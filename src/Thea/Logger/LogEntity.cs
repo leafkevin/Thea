@@ -1,0 +1,41 @@
+﻿using Microsoft.Extensions.Logging;
+using System;
+
+namespace Thea.Logger;
+
+public class LogEntity
+{
+    public string Id { get; set; }
+    public string TraceId { get; set; }
+    public int Sequence { get; set; } = 1;
+    public LogLevel LogLevel { get; set; }
+    public ApiType ApiType { get; set; } //get,post,localInvoke
+    public string Path { get; set; }
+    public string ApiUrl { get; set; }
+    public string ClientIp { get; set; }
+    public string Host { get; set; }
+    public string Source { get; set; }
+    public string AppId { get; set; }
+    public string Parameters { get; set; }
+    public int ThreadId { get; set; }
+
+    public int UserId { get; set; }
+    public string UserName { get; set; }
+    public int TenantType { get; set; }
+    public int TenantId { get; set; }
+    public string Authorization { get; set; }
+
+
+    public string Tag { get; set; }
+    public string Body { get; set; }
+    public int StatusCode { get; set; }
+    public string Response { get; set; }
+
+
+    public Exception Exception { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public string LogTime { get; set; }
+    public int? Elapsed { get; set; }
+
+    public override string ToString() => this.Body;
+}
