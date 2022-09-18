@@ -7,7 +7,6 @@ namespace Thea.Orm;
 
 public class EntityMap
 {
-    private readonly Dictionary<string, MemberMap> fieldMaps = new();
     private readonly Dictionary<string, MemberMap> memberMaps = new();
 
     public EntityMap(Type entityType) => this.EntityType = entityType;
@@ -56,22 +55,13 @@ public class EntityMap
     {
         if (this.memberMaps.TryGetValue(memberName, out var mapper))
             return mapper;
-        var memberInfos = this.EntityType.GetMember(memberName, BindingFlags.Public | BindingFlags.Instance);
+        var memberInfos = this.EntityType.GetMember(memberName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         if (memberInfos == null || memberInfos.Length <= 0)
             throw new Exception($"不存在名为{memberName}的成员");
         return new MemberMap(this, this.FieldPrefix, memberInfos[0]);
     }
-    public bool TryGetMemberMapByField(string fieldName, out MemberMap mapper)
-    {
-        if (!this.fieldMaps.TryGetValue(fieldName, out mapper))
-        {
-            if (!this.memberMaps.TryGetValue(fieldName, out mapper))
-                throw new Exception($"类型{EntityType.FullName}没有字段{fieldName}的映射定义");
-
-            this.fieldMaps.TryAdd(fieldName, mapper);
-        }
-        return true;
-    }
+    public List<MemberInfo> GetMembers() => this.EntityType.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+        .Where(f => f.MemberType == MemberTypes.Property | f.MemberType == MemberTypes.Field).ToList();
     public void AddMemberMap(string memberName, MemberMap mapper)
         => this.memberMaps.TryAdd(memberName, mapper);
     public EntityMap Build()
@@ -97,8 +87,6 @@ public class EntityMap
             foreach (var memberMapper in this.memberMaps.Values)
             {
                 var fieldName = $"{this.FieldPrefix}{memberMapper.FieldName}";
-                if (!this.fieldMaps.ContainsKey(fieldName))
-                    this.fieldMaps.TryAdd(fieldName, memberMapper);
                 if (memberMapper.IsKey)
                     this.KeyFields.Add(fieldName);
                 if (memberMapper.IsAutoIncrement)
@@ -137,9 +125,6 @@ public class EntityMap
             {
                 var memberMapper = new MemberMap(mapper, mapper.FieldPrefix, memberInfo);
                 mapper.memberMaps.TryAdd(memberMapper.MemberName, memberMapper);
-
-                var fieldName = $"{mapper.FieldPrefix}{memberMapper.FieldName}";
-                mapper.fieldMaps.TryAdd(fieldName, memberMapper);
             }
         }
         return mapper;

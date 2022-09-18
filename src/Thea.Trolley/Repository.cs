@@ -549,6 +549,12 @@ public partial class Repository : IRepository
     }
     #endregion
 
+    public ISqlExpression<TEntity> From<TEntity>()
+    {
+        var visitor = new SqlExpressionVisitor(this.dbFactory, this.connection.OrmProvider);
+        return new SqlExpression<TEntity>(this.dbFactory, this.connection, visitor.From(typeof(TEntity)));
+    }
+
     #region Transaction
     public void Begin()
     {

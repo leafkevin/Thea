@@ -2042,7 +2042,7 @@ class RepositoryHelper
         setPropExpr = Expression.Call(parameterExpr, methodInfo, Expression.Constant(ParameterDirection.Input, typeof(ParameterDirection)));
         blockBodies.Add(setPropExpr);
 
-        var valueExpr = Expression.Call(typedObjExpr, paramMapper.GetMethodInfo);
+        var valueExpr = Expression.PropertyOrField(typedObjExpr, paramMapper.MemberName);
 
         if (paramMapper.MemberType == propMapper.MemberType)
         {
@@ -2370,8 +2370,8 @@ class RepositoryHelper
 
         //if(localValue is DBNull)
         var isNullExpr = Expression.TypeIs(readerValueExpr, typeof(DBNull));
-        var setDefaultValueExpr = Expression.Call(targetExpr, targetMapper.SetMethodInfo, defaultValueExpr);
-        var setTypedValueExpr = Expression.Call(targetExpr, targetMapper.SetMethodInfo, typedValueExpr);
+        var setDefaultValueExpr = Expression.Assign(Expression.PropertyOrField(targetExpr, targetMapper.MemberName), defaultValueExpr);
+        var setTypedValueExpr = Expression.Assign(Expression.PropertyOrField(targetExpr, targetMapper.MemberName), typedValueExpr);
         Expression setParameterValueExpr = Expression.IfThenElse(isNullExpr, setDefaultValueExpr, setTypedValueExpr);
         blockBodies.Add(setParameterValueExpr);
     }
@@ -2406,7 +2406,7 @@ class RepositoryHelper
             Expression.Constant(connection.OrmProvider, typeof(IOrmProvider)),
             Expression.Constant(position, typeof(int)),
             Expression.Constant(parameterName, typeof(string)),
-            Expression.Convert(Expression.Call(typedObjExpr, paramMapper.GetMethodInfo), typeof(object)),
+            Expression.Convert(Expression.PropertyOrField(typedObjExpr, paramMapper.MemberName), typeof(object)),
             deferredExpr);
         blockBodies.Add(callExpr);
     }
@@ -2418,7 +2418,7 @@ class RepositoryHelper
         var callExpr = Expression.Call(methodInfo, commandExpr,
             Expression.Constant(connection.OrmProvider, typeof(IOrmProvider)),
             Expression.Constant(paramMapper.MemberName, typeof(string)),
-            Expression.Convert(Expression.Call(typedObjExpr, paramMapper.GetMethodInfo), typeof(object)));
+            Expression.Convert(Expression.PropertyOrField(typedObjExpr, paramMapper.MemberName), typeof(object)));
         blockBodies.Add(callExpr);
     }
     private static void BuildWhereInSqlParameters(TheaConnection connection, ParameterExpression commandExpr, Expression typedObjExpr, Expression sqlBuidlerExpr, string parameterName, MemberMap paramMapper, List<Expression> blockBodies)
@@ -2429,7 +2429,7 @@ class RepositoryHelper
         var callExpr = Expression.Call(methodInfo, commandExpr,
             Expression.Constant(connection.OrmProvider, typeof(IOrmProvider)),
             Expression.Constant(parameterName, typeof(string)),
-            Expression.Convert(Expression.Call(typedObjExpr, paramMapper.GetMethodInfo), typeof(object)),
+            Expression.Convert(Expression.PropertyOrField(typedObjExpr, paramMapper.MemberName), typeof(object)),
             sqlBuidlerExpr);
         blockBodies.Add(callExpr);
     }
@@ -2601,7 +2601,7 @@ class RepositoryHelper
         var enumeratorExpr = Expression.Variable(typeof(IEnumerator), "enumerator");
         var objExpr = Expression.Variable(typeof(object), "item");
 
-        var valueExpr = Expression.Call(typedObjExpr, paramMapper.GetMethodInfo);
+        var valueExpr = Expression.PropertyOrField(typedObjExpr, paramMapper.MemberName);
         var enumerableExpr = Expression.Convert(valueExpr, typeof(IEnumerable));
         var enumeratorCallExpr = Expression.Call(enumerableExpr, typeof(IEnumerable).GetMethod(nameof(IEnumerable.GetEnumerator)));
 

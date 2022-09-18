@@ -1,10 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Reflection;
 
 namespace Thea.Orm;
 
-public delegate string MethodCallSqlFormatter(object target, params object[] arguments);
+public delegate string MethodCallSqlFormatter(object target, Stack<DeferredExpr> deferredExprs, params object[] arguments);
 
 public interface IOrmProvider
 {

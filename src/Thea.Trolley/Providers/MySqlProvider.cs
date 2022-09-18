@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 using Thea.Orm;
@@ -61,27 +62,46 @@ public class MySqlProvider : BaseOrmProvider
                         && parameterInfos[0].ParameterType.IsAssignableFrom(typeof(IEnumerable<>).MakeGenericType(parameterInfos[0].ParameterType.GenericTypeArguments[0])))
                     {
                         //数组调用                        
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, args) =>
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
                             var builder = new StringBuilder();
-                            var argsSegment = args[0] as SqlSegment;
-                            var enumerable = argsSegment.Value as IEnumerable;
+                            IEnumerable enumerable = null;
+                            if (args[0] is SqlSegment argsSegment)
+                                enumerable = argsSegment.Value as IEnumerable;
+                            else enumerable = args[0] as IEnumerable;
+
                             foreach (var element in enumerable)
                             {
                                 if (builder.Length > 0)
                                     builder.Append(',');
-
+                                //目前数组元素是原来的值，没有SqlSegment包装
                                 builder.Append(this.GetQuotedValue(element));
                             }
-                            var targetSegment = args[1] as SqlSegment;
+
                             string fieldName = null;
-                            if (targetSegment.HasField || targetSegment.IsParameter)
-                                fieldName = targetSegment.ToString();
-                            else fieldName = this.GetQuotedValue(targetSegment.Value);
+                            if (args[1] is SqlSegment targetSegment)
+                            {
+                                if (targetSegment.HasField || targetSegment.IsParameter)
+                                    fieldName = targetSegment.ToString();
+                                else fieldName = this.GetQuotedValue(targetSegment.Value);
+                            }
+                            else fieldName = this.GetQuotedValue(args[1]);
+
+                            int notIndex = 0;
+                            if (deferExprs != null)
+                            {
+                                while (deferExprs.TryPeek(out var deferrdExpr)
+                               && deferrdExpr.ExpressionType == ExpressionType.Not)
+                                {
+                                    notIndex++;
+                                    deferExprs.TryPop(out _);
+                                }
+                            }
+                            string notString = notIndex % 2 > 0 ? " NOT" : "";
 
                             if (builder.Length > 0)
                             {
-                                builder.Insert(0, fieldName + " IN (");
+                                builder.Insert(0, fieldName + $"{notString} IN (");
                                 builder.Append(')');
                             }
                             //TODO:如果数组没有数据，抛出异常
@@ -95,20 +115,52 @@ public class MySqlProvider : BaseOrmProvider
                     if (!methodInfo.IsStatic && parameterInfos.Length == 1 && methodInfo.DeclaringType.GenericTypeArguments.Length > 0
                         && methodInfo.DeclaringType.IsAssignableFrom(typeof(IEnumerable<>).MakeGenericType(methodInfo.DeclaringType.GenericTypeArguments[0])))
                     {
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, args) =>
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
                             var builder = new StringBuilder();
-                            var enumerable = target as IEnumerable;
+                            IEnumerable enumerable = null;
+                            if (target is SqlSegment argsSegment)
+                                enumerable = argsSegment.Value as IEnumerable;
+                            else enumerable = target as IEnumerable;
+
+                            foreach (var element in enumerable)
+                            {
+                                if (builder.Length > 0)
+                                    builder.Append(',');
+                                //目前数组元素是原来的值，没有SqlSegment包装
+                                builder.Append(this.GetQuotedValue(element));
+                            }
+
                             foreach (var element in enumerable)
                             {
                                 if (builder.Length > 0)
                                     builder.Append(',');
                                 builder.Append(element);
                             }
-                            var fieldName = args[0] as string;
+                            string fieldName = null;
+                            if (args[0] is SqlSegment fieldSegment)
+                            {
+                                if (fieldSegment.HasField || fieldSegment.IsParameter)
+                                    fieldName = fieldSegment.ToString();
+                                else fieldName = this.GetQuotedValue(fieldSegment.Value);
+                            }
+                            else fieldName = this.GetQuotedValue(args[0]);
+
+                            int notIndex = 0;
+                            if (deferExprs != null)
+                            {
+                                while (deferExprs.TryPeek(out var deferrdExpr)
+                               && deferrdExpr.ExpressionType == ExpressionType.Not)
+                                {
+                                    notIndex++;
+                                    deferExprs.TryPop(out _);
+                                }
+                            }
+                            string notString = notIndex % 2 > 0 ? " NOT" : "";
+
                             if (builder.Length > 0)
                             {
-                                builder.Insert(0, fieldName + " IN (");
+                                builder.Insert(0, fieldName + $"{notString} IN (");
                                 builder.Append(')');
                             }
                             //TODO:如果数组没有数据，抛出异常
@@ -122,23 +174,42 @@ public class MySqlProvider : BaseOrmProvider
                     //public bool Contains(char value, StringComparison comparisonType);
                     //public bool Contains(String value);
                     //public bool Contains(String value, StringComparison comparisonType);
-                    if (!methodInfo.IsStatic && parameterInfos.Length == 1 && methodInfo.DeclaringType.IsAssignableFrom(typeof(string)))
+                    if (!methodInfo.IsStatic && parameterInfos.Length >= 1 && methodInfo.DeclaringType.IsAssignableFrom(typeof(string)))
                     {
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, args) =>
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
-                            string strParameters = null;
-                            if (args[0] is SqlSegment sqlSegment)
+                            string leftField = null;
+                            if (target is SqlSegment leftSegment)
                             {
-                                if (sqlSegment.IsParameter)
+                                if (leftSegment.HasField || leftSegment.IsParameter)
+                                    leftField = leftSegment.ToString();
+                                else leftField = this.GetQuotedValue(leftSegment.Value);
+                            }
+                            else leftField = target.ToString();
+
+                            string rightValue = null;
+                            if (args[0] is SqlSegment rightSegment && rightSegment.IsParameter)
+                            {
+                                var concatMethodInfo = typeof(string).GetMethod("Concat", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(string), typeof(string), typeof(string) });
+                                if (this.TryGetMethodCallSqlFormatter(concatMethodInfo, out var concatFormatter))
+                                    //自己调用字符串连接，参数直接是字符串
+                                    rightValue = concatFormatter.Invoke(null, deferExprs, "'%'", rightSegment.Value.ToString(), "'%'");
+                            }
+                            else rightValue = $"'%{args[0]}%'";
+
+                            int notIndex = 0;
+                            if (deferExprs != null)
+                            {
+                                while (deferExprs.TryPeek(out var deferrdExpr)
+                               && deferrdExpr.ExpressionType == ExpressionType.Not)
                                 {
-                                    var concatMethodInfo = typeof(string).GetMethod("Concat", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(string), typeof(string), typeof(string) });
-                                    if (this.TryGetMethodCallSqlFormatter(concatMethodInfo, out var concatFormatter))
-                                        strParameters = concatFormatter.Invoke(null, "'%'", sqlSegment.Value.ToString(), "'%'");
+                                    notIndex++;
+                                    deferExprs.TryPop(out _);
                                 }
                             }
-                            else strParameters = $"'%{args[0]}%'";
+                            string notString = notIndex % 2 > 0 ? " NOT" : "";
 
-                            return $"{target} LIKE {strParameters}";
+                            return $"{leftField}{notString} LIKE {rightValue}";
                         });
                         result = true;
                     }
@@ -156,7 +227,7 @@ public class MySqlProvider : BaseOrmProvider
                         //public static String Concat(ReadOnlySpan<char> str0, ReadOnlySpan<char> str1, ReadOnlySpan<char> str2, ReadOnlySpan<char> str3);
                         //public static IEnumerable<TSource> Concat<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second);
                         //TODO:测试一下IEnumerable<TSource> Concat<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second)
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, args) =>
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
                             var builder = new StringBuilder();
                             foreach (var arg in args)
@@ -167,8 +238,13 @@ public class MySqlProvider : BaseOrmProvider
                                     {
                                         if (builder.Length > 0)
                                             builder.Append(", ");
-                                        if (element is SqlSegment sqlSegment && (sqlSegment.HasField || sqlSegment.IsParameter))
-                                            builder.Append(sqlSegment.Value);
+
+                                        if (element is SqlSegment sqlSegment)
+                                        {
+                                            if (sqlSegment.HasField || sqlSegment.IsParameter)
+                                                builder.Append(sqlSegment.Value);
+                                            else builder.Append(this.GetQuotedValue(sqlSegment.Value));
+                                        }
                                         else builder.Append(element);
                                     }
                                 }
@@ -177,8 +253,12 @@ public class MySqlProvider : BaseOrmProvider
                                     if (builder.Length > 0)
                                         builder.Append(", ");
 
-                                    if (arg is SqlSegment sqlSegment && (sqlSegment.HasField || sqlSegment.IsParameter))
-                                        builder.Append(sqlSegment.Value);
+                                    if (arg is SqlSegment sqlSegment)
+                                    {
+                                        if (sqlSegment.HasField || sqlSegment.IsParameter)
+                                            builder.Append(sqlSegment.Value);
+                                        else builder.Append(this.GetQuotedValue(sqlSegment.Value));
+                                    }
                                     else builder.Append(arg);
                                 }
                             }
@@ -192,86 +272,272 @@ public class MySqlProvider : BaseOrmProvider
                         result = true;
                     }
                     break;
-                case "Compare":
-                    //String.Compare  不区分大小写
-                    if (methodInfo.IsStatic && parameterInfos.Length >= 2 && parameterInfos.Length <= 4)
+                case "Format":
+                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
                     {
-                        //public static int Compare(String? strA, String? strB, bool ignoreCase, CultureInfo? culture);
-                        //public static int Compare(String? strA, String? strB, bool ignoreCase);
-                        //public static int Compare(String? strA, String? strB);
-                        formatter = (target, args) => $"(CASE WHEN {args[0]}={args[1]} THEN 0 WHEN {args[0]}>{args[1]} THEN 1 ELSE -1 END)";
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                        //public static String Format(String format, object? arg0);
+                        //public static String Format(String format, object? arg0, object? arg1); 
+                        //public static String Format(String format, object? arg0, object? arg1, object? arg2); 
+                        //public static String Format(String format, params object?[] args);
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                        {
+                            var parameters = new List<object>(args);
+                            parameters.RemoveAt(0);
+
+                            return string.Format(args[0] as string, parameters.ToArray());
+                        });
                         result = true;
                     }
                     break;
+                case "Compare":
+                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
+                    {
+                        //String.Compare  不区分大小写
+                        //public static int Compare(String? strA, String? strB);
+                        //public static int Compare(String? strA, String? strB, bool ignoreCase);
+                        //public static int Compare(String? strA, String? strB, bool ignoreCase, CultureInfo? culture);
+                        if (parameterInfos.Length >= 2 && parameterInfos.Length <= 4)
+                        {
+                            methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                            {
+                                string leftArgument = null;
+                                if (args[0] is SqlSegment leftSegment)
+                                {
+                                    if (leftSegment.HasField || leftSegment.IsParameter)
+                                        leftArgument = leftSegment.ToString();
+                                    else leftArgument = this.GetQuotedValue(leftSegment.Value);
+                                }
+                                else leftArgument = this.GetQuotedValue(args[0]);
+
+                                string rightArgument = null;
+                                if (args[1] is SqlSegment rightSegment)
+                                {
+                                    if (rightSegment.HasField || rightSegment.IsParameter)
+                                        rightArgument = rightSegment.ToString();
+                                    else rightArgument = this.GetQuotedValue(rightSegment.Value);
+                                }
+                                else rightArgument = this.GetQuotedValue(args[1]);
+
+                                return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
+                            });
+                            result = true;
+                        }
+                    }
+                    break;
                 case "CompareOrdinal":
-                    if (methodInfo.IsStatic && parameterInfos.Length == 2)
+                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
                     {
                         //public static int CompareOrdinal(String? strA, String? strB);
-                        formatter = (target, args) => $"(CASE WHEN {args[0]}={args[1]} THEN 0 WHEN {args[0]}>{args[1]} THEN 1 ELSE -1 END)";
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
-                        result = true;
+                        if (parameterInfos.Length == 2)
+                        {
+                            methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                            {
+                                string leftArgument = null;
+                                if (args[0] is SqlSegment leftSegment)
+                                {
+                                    if (leftSegment.HasField || leftSegment.IsParameter)
+                                        leftArgument = leftSegment.ToString();
+                                    else leftArgument = this.GetQuotedValue(leftSegment.Value);
+                                }
+                                else leftArgument = this.GetQuotedValue(args[0]);
+
+                                string rightArgument = null;
+                                if (args[1] is SqlSegment rightSegment)
+                                {
+                                    if (rightSegment.HasField || rightSegment.IsParameter)
+                                        rightArgument = rightSegment.ToString();
+                                    else rightArgument = this.GetQuotedValue(rightSegment.Value);
+                                }
+                                else rightArgument = this.GetQuotedValue(args[1]);
+
+                                return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
+                            });
+                            result = true;
+                        }
                     }
                     break;
                 case "CompareTo":
                     if (!methodCallSqlFormatterCahe.TryGetValue(methodInfo, out formatter))
                     {
-                        //public static int CompareOrdinal(String? strA, String? strB);
-                        formatter = (target, args) => $"(CASE WHEN {target}={args[0]} THEN 0 WHEN {target}>{args[0]} THEN 1 ELSE -1 END)";
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                        //各种类型都有CompareTo方法
+                        //public int CompareTo(Boolean value);
+                        //public int CompareTo(Int32 value);
+                        //public int CompareTo(Double value);
+                        //public int CompareTo(DateTime value);
+                        //public int CompareTo(object? value);
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                        {
+                            string leftArgument = null;
+                            if (target is SqlSegment leftSegment)
+                            {
+                                if (leftSegment.HasField || leftSegment.IsParameter)
+                                    leftArgument = leftSegment.ToString();
+                                else leftArgument = this.GetQuotedValue(leftSegment.Value);
+                            }
+                            else leftArgument = this.GetQuotedValue(target);
+
+                            string rightArgument = null;
+                            if (args[0] is SqlSegment rightSegment)
+                            {
+                                if (rightSegment.HasField || rightSegment.IsParameter)
+                                    rightArgument = rightSegment.ToString();
+                                else rightArgument = this.GetQuotedValue(rightSegment.Value);
+                            }
+                            else rightArgument = this.GetQuotedValue(args[0]);
+
+                            return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
+                        });
                         result = true;
                     }
                     break;
                 case "Trim":
-                    formatter = (target, args) => $"ltrim(rtrim({target}))";
+                    formatter = (target, deferExprs, args) => $"ltrim(rtrim({target}))";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
                 case "LTrim":
-                    formatter = (target, args) => $"ltrim({target})";
+                    formatter = (target, deferExprs, args) => $"ltrim({target})";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
                 case "RTrim":
-                    formatter = (target, args) => $"rtrim({target})";
+                    formatter = (target, deferExprs, args) => $"rtrim({target})";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
                 case "ToUpper":
-                    formatter = (target, args) => $"upper({target})";
+                    formatter = (target, deferExprs, args) => $"upper({target})";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
                 case "ToLower":
-                    formatter = (target, args) => $"lower({target})";
+                    formatter = (target, deferExprs, args) => $"lower({target})";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
                 case "Equals":
-                    formatter = (target, args) => $"{target}={this.GetQuotedValue(args[0])}";
-                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                    {
+                        string leftTarget = null;
+                        if (target is SqlSegment targetSeqment)
+                        {
+                            if (targetSeqment.HasField || targetSeqment.IsParameter)
+                                leftTarget = targetSeqment.ToString();
+                            else leftTarget = this.GetQuotedValue(targetSeqment.Value);
+                        }
+                        else leftTarget = this.GetQuotedValue(target);
+
+                        string rightValue = null;
+                        if (args[0] is SqlSegment rightSeqment)
+                        {
+                            if (rightSeqment.HasField || rightSeqment.IsParameter)
+                                rightValue = rightSeqment.ToString();
+                            else rightValue = this.GetQuotedValue(rightSeqment.Value);
+                        }
+                        else rightValue = this.GetQuotedValue(args[0]);
+
+                        int notIndex = 0;
+                        if (deferExprs != null)
+                        {
+                            while (deferExprs.TryPeek(out var deferrdExpr)
+                                && deferrdExpr.ExpressionType == ExpressionType.Not)
+                            {
+                                notIndex++;
+                                deferExprs.TryPop(out _);
+                            }
+                        }
+                        string equalsString = notIndex % 2 > 0 ? "<>" : "=";
+
+                        return $"{leftTarget}{equalsString}{rightValue}";
+                    });
                     result = true;
                     break;
                 case "StartsWith":
-                    formatter = (target, args) => $"{target} LIKE '{args[0]}%'";
-                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                    {
+                        string leftField = null;
+                        if (target is SqlSegment leftSegment)
+                        {
+                            if (leftSegment.HasField || leftSegment.IsParameter)
+                                leftField = leftSegment.ToString();
+                            else leftField = this.GetQuotedValue(leftSegment.Value);
+                        }
+                        else leftField = target.ToString();
+
+                        string rightValue = null;
+                        if (args[0] is SqlSegment rightSegment && rightSegment.IsParameter)
+                        {
+                            var concatMethodInfo = typeof(string).GetMethod("Concat", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(string), typeof(string), typeof(string) });
+                            if (this.TryGetMethodCallSqlFormatter(concatMethodInfo, out var concatFormatter))
+                                //自己调用字符串连接，参数直接是字符串
+                                rightValue = concatFormatter.Invoke(null, deferExprs, rightSegment.Value.ToString(), "'%'");
+                        }
+                        else rightValue = $"'{args[0]}%'";
+
+                        int notIndex = 0;
+                        if (deferExprs != null)
+                        {
+                            while (deferExprs.TryPeek(out var deferrdExpr)
+                           && deferrdExpr.ExpressionType == ExpressionType.Not)
+                            {
+                                notIndex++;
+                                deferExprs.TryPop(out _);
+                            }
+                        }
+                        string notString = notIndex % 2 > 0 ? " NOT" : "";
+
+                        return $"{leftField}{notString} LIKE {rightValue}";
+                    });
                     result = true;
                     break;
                 case "EndsWith":
-                    formatter = (target, args) => $"{target} LIKE '%{args[0]}'";
-                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                    {
+                        string leftField = null;
+                        if (target is SqlSegment leftSegment)
+                        {
+                            if (leftSegment.HasField || leftSegment.IsParameter)
+                                leftField = leftSegment.ToString();
+                            else leftField = this.GetQuotedValue(leftSegment.Value);
+                        }
+                        else leftField = target.ToString();
+
+                        string rightValue = null;
+                        if (args[0] is SqlSegment rightSegment && rightSegment.IsParameter)
+                        {
+                            var concatMethodInfo = typeof(string).GetMethod("Concat", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(string), typeof(string), typeof(string) });
+                            if (this.TryGetMethodCallSqlFormatter(concatMethodInfo, out var concatFormatter))
+                                //自己调用字符串连接，参数直接是字符串
+                                rightValue = concatFormatter.Invoke(null, deferExprs, "'%'", rightSegment.Value.ToString());
+                        }
+                        else rightValue = $"'%{args[0]}'";
+
+                        int notIndex = 0;
+                        if (deferExprs != null)
+                        {
+                            while (deferExprs.TryPeek(out var deferrdExpr)
+                           && deferrdExpr.ExpressionType == ExpressionType.Not)
+                            {
+                                notIndex++;
+                                deferExprs.TryPop(out _);
+                            }
+                        }
+                        string notString = notIndex % 2 > 0 ? " NOT" : "";
+
+                        return $"{leftField}{notString} LIKE {rightValue}";
+                    });
                     result = true;
                     break;
                 case "Substring":
                     if (parameterInfos.Length > 1)
-                        formatter = (target, args) => $"substring({target} from {(int)(args[0]) + 1} for {args[1]})";
-                    else formatter = (target, args) => $"substring({target} from {(int)(args[0]) + 1}";
+                        formatter = (target, deferExprs, args) => $"substring({target} from {(int)(args[0]) + 1} for {args[1]})";
+                    else formatter = (target, deferExprs, args) => $"substring({target} from {(int)(args[0]) + 1}";
                     result = true;
                     break;
                 case "ToString":
                     if (methodInfo.DeclaringType == typeof(string))
-                        formatter = (target, args) => target.ToString();
-                    else formatter = (target, args) => $"CAST({target} AS VARCHAR(1000))";
+                        formatter = (target, deferExprs, args) => target.ToString();
+                    else formatter = (target, deferExprs, args) => $"CAST({target} AS VARCHAR(1000))";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;

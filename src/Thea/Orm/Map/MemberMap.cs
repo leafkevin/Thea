@@ -7,6 +7,7 @@ namespace Thea.Orm;
 public class MemberMap
 {
     public EntityMap Parent { get; set; }
+    public MemberInfo Member { get; set; }
     public string MemberName { get; set; }
     public Type MemberType { get; set; }
     public bool IsNullable { get; set; }
@@ -19,16 +20,17 @@ public class MemberMap
     public DbType DbType { get; set; }
     public int? NativeDbType { get; set; }
     public bool IsIgnore { get; set; }
-    public MethodInfo GetMethodInfo { get; set; }
-    public MethodInfo SetMethodInfo { get; set; }
 
     public bool IsNavigation { get; set; }
+    public string NavigationTable { get; set; }
     public Type NavigationTargetType { get; set; }
     public bool IsToOne { get; set; }
     public string NavigationMemberName { get; set; }
+    public MemberMap(MemberInfo memberInfo) : this(null, string.Empty, memberInfo) { }
     public MemberMap(EntityMap parent, string fieldPrefix, MemberInfo memberInfo)
     {
         this.Parent = parent;
+        this.Member = memberInfo;
         this.FieldName = $"{fieldPrefix}{memberInfo.Name}";
         this.MemberName = memberInfo.Name;
         switch (memberInfo.MemberType)
@@ -40,8 +42,8 @@ public class MemberMap
             case MemberTypes.Property:
                 var propertyInfo = memberInfo as PropertyInfo;
                 this.MemberType = propertyInfo.PropertyType;
-                this.GetMethodInfo = propertyInfo.GetGetMethod();
-                this.SetMethodInfo = propertyInfo.GetSetMethod();
+                //this.GetMethodInfo = propertyInfo.GetGetMethod();
+                //this.SetMethodInfo = propertyInfo.GetSetMethod();
                 break;
         }
         this.DbType = DbTypeMap.FindDbType(this.MemberType);

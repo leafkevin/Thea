@@ -3,6 +3,7 @@
 		<TargetFramework>net6.0</TargetFramework>
 	</PropertyGroup>
 	<ItemGroup>
+	  <Compile Remove="Providers\NpgsqlProvider.cs" />
 	  <Compile Remove="Providers\OracleProvider.cs" />
 	  <Compile Remove="Providers\SqLiteProvider.cs" />
 	  <Compile Remove="Providers\SqlServerProvider.cs" />

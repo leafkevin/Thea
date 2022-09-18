@@ -16,11 +16,11 @@ public class TopicContext : DbContext
     }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Topic>(f =>
-        {
-            f.ToTable("tts_topic").HasKey(f => f.Id);
-            f.HasOne(f => f.Category).WithMany(t => t.Topics).HasForeignKey(t => t.CategoryId);
-        });
+        //modelBuilder.Entity<Topic>(f =>
+        //{
+        //    f.ToTable("tts_topic").HasKey(f => f.Id);
+        //    f.HasOne(f => f.Category).WithMany(t => t.Topics).HasForeignKey(t => t.CategoryId);
+        //});
         modelBuilder.Entity<Category>(f =>
         {
             f.ToTable("tts_category").HasKey(f => f.Id);

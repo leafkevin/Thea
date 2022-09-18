@@ -22,8 +22,14 @@ public class OrmDbFactory : IOrmDbFactory
     public TheaDatabase Register(string dbKey, bool isDefault, Action<TheaDatabaseBuilder> databaseInitializer)
     {
         if (!this.databases.TryGetValue(dbKey, out var database))
-            this.databases.TryAdd(dbKey, database = new TheaDatabase { DbKey = dbKey, IsDefault = isDefault });
-
+        {
+            this.databases.TryAdd(dbKey, database = new TheaDatabase
+            {
+                DbKey = dbKey,
+                IsDefault = isDefault,
+                ConnectionStrings = new List<TheaConnectionInfo>()
+            });
+        }
         if (isDefault) this.defaultDatabase = database;
         var builder = new TheaDatabaseBuilder(database);
         databaseInitializer?.Invoke(builder);
@@ -71,13 +77,6 @@ public class OrmDbFactory : IOrmDbFactory
         return new Repository(this, connection);
     }
 
-    public ISqlExpression<T> From<T>(string dbKey = null, int? tenantId = null)
-    {
-        var connectionInfo = this.GetConnectionInfo(dbKey, tenantId);
-        var connection = new TheaConnection(connectionInfo);
-        var visitor = new SqlExpressionVisitor(this, connection.OrmProvider);
-        return new SqlExpression<T>(this, connection, visitor);
-    }
     //public SqlExpression<T1, T2> From<T1, T2>(string dbKey = null, int? tenantId = null)
     //{
     //    var connectionInfo = this.GetConnectionInfo(dbKey, tenantId);

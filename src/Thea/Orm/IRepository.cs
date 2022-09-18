@@ -73,6 +73,8 @@ public interface IRepository : IUnitOfWork, IDisposable
     Task<int> ExecuteAsync(string sql, object parameters = null, CommandType cmdType = CommandType.Text, CancellationToken cancellationToken = default);
     #endregion
 
+    ISqlExpression<TEntity> From<TEntity>();
+
     #region Others
     void Close();
     Task CloseAsync();
