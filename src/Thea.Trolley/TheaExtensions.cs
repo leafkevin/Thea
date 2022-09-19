@@ -58,5 +58,18 @@ public static class TheaExtensions
             return true;
         return false;
     }
+    public static Type GetMemberType(this MemberInfo member)
+    {
+        switch (member.MemberType)
+        {
+            case MemberTypes.Property:
+                var propertyInfo = member as PropertyInfo;
+                return propertyInfo.PropertyType;
+            case MemberTypes.Field:
+                var fieldInfo = member as FieldInfo;
+                return fieldInfo.FieldType;
+        }
+        throw new Exception("成员member，不是属性也不是字段");
+    }
 }
 

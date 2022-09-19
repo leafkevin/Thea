@@ -677,7 +677,7 @@ public class SqlExpressionVisitor
                 var memberInfo = newExpr.Members[i];
                 if (sqlSegment.Value is List<SqlSegment> tableSegments)
                 {
-                    if (!this.fromTables.TryGetValue(memberInfo.DeclaringType, out var fromTableInfo))
+                    if (!this.fromTables.TryGetValue(memberInfo.GetMemberType(), out var fromTableInfo))
                         throw new Exception($"MemberAccess表达式解析有误，当前引用的实体类型{memberInfo.DeclaringType.FullName}未添加到fromTables字典中");
                     var fieldsBuilder = new StringBuilder();
 
