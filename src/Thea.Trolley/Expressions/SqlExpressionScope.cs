@@ -11,6 +11,7 @@ public enum SqlSegmentType : byte
     LeftJoin,
     RightJoin,
     Select,
+    Include,
     Distinct,
     Where,
     Take,

@@ -10,5 +10,4 @@ public class FromTableInfo
     public string AlaisName { get; set; }
     public string JoinType { get; set; }
     public string JoinOn { get; set; }
-    public bool IsInclude { get; set; }
 }

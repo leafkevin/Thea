@@ -28,10 +28,6 @@ class SqlExpression<T> : ISqlExpression<T>
     {
         throw new NotImplementedException();
     }
-
-
-
-
     /// <summary>
     /// 导航属性的InnerJoin
     /// </summary>
@@ -49,13 +45,17 @@ class SqlExpression<T> : ISqlExpression<T>
     }
     public ISqlExpression<T> RightJoin(Expression<Func<T, bool>> predicate)
     {
-        this.visitor.Join(typeof(T), predicate.Body, "RIGHT JOIN");
+        this.visitor.Join(typeof(T), predicate, "RIGHT JOIN");
         return this;
     }
-
+    public ISqlExpression<T> Include<TTarget>(Expression<Func<T, TTarget>> memberSelector)
+    {
+        this.visitor.Include(memberSelector);
+        return this;
+    }
     public ISqlExpression<TTarget> Select<TTarget>(Expression<Func<T, TTarget>> fieldsExpr)
     {
-        this.visitor.Select(fieldsExpr);
+        this.visitor.Select(fieldsExpr.Body);
         return new SqlExpression<TTarget>(this.dbFactory, this.connection, this.visitor);
     }
     public IGroupBySqlExpression<TTarget> GroupBy<TTarget>(Expression<Func<T, TTarget>> fieldsExpr)
@@ -126,18 +126,7 @@ class SqlExpression<T> : ISqlExpression<T>
         if (condition) this.visitor.Where(predicate);
         return this;
     }
-
-    public ISqlExpression<T> Include<TTarget>(Expression<Func<T, TTarget>> predicate)
-    {
-        this.visitor.Include(predicate);
-        return this;
-    }
     public string ToSql() => this.visitor.BuildSql();
-
-    private void GetReader(Type targetType, IDataReader reader)
-    {
-
-    }
 }
 
 

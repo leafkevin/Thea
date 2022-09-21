@@ -32,6 +32,12 @@ services.AddSingleton<IOrmDbFactory, OrmDbFactory>(f =>
     {
         f.ToTable("tts_category").Key(f => f.Id).AutoIncrement(f => f.Id);
         f.Member(f => f.Topics).Navigate(nameof(Topic.CategoryId));
+        f.Member(f => f.Type).Navigate(nameof(Category.TypeId));
+    });
+    builder.Entity<CategoryType>(f =>
+    {
+        f.ToTable("tts_category_type").Key(f => f.Id).AutoIncrement(f => f.Id);
+        f.Member(f => f.Categories).Navigate(nameof(Category.TypeId));
     });
     return dbFactory;
 });
@@ -43,24 +49,24 @@ services.AddSingleton<IOrmDbFactory, OrmDbFactory>(f =>
 
 var serviceProvider = services.BuildServiceProvider();
 
-var connectionString = "Server=bj-cdb-o9bbr5vl.sql.tencentcdb.com;Port=63227;Database=fengling;Uid=root;password=Siia@TxDb582e4sdf;charset=utf8mb4;";
-var fsql = new FreeSql.FreeSqlBuilder()
-   .UseConnectionString(FreeSql.DataType.MySql, connectionString)
-   //.UseAutoSyncStructure(true)
-   //.UseLazyLoading(true)
-   .Build();
-fsql.CodeFirst.ConfigEntity<Topic>(a =>
-{
-    a.Name("tts_topic");
-    a.Property(b => b.Id).IsIdentity(true);
-    a.Navigate(b => b.Category, "CategoryId", null);
-});
-fsql.CodeFirst.ConfigEntity<Category>(a =>
-{
-    a.Name("tts_category");
-    a.Property(b => b.Id).IsIdentity(true);
-    a.Navigate(b => b.Topics, "CategoryId", null);
-});
+//var connectionString = "Server=bj-cdb-o9bbr5vl.sql.tencentcdb.com;Port=63227;Database=fengling;Uid=root;password=Siia@TxDb582e4sdf;charset=utf8mb4;";
+//var fsql = new FreeSql.FreeSqlBuilder()
+//   .UseConnectionString(FreeSql.DataType.MySql, connectionString)
+//   //.UseAutoSyncStructure(true)
+//   //.UseLazyLoading(true)
+//   .Build();
+//fsql.CodeFirst.ConfigEntity<Topic>(a =>
+//{
+//    a.Name("tts_topic");
+//    a.Property(b => b.Id).IsIdentity(true);
+//    a.Navigate(b => b.Category, "CategoryId", null);
+//});
+//fsql.CodeFirst.ConfigEntity<Category>(a =>
+//{
+//    a.Name("tts_category");
+//    a.Property(b => b.Id).IsIdentity(true);
+//    a.Navigate(b => b.Topics, "CategoryId", null);
+//});
 
 //fsql.Update<Topic>().Set(f => new { f.Name, f.Clicks }, new { Name = "333", Clicks = 33 })
 //    .Where(f => f.Id == 4).ExecuteAffrows();
@@ -103,25 +109,22 @@ fsql.CodeFirst.ConfigEntity<Category>(a =>
 //VisitExpr(f => f.StringColumn.Contains("123"));
 //VisitExpr(f => new { f.BoolColumn, f.IntColumn });
 
-string abc = "456";
-string cp = "戏";
-int[] iArray = new int[] { 11, 12, 3 };
-string[] strArray = new string[] { "123", "456" };
+
 
 //var sql = fsql.Select<Category>()
 //  //.InnerJoin(f => f == f.Category.Id)
 //  //.Include(f => f.Topics)
 //  .Where(f => !iArray.Contains(f.Id))
-//  .ToSql(); 
-Expression<Func<Topic, bool>> whereExpr = f => !iArray.Contains(f.Id) && strArray.Contains(abc) && f.Category.Name.Contains(cp) && f.Category.IsEnabled && !f.Clicks.HasValue;
+//  .ToSql();
 
 
-var result = VisitExpr(f => new { Constant1 = abc, Constant2 = "123" + "789", f.Name, TopicId = f.Id, CategoryName = f.Category.Name + "-" + f.Name, f.Category }, "Topic1");
+
+var result = VisitExpr("Topic1");
 //Console.WriteLine("Hello, World!");
 int dddds = 0;
 
 
-List<TTarget> VisitExpr<TTarget>(Expression<Func<Topic, TTarget>> selectExpr, string strParameter)
+object VisitExpr(string strParameter)
 {
     var ormProvider = serviceProvider.GetService<IOrmProvider>();
     var dbFactory = serviceProvider.GetService<IOrmDbFactory>();
@@ -131,10 +134,17 @@ List<TTarget> VisitExpr<TTarget>(Expression<Func<Topic, TTarget>> selectExpr, st
     bool isMutilMember = type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Count(f => f.MemberType == MemberTypes.Property || f.MemberType == MemberTypes.Field) > 1;
 
-    using var repository = dbFactory.Create();
-    //var ddd = repository.Query<(int Id, string Name)>("select Id,Name from tts_topic");
+    string abc = "456";
+    string cp = "戏";
+    int[] iArray = new int[] { 11, 12, 3 };
+    string[] strArray = new string[] { "123", "456" };
 
-    return repository.From<Topic>().Where(whereExpr).Select(selectExpr).ToList();
+    using var repository = dbFactory.Create();
+    var result = repository.From<Topic>()
+        .Where(f => !iArray.Contains(f.Id) && strArray.Contains(abc) && f.Category.Name.Contains(cp) && f.Category.IsEnabled && !f.Clicks.HasValue)
+        .Select(f => new { Constant1 = abc, Constant2 = "123" + "789", f.Name, TopicId = f.Id, CategoryName = f.Category.Name + "-" + f.Name, f.Category })
+        .Include(f => f.Category.Type).ToList();
+    return result;
     //var result = fsql.Select<Topic>().Where(whereExpr).ToList(selectExpr);
     //((`StringColumn`= '123' AND `IntColumn`> 10) OR `BoolColumn`= 1) AND (`BoolNullableColumn` is not null)    
 }

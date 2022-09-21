@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Thea.Orm;
@@ -62,9 +63,8 @@ public class MemberBuilder<TMember>
         }
         return this;
     }
-	//public virtual MemberBuilder<TMember> Navigate<TTarget,TNavigationMember>(Expression<Func<TTarget, TNavigationMember>> member, string bind, string memberName)
+    //public virtual MemberBuilder<TMember> ValueObject<TTarget>(string memberName)
     //{
-
     //}
     public MemberMap Build() => this.mapper;
 }

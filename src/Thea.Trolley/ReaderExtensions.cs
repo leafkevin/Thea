@@ -90,14 +90,14 @@ static class ReaderExtensions
             var blockParameters = new List<ParameterExpression>();
             var blockBodies = new List<Expression>();
             var readerExpr = Expression.Parameter(typeof(IDataReader), "reader");
-            var resultLabelExpr = Expression.Label(typeof(object));
-            Expression returnExpr = null;
 
             bool isDefaultCtor = false;
             NewExpression entityExpr = null;
             List<MemberBinding> bindings = null;
-            List<Expression> ctorParameters = null;
+            List<Expression> ctorArguments = null;
 
+            var entityExprs = new Dictionary<string, BuildInfo>();
+            var deferredBuildInfos = new Stack<BuildInfo>();
             var ctor = entityType.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
             if (ctor != null)
             {
@@ -108,73 +108,139 @@ static class ReaderExtensions
             else
             {
                 ctor = entityType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).OrderBy(f => f.IsPublic ? 0 : (f.IsPrivate ? 2 : 1)).First();
-                ctorParameters = new List<Expression>();
+                ctorArguments = new List<Expression>();
             }
 
+            var rootBuildInfo = new BuildInfo
+            {
+                IsDefault = isDefaultCtor,
+                Constructor = ctor,
+                Bindings = bindings,
+                Arguments = ctorArguments
+            };
+
             int index = 0;
-            MemberInfo lastMemberInfo = null;
+            ReaderFieldInfo lastReaderInfo = null;
 
             while (index < reader.FieldCount)
             {
                 var fieldName = reader.GetName(index);
                 var readerFieldInfo = readerFields[index];
-                if (readerFieldInfo.Member is PropertyInfo propertyInfo && propertyInfo.SetMethod == null)
+                if (isDefaultCtor && readerFieldInfo.Member is PropertyInfo propertyInfo && propertyInfo.SetMethod == null)
                 {
-                    lastMemberInfo = readerFieldInfo.Member;
+                    lastReaderInfo = readerFieldInfo;
                     index++;
                     continue;
                 }
-
                 if (readerFieldInfo.IsTarget)
                 {
-                    var readerValueExpr = GetReaderValue(reader, readerExpr, index, fieldName, readerFieldInfo, blockParameters, blockBodies);
+                    var readerValueExpr = GetReaderValue(reader, readerExpr, index, fieldName, readerFieldInfo.Member, blockParameters, blockBodies);
                     if (isDefaultCtor) bindings.Add(Expression.Bind(readerFieldInfo.Member, readerValueExpr));
-                    else ctorParameters.Add(readerValueExpr);
+                    else ctorArguments.Add(readerValueExpr);
 
-                    lastMemberInfo = readerFieldInfo.Member;
+                    lastReaderInfo = readerFieldInfo;
                     index++;
                     continue;
                 }
                 //不相等说明是一个新实体
-                if (readerFieldInfo.Member != lastMemberInfo)
+                if (readerFieldInfo.Member != lastReaderInfo.Member)
                 {
-                    lastMemberInfo = readerFieldInfo.Member;
-
+                    //第一次不相等直接赋值，再次不相等就是更换实体了
                     bool isChildDefaultCtor = false;
-                    NewExpression childEntityExpr = null;
                     List<MemberBinding> childBindings = null;
-                    List<Expression> childCtorParameters = null;
+                    List<Expression> childCtorArguments = null;
 
-                    var childEntityType = readerFieldInfo.Member.DeclaringType;
+                    lastReaderInfo = readerFieldInfo;
+                    var childEntityType = readerFieldInfo.Member.GetMemberType();
                     var childCtor = childEntityType.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
                     if (childCtor != null)
                     {
-                        childEntityExpr = Expression.New(ctor);
                         childBindings = new List<MemberBinding>();
                         isChildDefaultCtor = true;
                     }
                     else
                     {
                         childCtor = childEntityType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).OrderBy(f => f.IsPublic ? 0 : (f.IsPrivate ? 2 : 1)).First();
-                        childCtorParameters = new List<Expression>();
+                        childCtorArguments = new List<Expression>();
                     }
-
-                    while (readerFieldInfo.Member == lastMemberInfo)
+                    while (true)
                     {
-                        var readerValueExpr = GetReaderValue(reader, readerExpr, index, fieldName, readerFieldInfo, blockParameters, blockBodies);
-                        if (isChildDefaultCtor) childBindings.Add(Expression.Bind(readerFieldInfo.Member, readerValueExpr));
-                        else childCtorParameters.Add(readerValueExpr);
+                        if (index >= reader.FieldCount) break;
+                        readerFieldInfo = readerFields[index];
+
+                        if (readerFieldInfo.Member != lastReaderInfo.Member) break;
+                        var childMember = readerFieldInfo.RefMapper.GetMemberMap(readerFieldInfo.MemberName);
+                        var readerValueExpr = GetReaderValue(reader, readerExpr, index, fieldName, childMember, blockParameters, blockBodies);
+                        if (isChildDefaultCtor) childBindings.Add(Expression.Bind(childMember.Member, readerValueExpr));
+                        else childCtorArguments.Add(readerValueExpr);
                         index++;
                     }
+                    var readerMemberExpr = lastReaderInfo.Expression as MemberExpression;
+                    BuildInfo parentInfo = null;
+                    if (readerMemberExpr.Expression.NodeType == ExpressionType.Parameter)
+                        parentInfo = rootBuildInfo;
+                    else
+                    {
+                        var parentPath = readerMemberExpr.Expression.ToString();
+                        if (!entityExprs.TryGetValue(parentPath, out parentInfo))
+                            throw new Exception($"{readerMemberExpr}未找到到父亲实体的Expression");
+                    }
+
                     Expression childExpr = null;
                     if (isChildDefaultCtor)
-                        childExpr = Expression.MemberInit(childEntityExpr, childBindings);
-                    else childExpr = Expression.New(childCtor, childCtorParameters);
+                        childExpr = Expression.MemberInit(Expression.New(childCtor), childBindings);
+                    else childExpr = Expression.New(childCtor, childCtorArguments);
 
-                    if (isDefaultCtor) bindings.Add(Expression.Bind(lastMemberInfo, childExpr));
-                    else ctorParameters.Add(childExpr);
+                    var currentPath = lastReaderInfo.Expression.ToString();
+                    var childBuildInfo = new BuildInfo
+                    {
+                        IsDefault = isChildDefaultCtor,
+                        Constructor = childCtor,
+                        Bindings = childBindings,
+                        Arguments = childCtorArguments,
+                        Parent = parentInfo
+                    };
+                    entityExprs.TryAdd(currentPath, childBuildInfo);
+
+                    if (parentInfo.IsDefault)
+                    {
+                        childBuildInfo.ParentIndex = parentInfo.Bindings.Count;
+                        parentInfo.Bindings.Add(Expression.Bind(lastReaderInfo.Member, childExpr));
+                    }
+                    else
+                    {
+                        childBuildInfo.ParentIndex = parentInfo.Arguments.Count;
+                        parentInfo.Arguments.Add(childExpr);
+                    }
+                    if (parentInfo.Parent != null)
+                        deferredBuildInfos.Push(parentInfo);
                 }
             }
+            while (deferredBuildInfos.TryPop(out var buildInfo))
+            {
+                BuildInfo current = buildInfo;
+                while (current != null)
+                {
+                    if (current.Parent == null) break;
+                    Expression instanceExpr = null;
+                    if (buildInfo.IsDefault)
+                        instanceExpr = Expression.MemberInit(Expression.New(current.Constructor), current.Bindings);
+                    else instanceExpr = Expression.New(current.Constructor, current.Arguments);
+
+                    if (current.Parent.IsDefault)
+                    {
+                        var parentBinding = current.Parent.Bindings[current.ParentIndex];
+                        parentBinding = Expression.Bind(parentBinding.Member, instanceExpr);
+                    }
+                    else current.Parent.Arguments[current.ParentIndex] = instanceExpr;
+                    current = buildInfo.Parent;
+                }
+            }
+
+            var resultLabelExpr = Expression.Label(typeof(object));
+            Expression returnExpr = null;
+            if (isDefaultCtor) returnExpr = Expression.MemberInit(Expression.New(ctor), bindings);
+            else returnExpr = Expression.New(ctor, ctorArguments);
 
             blockBodies.Add(Expression.Return(resultLabelExpr, Expression.Convert(returnExpr, typeof(object))));
             blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Constant(null, typeof(object))));
@@ -248,7 +314,7 @@ static class ReaderExtensions
         return Expression.Condition(isNullExpr, defaultValueExpr, typedValueExpr);
     }
     private static Expression GetReaderValue(IDataReader reader, ParameterExpression readerExpr, int index, string fieldName,
-        ReaderFieldInfo readerFieldInfo, List<ParameterExpression> blockParameters, List<Expression> blockBodies)
+        MemberInfo member, List<ParameterExpression> blockParameters, List<Expression> blockBodies)
     {
         MethodInfo methodInfo = null;
         Expression typedValueExpr = null;
@@ -259,8 +325,8 @@ static class ReaderExtensions
         var readerValueExpr = Expression.Call(readerExpr, methodInfo, Expression.Constant(index, typeof(int)));
 
         //null或default(int)
-        var entityType = readerFieldInfo.Member.DeclaringType;
-        var memberType = readerFieldInfo.Member.GetMemberType();
+        var entityType = member.DeclaringType;
+        var memberType = member.GetMemberType();
 
         var underlyingType = Nullable.GetUnderlyingType(memberType);
         bool isNullable = underlyingType != null;
@@ -273,7 +339,7 @@ static class ReaderExtensions
         else if (underlyingType == typeof(Guid))
         {
             if (readerType != typeof(string) && readerType != typeof(byte[]))
-                throw new Exception($"数据库字段{fieldName}，无法初始化{entityType.FullName}类型的Guid类型{readerFieldInfo.Member.Name}成员");
+                throw new Exception($"数据库字段{fieldName}，无法初始化{entityType.FullName}类型的Guid类型{member.Name}成员");
 
             typedValueExpr = Expression.New(typeof(Guid).GetConstructor(new Type[] { readerType }), Expression.Convert(readerValueExpr, readerType));
             if (!isNullable) defaultValueExpr = Expression.Constant(Guid.Empty, typeof(Guid));
@@ -318,61 +384,6 @@ static class ReaderExtensions
         var isNullExpr = Expression.TypeIs(readerValueExpr, typeof(DBNull));
         return Expression.Condition(isNullExpr, defaultValueExpr, typedValueExpr);
     }
-    private static Expression NewInitEntity(IDataReader reader, ParameterExpression readerExpr, Type entityType, int startIndex,
-        ref int nextIndex, List<ReaderFieldInfo> readerFields, List<ParameterExpression> blockParameters, List<Expression> blockBodies)
-    {
-        Expression returnExpr = null;
-        var ctor = entityType.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
-        if (ctor != null)
-        {
-            var entityExpr = Expression.Variable(entityType, $"entity{startIndex}");
-            blockParameters.Add(entityExpr);
-            blockBodies.Add(Expression.Assign(entityExpr, Expression.New(ctor)));
-
-            var lastMember = readerFields[startIndex].Member;
-            for (int i = startIndex; i < reader.FieldCount; i++)
-            {
-                //TODO:后续所有Member的值相等的，是同一个实体，
-                //如果同一个实体字段是有间隔，不哎
-                var fieldName = reader.GetName(i);
-                var readerFieldInfo = readerFields[i];
-                if (readerFieldInfo.Member != lastMember)
-                {
-                    nextIndex = i;
-                    break;
-                }
-                if (readerFieldInfo.Member is PropertyInfo propertyInfo && propertyInfo.SetMethod == null)
-                    continue;
-
-                var valueExpr = GetReaderValue(reader, readerExpr, i, fieldName, readerFieldInfo, blockParameters, blockBodies);
-                blockBodies.Add(Expression.Assign(Expression.PropertyOrField(entityExpr, readerFieldInfo.MemberName), valueExpr));
-            }
-            returnExpr = entityExpr;
-        }
-        else
-        {
-            ctor = entityType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).OrderBy(f => f.IsPublic ? 0 : (f.IsPrivate ? 2 : 1)).First();
-            var valuesExprs = new List<Expression>();
-            var ctorParameters = ctor.GetParameters();
-
-            int index = 0;
-            for (int i = startIndex; i < reader.FieldCount; i++)
-            {
-                if (index == ctorParameters.Length)
-                {
-                    nextIndex = i;
-                    break;
-                }
-                var fieldName = reader.GetName(i);
-                var readerFieldInfo = readerFields[i];
-                var valueExpr = GetReaderValue(reader, readerExpr, i, fieldName, readerFieldInfo, blockParameters, blockBodies);
-                valuesExprs.Add(valueExpr);
-                index++;
-            }
-            returnExpr = Expression.New(ctor, valuesExprs);
-        }
-        return returnExpr;
-    }
     private static int GetReaderKey(Type entityType, TheaConnection connection, IDataReader reader)
     {
         var hashCode = new HashCode();
@@ -385,5 +396,24 @@ static class ReaderExtensions
             hashCode.Add(reader.GetName(i));
         }
         return hashCode.ToHashCode();
+    }
+    private static string GetRootPath(Expression expr)
+    {
+        var parentExpr = expr;
+        while (parentExpr.NodeType != ExpressionType.Parameter)
+        {
+            if (parentExpr is MemberExpression memberExpr)
+                parentExpr = memberExpr.Expression;
+        }
+        return parentExpr.ToString();
+    }
+    class BuildInfo
+    {
+        public bool IsDefault { get; set; }
+        public ConstructorInfo Constructor { get; set; }
+        public List<MemberBinding> Bindings { get; set; }
+        public List<Expression> Arguments { get; set; }
+        public BuildInfo Parent { get; set; }
+        public int ParentIndex { get; set; }
     }
 }

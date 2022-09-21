@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Linq.Expressions;
-using System.Reflection;
 using System.Text;
 using Thea.Orm;
 
@@ -113,31 +113,41 @@ public class SqlExpressionVisitor
     }
     public void Include(Expression includeExpr)
     {
-        var expr = includeExpr;
-        if (expr is LambdaExpression lambdaExpr)
-            expr = lambdaExpr.Body;
-        if (expr is UnaryExpression unaryExpr)
-            expr = unaryExpr.Operand;
+        this.hasScope = false;
+        this.nodeType = SqlSegmentType.Include;
+        if (this.readerFields == null)
+            this.readerFields = new List<ReaderFieldInfo>();
+        var sqlSegment = this.Visit(includeExpr) as SqlSegment;
+        if (sqlSegment.Value is List<SqlSegment> tableSegments)
+        {
+            if (!this.fromTables.TryGetValue(sqlSegment.Member.GetMemberType(), out var fromTableInfo))
+                throw new Exception($"MemberAccess表达式解析有误，当前引用的实体类型{sqlSegment.Member.DeclaringType.FullName}未添加到fromTables字典中");
 
-        if (expr is MemberExpression memberExpr)
-        {
-            var entityType = memberExpr.Member.DeclaringType;
-            this.TryAddTable(entityType);
-            this.TryAddTable(memberExpr.Type);
-            return;
-        }
-        if (expr is NewExpression newExpr)
-        {
-            foreach (var argumentExpr in newExpr.Arguments)
+            var fieldsBuilder = new StringBuilder();
+            foreach (var fieldSegment in tableSegments)
             {
-                var newMemberExpr = argumentExpr as MemberExpression;
-                var entityType = newMemberExpr.Member.DeclaringType;
-                this.TryAddTable(entityType);
-                this.TryAddTable(newMemberExpr.Type);
+                this.readerFields.Add(new ReaderFieldInfo
+                {
+                    Index = this.readerFields.Count,
+                    IsTarget = false,
+                    FromType = sqlSegment.Member?.DeclaringType,
+                    Member = sqlSegment.Member,
+                    RefMapper = fromTableInfo.Mapper,
+                    MemberName = fieldSegment.Member.Name,
+                    Expression = sqlSegment.Expression,
+                    IsIncluded = true
+                });
+                if (fieldsBuilder.Length > 0)
+                    fieldsBuilder.Append(", ");
+                fieldsBuilder.Append(fieldSegment.ToString());
             }
+            sqlSegment.Value = fieldsBuilder.ToString();
         }
+        if (string.IsNullOrEmpty(this.selectSql))
+            this.selectSql = sqlSegment.ToString();
+        else this.selectSql += ", " + sqlSegment.ToString();
     }
-    public SqlExpressionVisitor Join(Type entityType, Expression joinExpr = null, string joinType = null)
+    public void Join(Type entityType, Expression joinExpr = null, string joinType = null)
     {
         this.hasScope = false;
         this.nodeType = SqlSegmentType.InnerJoin;
@@ -152,16 +162,16 @@ public class SqlExpressionVisitor
             if (string.IsNullOrEmpty(joinTableInfo.JoinOn))
                 joinTableInfo.JoinOn = sqlSegment.ToString();
         }
-        return this;
     }
-    public SqlExpressionVisitor Select(Expression expr)
+    public void Select(Expression expr)
     {
         this.hasScope = false;
         this.nodeType = SqlSegmentType.Select;
         this.readerFields = new List<ReaderFieldInfo>();
         var sqlSegment = this.Visit(expr);
-        this.selectSql = sqlSegment.ToString();
-        return this;
+        if (string.IsNullOrEmpty(this.selectSql))
+            this.selectSql = sqlSegment.ToString();
+        else this.selectSql += ", " + sqlSegment.ToString();
     }
     public SqlExpressionVisitor Where(Expression expr)
     {
@@ -334,7 +344,7 @@ public class SqlExpressionVisitor
             }
             else
             {
-                if (result is SqlSegment sqlSegment)
+                if (result is SqlSegment sqlSegment && sqlSegment.Expression == null)
                     sqlSegment.Expression = currentExpr;
                 break;
             }
@@ -509,69 +519,51 @@ public class SqlExpressionVisitor
 
                     while (true)
                     {
+                        //处理FROM来源表之间JOIN ON语句，这里的实体都是模型
                         entityType = memberExpr.Member.DeclaringType;
+                        if (entityType.Name.StartsWith("<>"))
+                            entityType = this.fromTables.Values.First(f => f.JoinType == "FROM").EntityType;
                         entityMapper = this.dbFactory.GetEntityMap(entityType);
                         fromTableInfo = this.TryAddTable(entityType, entityMapper);
                         //TODO:enum类型，数据库中的值可能是字符串要处理为enum类型
                         memberMapper = entityMapper.GetMemberMap(memberExpr.Member.Name);
 
                         //没有joinOn子句，只能是导航属性，如果未设置导航属性，会有InnerJoin,LeftJoin,RightJoin子句来指定
-                        if (leftTableInfo != null && string.IsNullOrEmpty(fromTableInfo.JoinOn))
-                        {
-                            if (!leftMemberMapper.IsNavigation)
-                                throw new Exception($"未提供{entityType.FullName}的JoinOn关联语句,缺少InnerJoin/LeftJoin/RightJoin子句或是未设置导航属性");
-
-                            string leftField = null;
-                            string rightField = null;
-                            if (leftMemberMapper.IsToOne)
-                            {
-                                //1:1或是n:1
-                                var navigationMapper = leftMapper.GetMemberMap(leftMemberMapper.NavigationMemberName);
-                                leftField = this.ormProvider.GetFieldName(navigationMapper.MemberName);
-
-                                if (entityMapper.KeyFields == null && entityMapper.KeyFields.Count == 0)
-                                    throw new Exception($"实体类{entityType.FullName}是实体类{leftMapper.EntityType.FullName}的导航类型，但未提供主键定义KeyFields");
-                                if (entityMapper.KeyFields.Count > 1)
-                                    throw new Exception($"实体类{entityType.FullName}是实体类{leftMapper.EntityType.FullName}的导航类型，主键定义KeyFields只支持一个字段，不支持多个字段联合主键");
-                                rightField = this.ormProvider.GetFieldName(entityMapper.KeyFields[0]);
-                            }
-                            else
-                            {
-                                //1:n                          
-                                if (leftMapper.KeyFields == null && leftMapper.KeyFields.Count == 0)
-                                    throw new Exception($"实体类{leftMapper.EntityType.FullName}包内导航属性，但未提供主键定义KeyFields");
-                                if (leftMapper.KeyFields.Count > 1)
-                                    throw new Exception($"实体类{leftMapper.EntityType.FullName}包内导航属性，主键定义KeyFields只支持一个字段，不支持多个字段联合主键");
-                                leftField = this.ormProvider.GetFieldName(leftMapper.KeyFields[0]);
-
-                                var navigationMapper = entityMapper.GetMemberMap(leftMemberMapper.NavigationMemberName);
-                                rightField = this.ormProvider.GetFieldName(navigationMapper.FieldName);
-                            }
-                            fromTableInfo.JoinOn = $"{leftTableInfo.AlaisName}.{leftField}={fromTableInfo.AlaisName}.{rightField}";
-                        }
+                        this.SetRightTableJoinOn(entityMapper, fromTableInfo, leftMapper, leftTableInfo, leftMemberMapper);
 
                         isEntity = memberMapper.UnderlyingType.IsEntityType();
-                        if (!isEntity) break;
-
-                        if (this.deferredExprs.TryPeek(out var deferredExpr)
-                            && deferredExpr.ExpressionType == ExpressionType.MemberAccess)
+                        if (isEntity)
                         {
+                            if (this.deferredExprs.TryPeek(out var deferredExpr)
+                                && deferredExpr.ExpressionType == ExpressionType.MemberAccess)
+                            {
+                                leftMapper = entityMapper;
+                                leftMemberMapper = memberMapper;
+                                leftTableInfo = fromTableInfo;
+                                memberExpr = deferredExpr.Value as MemberExpression;
+                                this.deferredExprs.TryPop(out _);
+                                continue;
+                            }
+
+                            //直接取实体属性
                             leftMapper = entityMapper;
                             leftMemberMapper = memberMapper;
                             leftTableInfo = fromTableInfo;
-                            memberExpr = deferredExpr.Value as MemberExpression;
-                            this.deferredExprs.TryPop(out _);
+
+                            entityType = memberMapper.UnderlyingType;
+                            entityMapper = this.dbFactory.GetEntityMap(entityType);
+                            fromTableInfo = this.TryAddTable(entityType, entityMapper);
+                            fromTableInfo.Mapper = entityMapper;
+
+                            //没有joinOn子句，只能是导航属性，如果未设置导航属性，会有InnerJoin,LeftJoin,RightJoin子句来指定
+                            this.SetRightTableJoinOn(entityMapper, fromTableInfo, leftMapper, leftTableInfo, leftMemberMapper);
+                            break;
                         }
                         else break;
                     }
                     if (isEntity)
                     {
-                        //直接取属性，属性就是实体
-                        entityType = memberMapper.UnderlyingType;
-                        entityMapper = this.dbFactory.GetEntityMap(entityType);
-                        fromTableInfo = this.TryAddTable(entityType, entityMapper);
-
-                        //var builder = new StringBuilder();
+                        //直接取实体属性
                         var entitySegements = new List<SqlSegment>();
                         var memberInfos = entityMapper.GetMembers();
                         foreach (var memberInfo in memberInfos)
@@ -584,15 +576,19 @@ public class SqlExpressionVisitor
                             entitySegements.Add(new SqlSegment
                             {
                                 HasField = true,
+                                //
                                 Member = memberInfo,
                                 Value = fieldName
                             });
                         }
+
                         return new SqlSegment
                         {
                             HasField = true,
+                            //取当前scope中原来类的MemberInfo
                             Member = memberExpr.Member,
-                            Value = entitySegements
+                            Value = entitySegements,
+                            Expression = memberExpr
                         };
                     }
                     else
@@ -660,9 +656,8 @@ public class SqlExpressionVisitor
     private SqlSegment VisitNew(NewExpression newExpr)
     {
         var arguments = new List<SqlSegment>();
-        for (int i = 0; i < newExpr.Arguments.Count; i++)
+        foreach (var argumentExpr in newExpr.Arguments)
         {
-            var argumentExpr = newExpr.Arguments[i];
             var sqlSegment = this.VisitAndDeferred(argumentExpr) as SqlSegment;
             arguments.Add(sqlSegment);
         }
@@ -687,9 +682,11 @@ public class SqlExpressionVisitor
                         {
                             Index = this.readerFields.Count,
                             IsTarget = false,
+                            FromType = fieldSegment.Member.DeclaringType,
                             Member = memberInfo,
                             RefMapper = fromTableInfo.Mapper,
-                            MemberName = fieldSegment.Member.Name
+                            MemberName = fieldSegment.Member.Name,
+                            Expression = argumentExpr
                         });
                         if (fieldsBuilder.Length > 0)
                             fieldsBuilder.Append(", ");
@@ -703,8 +700,10 @@ public class SqlExpressionVisitor
                     {
                         Index = this.readerFields.Count,
                         IsTarget = true,
+                        FromType = sqlSegment.Member?.DeclaringType,
                         Member = memberInfo,
-                        MemberName = memberInfo.Name
+                        MemberName = memberInfo.Name,
+                        Expression = argumentExpr
                     });
                     if (sqlSegment.IsParameter || sqlSegment.IsMethodCall)
                         sqlSegment.Value = $"{sqlSegment} AS {memberInfo.Name}";
@@ -817,6 +816,7 @@ public class SqlExpressionVisitor
         if (!this.ormProvider.TryGetMethodCallSqlFormatter(methodInfo, out var formatter))
             throw new Exception($"{this.ormProvider.GetType().FullName}类未实现TryGetMethodCallSqlFormatter中的Concat方法调用");
         var result = formatter.Invoke(null, this.deferredExprs, values.ToArray());
+        this.deferredExprs.TryPop(out _);
         return new SqlSegment { IsMethodCall = true, Expression = originalExpr, Value = result };
     }
     private SqlSegment VisitAndDeferred(Expression expr)
@@ -825,6 +825,43 @@ public class SqlExpressionVisitor
         if (sqlSegment == SqlSegment.None && expr.Type == typeof(string))
             sqlSegment = this.VisitConcatDeferredMember(expr);
         return sqlSegment;
+    }
+    private void SetRightTableJoinOn(EntityMap entityMapper, FromTableInfo fromTableInfo, EntityMap leftMapper, FromTableInfo leftTableInfo, MemberMap leftMemberMapper)
+    {
+        //没有joinOn子句，只能是导航属性，如果未设置导航属性，会有InnerJoin,LeftJoin,RightJoin子句来指定
+        if (leftTableInfo != null && string.IsNullOrEmpty(fromTableInfo.JoinOn))
+        {
+            if (!leftMemberMapper.IsNavigation)
+                throw new Exception($"未提供{entityMapper.EntityType.FullName}的JoinOn关联语句,缺少InnerJoin/LeftJoin/RightJoin子句或是未设置导航属性");
+
+            string leftField = null;
+            string rightField = null;
+            if (leftMemberMapper.IsToOne)
+            {
+                //1:1或是n:1
+                var navigationMapper = leftMapper.GetMemberMap(leftMemberMapper.NavigationMemberName);
+                leftField = this.ormProvider.GetFieldName(navigationMapper.MemberName);
+
+                if (entityMapper.KeyFields == null && entityMapper.KeyFields.Count == 0)
+                    throw new Exception($"实体类{entityMapper.EntityType.FullName}是实体类{leftMapper.EntityType.FullName}的导航类型，但未提供主键定义KeyFields");
+                if (entityMapper.KeyFields.Count > 1)
+                    throw new Exception($"实体类{entityMapper.EntityType.FullName}是实体类{leftMapper.EntityType.FullName}的导航类型，主键定义KeyFields只支持一个字段，不支持多个字段联合主键");
+                rightField = this.ormProvider.GetFieldName(entityMapper.KeyFields[0]);
+            }
+            else
+            {
+                //1:n                          
+                if (leftMapper.KeyFields == null && leftMapper.KeyFields.Count == 0)
+                    throw new Exception($"实体类{leftMapper.EntityType.FullName}包内导航属性，但未提供主键定义KeyFields");
+                if (leftMapper.KeyFields.Count > 1)
+                    throw new Exception($"实体类{leftMapper.EntityType.FullName}包内导航属性，主键定义KeyFields只支持一个字段，不支持多个字段联合主键");
+                leftField = this.ormProvider.GetFieldName(leftMapper.KeyFields[0]);
+
+                var navigationMapper = entityMapper.GetMemberMap(leftMemberMapper.NavigationMemberName);
+                rightField = this.ormProvider.GetFieldName(navigationMapper.FieldName);
+            }
+            fromTableInfo.JoinOn = $"{leftTableInfo.AlaisName}.{leftField}={fromTableInfo.AlaisName}.{rightField}";
+        }
     }
     private bool IsParameterExpr(Expression expr)
     {

@@ -14,6 +14,7 @@ public interface ISqlExpression<T>
     ISqlExpression<T> RightJoin(Expression<Func<T, bool>> predicate);
     ISqlExpression<T> Where(Expression<Func<T, bool>> predicate);
     ISqlExpression<T> Where(bool condition, Expression<Func<T, bool>> predicate);
+    ISqlExpression<T> Include<TTarget>(Expression<Func<T, TTarget>> memberSelector);
 
     IGroupBySqlExpression<TTarget> GroupBy<TTarget>(Expression<Func<T, TTarget>> fieldsExpr);
     ISqlExpression<T> OrderBy<TTarget>(Expression<Func<T, TTarget>> fieldsExpr);
