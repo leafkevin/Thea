@@ -1,12 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<TargetFramework>net6.0</TargetFramework>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Compile Remove="Providers\NpgsqlProvider.cs" />
 	  <Compile Remove="Providers\OracleProvider.cs" />
 	  <Compile Remove="Providers\SqLiteProvider.cs" />
-	  <Compile Remove="Providers\SqlServerProvider.cs" />
 	</ItemGroup>
 	<ItemGroup>
 	  <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />

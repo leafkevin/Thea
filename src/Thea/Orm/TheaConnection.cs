@@ -13,6 +13,7 @@ public sealed class TheaConnection : IDbConnection
     public string ConnectionString { get; set; }
     public IOrmProvider OrmProvider { get; private set; }
     public int ConnectionTimeout => this.baseConnection.ConnectionTimeout;
+    public int CommandTimeout { get; set; } = 30;
     public string Database => this.baseConnection.Database;
     public ConnectionState State => this.baseConnection.State;
     public TheaConnection() { }
@@ -46,7 +47,12 @@ public sealed class TheaConnection : IDbConnection
     }
     public void ChangeDatabase(string databaseName) => this.baseConnection.ChangeDatabase(databaseName);
     public void Close() => this.baseConnection.Close();
-    public IDbCommand CreateCommand() => this.baseConnection.CreateCommand();
+    public IDbCommand CreateCommand()
+    {
+        var command = this.baseConnection.CreateCommand();
+        command.CommandTimeout = this.CommandTimeout;
+        return command;
+    }
     public void Open()
     {
         if (this.baseConnection.State == ConnectionState.Broken)
@@ -78,13 +84,5 @@ public sealed class TheaConnection : IDbConnection
             await connection.DisposeAsync();
         else throw new Exception("当前数据库驱动不支持异步操作");
     }
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hashCode = 17;
-            hashCode = (hashCode * 23) + this.ConnectionString.GetHashCode();
-            return hashCode;
-        }
-    }
+    public override int GetHashCode() => HashCode.Combine(this.ConnectionString);
 }

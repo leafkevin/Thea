@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using Thea.Orm;
 
@@ -17,7 +16,8 @@ public class OrmDbFactory : IOrmDbFactory
 
     private readonly IServiceProvider serviceProvider;
     private TheaDatabase defaultDatabase;
-    public OrmDbFactory(IServiceProvider serviceProvider) => this.serviceProvider = serviceProvider;
+    public OrmDbFactory(IServiceProvider serviceProvider)
+        => this.serviceProvider = serviceProvider;
 
     public TheaDatabase Register(string dbKey, bool isDefault, Action<TheaDatabaseBuilder> databaseInitializer)
     {
@@ -35,7 +35,7 @@ public class OrmDbFactory : IOrmDbFactory
         databaseInitializer?.Invoke(builder);
         return database;
     }
-    public void LoadFromConfigure(string sectionName)
+    public void LoadFromConfiguration(string sectionName)
     {
         var configuration = this.serviceProvider.GetService<IConfiguration>();
         var databases = configuration.GetSection(sectionName).GetChildren();
@@ -68,7 +68,11 @@ public class OrmDbFactory : IOrmDbFactory
             }
         }
     }
-    public ModelBuilder CreateModelBuidler() => new ModelBuilder(this);
+    public void Configure(Action<ModelBuilder> modelInitializer)
+    {
+        var builder = new ModelBuilder(this);
+        modelInitializer.Invoke(builder);
+    }
     public IRepository Create(TheaConnection connection) => new Repository(this, connection);
     public IRepository Create(string dbKey = null, int? tenantId = null)
     {
@@ -76,32 +80,10 @@ public class OrmDbFactory : IOrmDbFactory
         var connection = new TheaConnection(connectionInfo);
         return new Repository(this, connection);
     }
-
-    //public SqlExpression<T1, T2> From<T1, T2>(string dbKey = null, int? tenantId = null)
-    //{
-    //    var connectionInfo = this.GetConnectionInfo(dbKey, tenantId);
-    //    var connection = new TheaConnection(connectionInfo);
-    //    var visitor = new SqlExpressionVisitor(this, connection.OrmProvider);
-    //    return new SqlExpression<T1, T2>(this, connection, visitor);
-    //}
-    //public SqlExpression<T1, T2, T3> From<T1, T2, T3>(string dbKey = null, int? tenantId = null)
-    //{
-    //    var connectionInfo = this.GetConnectionInfo(dbKey, tenantId);
-    //    var connection = new TheaConnection(connectionInfo);
-    //    var visitor = new SqlExpressionVisitor(this, connection.OrmProvider);
-    //    return new SqlExpression<T>(this, connection, visitor);
-    //}
-    //public SqlExpression<T> From<T>(string dbKey = null, int? tenantId = null)
-    //{
-    //    var connectionInfo = this.GetConnectionInfo(dbKey, tenantId);
-    //    var connection = new TheaConnection(connectionInfo);
-    //    var visitor = new SqlExpressionVisitor(this, connection.OrmProvider);
-    //    return new SqlExpression<T>(this, connection, visitor);
-    //}
     public TheaDatabase GetDatabase(string dbKey = null)
     {
         TheaDatabase database = null;
-        if (String.IsNullOrEmpty(dbKey))
+        if (string.IsNullOrEmpty(dbKey))
             database = this.defaultDatabase;
         else if (!this.databases.TryGetValue(dbKey, out database))
             throw new Exception($"未配置dbKey:{dbKey}数据库连接串");

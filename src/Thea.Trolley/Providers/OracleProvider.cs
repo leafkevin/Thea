@@ -2,7 +2,7 @@
 using System.Data;
 using System.Text;
 
-namespace Thea.Trolley.Providers;
+namespace Thea.Trolley;.Providers;
 
 public class OracleProvider : BaseOrmProvider
 {
@@ -20,7 +20,7 @@ public class OracleProvider : BaseOrmProvider
     {
         if (String.IsNullOrEmpty(orderBy)) throw new ArgumentNullException("orderBy");
         var builder = new StringBuilder($"SELECT * FROM (SELECT ROW_NUMBER() OVER({orderBy}) _RowIndex,");
-        builder.Append($"/**fields**/ FROM /**tables**/ WHERE /**conditions**/) T WHERE _RowIndex>={skip}");
+        builder.Append($"/**fields**/ FROM /**tables**/ /**others**/) T WHERE _RowIndex>={skip}");
         if (limit.HasValue) builder.Append($" AND _RowIndex<{skip + limit.Value}");
         return builder.ToString();
     }

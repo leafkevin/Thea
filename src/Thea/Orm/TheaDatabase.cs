@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace Thea.Orm;
+namespace Thea.Orm; 
 
 public class TheaDatabase
 {

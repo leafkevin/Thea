@@ -1,6 +1,9 @@
-﻿namespace Thea.Alarm;
+﻿using System.Threading.Tasks;
+
+namespace Thea.Alarm;
 
 public interface IAlarmService
 {
-    void PostAlarm(string sceneKey, string title, string content);
+    Task PostAsync(string sceneKey, string title, string content);
 }
+
