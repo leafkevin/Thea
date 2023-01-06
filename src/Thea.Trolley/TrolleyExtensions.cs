@@ -15,7 +15,7 @@ public static class TrolleyExtensions
     private static readonly ConcurrentDictionary<int, Delegate> typeReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> queryReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> readerValueConverterCache = new();
-        
+
     public static string GetQuotedValue(this IOrmProvider ormProvider, object value)
     {
         if (value == null) return "NULL";
@@ -39,7 +39,7 @@ public static class TrolleyExtensions
             dbFactory.AddEntityMap(entityType, mapper);
         }
         return mapper;
-    } 
+    }
     public static Type GetMemberType(this MemberInfo member)
     {
         switch (member.MemberType)

@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using Thea.Orm;
 
@@ -6,50 +7,38 @@ namespace Thea.Trolley
 {
     public static class TheaExtensions
     {
-        public static IServiceCollection AddTrolley(this IServiceCollection services, Action<OrmDbFactoryBuilder> initializer)
+        public static IServiceCollection AddTrolley(this IServiceCollection services, string sectionName)
         {
-            services.AddSingleton<IOrmDbFactory, OrmDbFactory>(f =>
-            {
-                var dbFactory = new OrmDbFactory(f);
-                var builder = new OrmDbFactoryBuilder(dbFactory);
-                initializer?.Invoke(builder);
-                return dbFactory;
-            });
+            services.AddSingleton(f => new OrmDbFactoryBuilder().LoadFromConfiguration(f, sectionName));
             return services;
         }
-    }
-    public class OrmDbFactoryBuilder
-    {
-        private readonly IOrmDbFactory dbFactory;
-        internal OrmDbFactoryBuilder(IOrmDbFactory dbFactory) => this.dbFactory = dbFactory;
-        public OrmDbFactoryBuilder Register(string dbKey, bool isDefault, Action<TheaDatabaseBuilder> databaseInitializer)
+        public static IServiceCollection AddTrolley(this IServiceCollection services, Action<OrmDbFactoryBuilder> initializer)
         {
-            this.dbFactory.Register(dbKey, isDefault, databaseInitializer);
-            return this;
-        }
-        public OrmDbFactoryBuilder Configure(IModelConfiguration configuration)
-        {
-            var builder = new ModelBuilder(this.dbFactory);
-            configuration.OnModelCreating(builder);
-            return this;
-        }
-        public OrmDbFactoryBuilder Configure<TModelConfiguration>() where TModelConfiguration : class, IModelConfiguration, new()
-        {
-            var builder = new ModelBuilder(this.dbFactory);
-            var configuration = new TModelConfiguration();
-            configuration.OnModelCreating(builder);
-            return this;
-        }
-        public OrmDbFactoryBuilder Configure(Action<ModelBuilder> initializer)
-        {
-            var builder = new ModelBuilder(this.dbFactory);
+            var builder = new OrmDbFactoryBuilder();
             initializer.Invoke(builder);
-            return this;
+            services.AddSingleton(f => builder.Build());
+            return services;
         }
-        public OrmDbFactoryBuilder LoadFromConfigure(string sectionName)
+        public static IOrmDbFactory LoadFromConfiguration(this OrmDbFactoryBuilder builder, IServiceProvider serviceProvider, string sectionName)
         {
-            this.dbFactory.LoadFromConfiguration(sectionName);
-            return this;
+            var configuration = serviceProvider.GetService<IConfiguration>();
+            var databases = configuration.GetSection(sectionName).GetChildren();
+            foreach (var configInfo in databases)
+            {
+                var database = new TheaDatabase { DbKey = configInfo.Key };
+                configInfo.Bind(database);
+                var connStrings = configInfo.GetSection("ConnectionStrings").GetChildren();
+                foreach (var connString in connStrings)
+                {
+                    var connectionInfo = new TheaConnectionInfo { DbKey = configInfo.Key };
+                    connString.Bind(connectionInfo);
+                    var ormProviderTypeName = connString.GetValue<string>("OrmProvider");
+                    var ormProviderType = typeof(IOrmDbFactory).Assembly.GetType(ormProviderTypeName);
+                    connectionInfo.OrmProvider = Activator.CreateInstance(ormProviderType) as IOrmProvider;
+                    builder.Register(database.DbKey, connectionInfo.IsDefault, f => f.Add(connectionInfo));
+                }
+            }
+            return builder.Build();
         }
     }
 }
