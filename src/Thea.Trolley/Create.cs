@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -13,6 +14,14 @@ using Thea.Orm;
 
 namespace Thea.Trolley;
 
+/// <summary>
+/// MySql:
+/// INSERT INTO table2 (column1, column2, column3, ...)
+/// SELECT column1, column2, column3, ...
+/// FROM table1
+/// WHERE condition;
+/// </summary>
+/// <typeparam name="TEntity"></typeparam>
 class Create<TEntity> : ICreate<TEntity>
 {
     private readonly IOrmDbFactory dbFactory;
@@ -188,7 +197,7 @@ class Created<TEntity> : ICreated<TEntity>
             command.CommandText = sql;
             command.CommandType = CommandType.Text;
             command.Transaction = this.transaction;
-            connection.Open();
+            this.connection.Open();
             var entityMapper = this.dbFactory.GetEntityMap(entityType);
             if (entityMapper.IsAutoIncrement)
             {
@@ -311,8 +320,9 @@ class Created<TEntity> : ICreated<TEntity>
             return result;
         }
     }
-    public string ToSql()
+    public string ToSql(out List<IDbDataParameter> dbParameters)
     {
+        dbParameters = null;
         bool isMulti = false;
         bool isDictionary = false;
         var entityType = typeof(TEntity);
@@ -348,12 +358,14 @@ class Created<TEntity> : ICreated<TEntity>
             {
                 commandInitializer.Invoke(command, this.connection.OrmProvider, sqlBuilder, index, entity);
                 if (index >= this.bulkCount)
-                    return sqlBuilder.ToString();
+                    break;
                 index++;
             }
             string sql = null;
             if (index > 0)
                 sql = sqlBuilder.ToString();
+            if (command.Parameters != null && command.Parameters.Count > 0)
+                dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
             command.Cancel();
             command.Dispose();
             return sql;
@@ -366,6 +378,8 @@ class Created<TEntity> : ICreated<TEntity>
             else commandInitializer = this.BuildCommandInitializer(entityType, parameterType);
             using var command = this.connection.CreateCommand();
             var sql = commandInitializer?.Invoke(command, this.connection.OrmProvider, this.parameters);
+            if (command.Parameters != null && command.Parameters.Count > 0)
+                dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
             command.Cancel();
             command.Dispose();
             return sql;
@@ -430,7 +444,7 @@ class Created<TEntity> : ICreated<TEntity>
                 var suffixExpr = Expression.Call(indexExpr, typeof(int).GetMethod(nameof(int.ToString), Type.EmptyTypes));
                 var parameterNameExpr = Expression.Call(methodInfo3, Expression.Constant(parameterName), suffixExpr);
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, parameterNameExpr));
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, parameterMemberMapper.MemberName, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, propMapper.NativeDbType, parameterMemberMapper.MemberName, blockBodies);
                 columnIndex++;
             }
             blockBodies.Add(Expression.Call(builderExpr, methodInfo1, Expression.Constant(')')));
@@ -476,7 +490,7 @@ class Created<TEntity> : ICreated<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName;
                 valuesBuilder.Append(parameterName);
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, parameterMemberMapper.MemberName, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, propMapper.NativeDbType, parameterMemberMapper.MemberName, blockBodies);
                 columnIndex++;
             }
             insertBuilder.Append(')');
@@ -558,12 +572,14 @@ class Created<TEntity> : ICreated<TEntity>
                     || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
                     continue;
 
-                var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName + index.ToString();
-                var dbParameter = ormProvider.CreateParameter(parameterName, dict[propMapper.MemberName]);
                 if (columnIndex > 0)
                     builder.Append(',');
+                var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName + index.ToString();
                 builder.Append(parameterName);
-                command.Parameters.Add(dbParameter);
+
+                if (propMapper.NativeDbType.HasValue)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType.Value, item.Value));
+                else command.Parameters.Add(ormProvider.CreateParameter(parameterName, item.Value));
                 columnIndex++;
             }
             builder.Append(')');
@@ -584,16 +600,18 @@ class Created<TEntity> : ICreated<TEntity>
                     || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
                     continue;
 
-                var parameterName = ormProvider.ParameterPrefix + item.Key;
-                var dbParameter = ormProvider.CreateParameter(parameterName, dict[item.Key]);
                 if (index > 0)
                 {
                     insertBuilder.Append(',');
                     valuesBuilder.Append(',');
                 }
+                var parameterName = ormProvider.ParameterPrefix + item.Key;
                 insertBuilder.Append(ormProvider.GetFieldName(propMapper.FieldName));
                 valuesBuilder.Append(parameterName);
-                command.Parameters.Add(dbParameter);
+
+                if (propMapper.NativeDbType.HasValue)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType.Value, item.Value));
+                else command.Parameters.Add(ormProvider.CreateParameter(parameterName, item.Value));
                 index++;
             }
             insertBuilder.Append(')');
@@ -642,7 +660,7 @@ class CreateBase
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
 
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -666,7 +684,8 @@ class CreateBase
         await command.DisposeAsync();
         return result;
     }
-    public string ToSql() => this.visitor.BuildSql(out _);
+    public string ToSql(out List<IDbDataParameter> dbParameters)
+        => this.visitor.BuildSql(out dbParameters);
 }
 class Create<TEntity, TSource> : CreateBase, ICreate<TEntity, TSource>
 {

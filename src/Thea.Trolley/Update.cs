@@ -270,9 +270,12 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                     setField.DbParameters.ForEach(f => command.Parameters.Add(f));
                 index++;
             }
-            builder.Insert(0, $"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
-            fixSetSql = builder.ToString();
-            isFixSetSql = true;
+            if (index > 0)
+            {
+                builder.Insert(0, $"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
+                fixSetSql = builder.ToString();
+                isFixSetSql = true;
+            }
         }
 
         if (isMulti)
@@ -328,7 +331,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             command.CommandText = sql;
             command.CommandType = CommandType.Text;
             command.Transaction = this.transaction;
-            connection.Open();
+            this.connection.Open();
             var result = command.ExecuteNonQuery();
             command.Dispose();
             return result;
@@ -619,28 +622,28 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(ormProvider.GetFieldName(propMapper.FieldName) + "=")));
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, parameterNameExpr));
 
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, parameterMemberMapper.MemberName, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, propMapper.NativeDbType, parameterMemberMapper.MemberName, blockBodies);
                 columnIndex++;
             }
             columnIndex = 0;
             blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(" WHERE ")));
-            foreach (var keyMemberMapper in entityMapper.KeyMembers)
+            foreach (var keyMapper in entityMapper.KeyMembers)
             {
-                if (!parameterMapper.TryGetMemberMap(keyMemberMapper.MemberName, out var parameterMemberMapper))
-                    throw new Exception($"参数类型{parameterMapper.EntityType.FullName}，丢失{keyMemberMapper.MemberName}主键成员");
+                if (!parameterMapper.TryGetMemberMap(keyMapper.MemberName, out var parameterMemberMapper))
+                    throw new ArgumentNullException($"参数类型{parameterType.FullName}缺少主键字段{keyMapper.MemberName}", "parameters");
 
                 if (columnIndex > 0)
                     blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(" AND ")));
-                var fieldExpr = Expression.Constant(ormProvider.GetFieldName(keyMemberMapper.FieldName) + "=");
+                var fieldExpr = Expression.Constant(ormProvider.GetFieldName(keyMapper.FieldName) + "=");
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, fieldExpr));
 
-                var parameterName = ormProvider.ParameterPrefix + "k" + keyMemberMapper.MemberName;
+                var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
                 var suffixExpr = Expression.Call(indexExpr, typeof(int).GetMethod(nameof(int.ToString), Type.EmptyTypes));
                 var concatExpr = Expression.Call(methodInfo3, Expression.Constant(parameterName), suffixExpr);
                 blockBodies.Add(Expression.Assign(parameterNameExpr, concatExpr));
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, parameterNameExpr));
 
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, parameterMemberMapper.MemberName, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, keyMapper.NativeDbType, parameterMemberMapper.MemberName, blockBodies);
                 columnIndex++;
             }
             commandInitializerDelegate = Expression.Lambda<Action<IDbCommand, IOrmProvider, StringBuilder, int, object>>(Expression.Block(blockParameters, blockBodies), commandExpr, ormProviderExpr, builderExpr, indexExpr, parameterExpr).Compile();
@@ -682,7 +685,9 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             var methodInfo2 = typeof(StringBuilder).GetMethod(nameof(StringBuilder.Append), new Type[] { typeof(string) });
             var methodInfo3 = typeof(string).GetMethod(nameof(string.Concat), new Type[] { typeof(string), typeof(string) });
 
-            var sqlBuilder = new StringBuilder($"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
+            var sqlBuilder = new StringBuilder();
+            if (!isFixSetSql)
+                sqlBuilder.Append($"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
             foreach (var parameterMemberMapper in parameterMapper.MemberMaps)
             {
                 if (!entityMapper.TryGetMemberMap(parameterMemberMapper.MemberName, out var propMapper)
@@ -700,27 +705,27 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                     if (propMapper.IsKey) continue;
                 }
 
-                if (columnIndex > 0)
+                if (isFixSetSql || columnIndex > 0)
                     sqlBuilder.Append(',');
                 var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName;
                 sqlBuilder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, parameterMemberMapper.MemberName, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, propMapper.NativeDbType, parameterMemberMapper.MemberName, blockBodies);
                 columnIndex++;
             }
             columnIndex = 0;
             sqlBuilder.Append(" WHERE ");
-            foreach (var keyMemberMapper in entityMapper.KeyMembers)
+            foreach (var keyMapper in entityMapper.KeyMembers)
             {
-                if (!parameterMapper.TryGetMemberMap(keyMemberMapper.MemberName, out var parameterMemberMapper))
-                    throw new Exception($"参数类型{parameterMapper.EntityType.FullName}，丢失{keyMemberMapper.MemberName}主键成员");
+                if (!parameterMapper.TryGetMemberMap(keyMapper.MemberName, out var parameterMemberMapper))
+                    throw new ArgumentNullException($"参数类型{parameterType.FullName}缺少主键字段{keyMapper.MemberName}", "parameters");
 
                 if (columnIndex > 0)
                     sqlBuilder.Append(" AND ");
-                var parameterName = ormProvider.ParameterPrefix + "k" + keyMemberMapper.MemberName;
-                sqlBuilder.Append($"{ormProvider.GetFieldName(keyMemberMapper.FieldName)}={parameterName}");
+                var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
+                sqlBuilder.Append($"{ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, parameterMemberMapper.MemberName, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, typedParameterExpr, parameterNameExpr, keyMapper.NativeDbType, parameterMemberMapper.MemberName, blockBodies);
                 columnIndex++;
             }
             var resultLabelExpr = Expression.Label(typeof(string));
@@ -797,21 +802,27 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
                 var parameterName = ormProvider.ParameterPrefix + item.Key + index.ToString();
                 builder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
-                command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[item.Key]));
+
+                if (propMapper.NativeDbType.HasValue)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType.Value, item.Value));
+                else command.Parameters.Add(ormProvider.CreateParameter(parameterName, item.Value));
                 updateIndex++;
             }
             updateIndex = 0;
             builder.Append(" WHERE ");
-            foreach (var propMapper in entityMapper.KeyMembers)
+            foreach (var keyMapper in entityMapper.KeyMembers)
             {
-                if (!dict.ContainsKey(propMapper.MemberName))
-                    throw new ArgumentException($"参数parameters不包含主键成员{propMapper.MemberName}", "parameters");
+                if (!dict.ContainsKey(keyMapper.MemberName))
+                    throw new ArgumentNullException($"字典参数中缺少主键字段{keyMapper.MemberName}", "parameters");
 
                 if (updateIndex > 0)
                     builder.Append(',');
-                var parameterName = ormProvider.ParameterPrefix + "k" + propMapper.MemberName + index.ToString();
-                builder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
-                command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[propMapper.MemberName]));
+                var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName + index.ToString();
+                builder.Append($"{ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
+
+                if (keyMapper.NativeDbType.HasValue)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, keyMapper.NativeDbType.Value, dict[keyMapper.MemberName]));
+                else command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[keyMapper.MemberName]));
                 updateIndex++;
             }
         };
@@ -850,22 +861,28 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
                 var parameterName = ormProvider.ParameterPrefix + item.Key;
                 sqlBuilder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
-                command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[item.Key]));
+
+                if (propMapper.NativeDbType.HasValue)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType.Value, item.Value));
+                else command.Parameters.Add(ormProvider.CreateParameter(parameterName, item.Value));
                 index++;
             }
 
             index = 0;
             sqlBuilder.Append(" WHERE ");
-            foreach (var propMapper in entityMapper.KeyMembers)
+            foreach (var keyMapper in entityMapper.KeyMembers)
             {
-                if (!dict.ContainsKey(propMapper.MemberName))
-                    throw new ArgumentException($"参数parameters不包含主键成员{propMapper.MemberName}", "parameters");
+                if (!dict.ContainsKey(keyMapper.MemberName))
+                    throw new ArgumentNullException($"字典参数中缺少主键字段{keyMapper.MemberName}", "parameters");
 
                 if (index > 0)
                     sqlBuilder.Append(',');
-                var parameterName = ormProvider.ParameterPrefix + "k" + propMapper.MemberName;
-                sqlBuilder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
-                command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[propMapper.MemberName]));
+                var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
+                sqlBuilder.Append($"{ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
+
+                if (keyMapper.NativeDbType.HasValue)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, keyMapper.NativeDbType.Value, dict[keyMapper.MemberName]));
+                else command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[keyMapper.MemberName]));
                 index++;
             }
             return sqlBuilder.ToString();
@@ -897,7 +914,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
         hashCode.Add(setFields.Count);
         foreach (var setField in setFields)
         {
-            if (string.IsNullOrEmpty(setField.Value))
+            if (!string.IsNullOrEmpty(setField.Value))
                 continue;
             hashCode.Add(setField.MemberName);
         }
@@ -988,7 +1005,7 @@ class UpdateSetting<TEntity> : IUpdateSetting<TEntity>
         command.CommandText = sql;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1096,7 +1113,7 @@ class UpdateFrom<TEntity, T1> : IUpdateFrom<TEntity, T1>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1220,7 +1237,7 @@ class UpdateJoin<TEntity, T1> : IUpdateJoin<TEntity, T1>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1328,7 +1345,7 @@ class UpdateFrom<TEntity, T1, T2> : IUpdateFrom<TEntity, T1, T2>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1452,7 +1469,7 @@ class UpdateJoin<TEntity, T1, T2> : IUpdateJoin<TEntity, T1, T2>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1560,7 +1577,7 @@ class UpdateFrom<TEntity, T1, T2, T3> : IUpdateFrom<TEntity, T1, T2, T3>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1684,7 +1701,7 @@ class UpdateJoin<TEntity, T1, T2, T3> : IUpdateJoin<TEntity, T1, T2, T3>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1792,7 +1809,7 @@ class UpdateFrom<TEntity, T1, T2, T3, T4> : IUpdateFrom<TEntity, T1, T2, T3, T4>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -1916,7 +1933,7 @@ class UpdateJoin<TEntity, T1, T2, T3, T4> : IUpdateJoin<TEntity, T1, T2, T3, T4>
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -2024,7 +2041,7 @@ class UpdateFrom<TEntity, T1, T2, T3, T4, T5> : IUpdateFrom<TEntity, T1, T2, T3,
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;
@@ -2132,7 +2149,7 @@ class UpdateJoin<TEntity, T1, T2, T3, T4, T5> : IUpdateJoin<TEntity, T1, T2, T3,
         command.Transaction = this.transaction;
         if (dbParameters != null && dbParameters.Count > 0)
             dbParameters.ForEach(f => command.Parameters.Add(f));
-        connection.Open();
+        this.connection.Open();
         var result = command.ExecuteNonQuery();
         command.Dispose();
         return result;

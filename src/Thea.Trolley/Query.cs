@@ -411,7 +411,13 @@ class Query<T> : IQuery<T>
         this.connection.Open();
         var behavior = CommandBehavior.SequentialAccess | CommandBehavior.SingleResult | CommandBehavior.SingleRow;
         using var reader = command.ExecuteReader(behavior);
-        if (reader.Read()) result = reader.To<T>(this.connection, readerFields);
+        if (reader.Read())
+        {
+            var entityType = typeof(T);
+            if (entityType.IsEntityType())
+                result = reader.To<T>(this.connection, readerFields);
+            else result = reader.To<T>();
+        }
         reader.Close();
         reader.Dispose();
 
@@ -446,7 +452,12 @@ class Query<T> : IQuery<T>
         var behavior = CommandBehavior.SequentialAccess | CommandBehavior.SingleResult | CommandBehavior.SingleRow;
         using var reader = await command.ExecuteReaderAsync(behavior, cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
-            result = reader.To<T>(this.connection, readerFields);
+        {
+            var entityType = typeof(T);
+            if (entityType.IsEntityType())
+                result = reader.To<T>(this.connection, readerFields);
+            else result = reader.To<T>();
+        }
         await reader.CloseAsync();
         await reader.DisposeAsync();
 
@@ -477,9 +488,20 @@ class Query<T> : IQuery<T>
         this.connection.Open();
         var behavior = CommandBehavior.SequentialAccess;
         using var reader = command.ExecuteReader(behavior);
-        while (reader.Read())
+        var entityType = typeof(T);
+        if (entityType.IsEntityType())
         {
-            result.Add(reader.To<T>(this.connection, readerFields));
+            while (reader.Read())
+            {
+                result.Add(reader.To<T>(this.connection, readerFields));
+            }
+        }
+        else
+        {
+            while (reader.Read())
+            {
+                result.Add(reader.To<T>());
+            }
         }
         reader.Close();
         reader.Dispose();
@@ -514,9 +536,21 @@ class Query<T> : IQuery<T>
         await this.connection.OpenAsync(cancellationToken);
         var behavior = CommandBehavior.SequentialAccess;
         using var reader = await command.ExecuteReaderAsync(behavior, cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+
+        var entityType = typeof(T);
+        if (entityType.IsEntityType())
         {
-            result.Add(reader.To<T>(this.connection, readerFields));
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                result.Add(reader.To<T>(this.connection, readerFields));
+            }
+        }
+        else
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                result.Add(reader.To<T>());
+            }
         }
         await reader.CloseAsync();
         await reader.DisposeAsync();
@@ -619,7 +653,7 @@ class Query<T> : IQuery<T>
         await command.DisposeAsync();
         return result;
     }
-    public Dictionary<TKey, TElement> ToDictionary<TKey, TElement>(Func<T, TKey> keySelector, Func<T, TElement> valueSelector) where TKey : notnull
+    public Dictionary<TKey, TValue> ToDictionary<TKey, TValue>(Func<T, TKey> keySelector, Func<T, TValue> valueSelector) where TKey : notnull
     {
         if (keySelector == null)
             throw new ArgumentNullException(nameof(keySelector));
@@ -628,7 +662,7 @@ class Query<T> : IQuery<T>
 
         return this.ToList().ToDictionary(keySelector, valueSelector);
     }
-    public async Task<Dictionary<TKey, TElement>> ToDictionaryAsync<TKey, TElement>(Func<T, TKey> keySelector, Func<T, TElement> valueSelector, CancellationToken cancellationToken = default) where TKey : notnull
+    public async Task<Dictionary<TKey, TValue>> ToDictionaryAsync<TKey, TValue>(Func<T, TKey> keySelector, Func<T, TValue> valueSelector, CancellationToken cancellationToken = default) where TKey : notnull
     {
         if (keySelector == null)
             throw new ArgumentNullException(nameof(keySelector));
@@ -658,14 +692,13 @@ class Query<T> : IQuery<T>
 
         this.connection.Open();
         var behavior = CommandBehavior.SequentialAccess | CommandBehavior.SingleResult | CommandBehavior.SingleRow;
-        object result = null;
+        TTarget result = default;
         using var reader = command.ExecuteReader(behavior);
-        if (reader.Read()) result = reader.GetValue(0);
+        if (reader.Read()) result = reader.To<TTarget>();
         reader.Close();
         reader.Dispose();
         command.Dispose();
-        if (result is DBNull) return default;
-        return (TTarget)result;
+        return result;
     }
     private async Task<TTarget> QueryFirstValueAsync<TTarget>(string sqlFormat, Expression fieldExpr = null, CancellationToken cancellationToken = default)
     {
@@ -682,16 +715,15 @@ class Query<T> : IQuery<T>
         if (cmd is not DbCommand command)
             throw new NotSupportedException("当前数据库驱动不支持异步SQL查询");
 
-        object result = null;
+        TTarget result = default;
         var behavior = CommandBehavior.SequentialAccess | CommandBehavior.SingleResult | CommandBehavior.SingleRow;
         await this.connection.OpenAsync(cancellationToken);
         using var reader = await command.ExecuteReaderAsync(behavior, cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
-            result = reader.GetValue(0);
+            result = reader.To<TTarget>();
         await reader.CloseAsync();
         await reader.DisposeAsync();
         await command.DisposeAsync();
-        if (result is DBNull) return default;
-        return (TTarget)result;
+        return result;
     }
 }

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
@@ -152,7 +151,9 @@ class UpdateVisitor : SqlVisitor
                     var parameterName = ormProvider.ParameterPrefix + memberMapper.MemberName;
                     builder.Append(parameterName);
                     this.dbParameters ??= new();
-                    this.dbParameters.Add(ormProvider.CreateParameter(parameterName, fieldValue));
+                    if (memberMapper.NativeDbType.HasValue)
+                        this.dbParameters.Add(ormProvider.CreateParameter(parameterName, memberMapper.NativeDbType.Value, fieldValue));
+                    else this.dbParameters.Add(ormProvider.CreateParameter(parameterName, fieldValue));
                 }
                 break;
             case ExpressionType.New:
@@ -358,25 +359,27 @@ class UpdateVisitor : SqlVisitor
         var memberMapper = entityMapper.GetMemberMap(memberInfo.Name);
         if (builder.Length > 0)
             builder.Append(',');
-        if (this.ormProvider.DatabaseType == DatabaseType.MySql)
+        if (this.isNeedAlias)
             builder.Append("a.");
         builder.Append(this.ormProvider.GetFieldName(memberMapper.FieldName) + "=");
         if (sqlSegment == SqlSegment.Null)
             builder.Append("NULL");
         else
         {
-            if (sqlSegment.HasField)
-                builder.Append(sqlSegment.ToString());
-            else
+            if (sqlSegment.IsConstantValue)
             {
                 builder.Append(parameterName);
                 if (!sqlSegment.IsParameter)
                 {
                     this.dbParameters ??= new();
-                    this.dbParameters.Add(this.ormProvider.CreateParameter(parameterName, sqlSegment.Value));
+                    if (memberMapper.NativeDbType.HasValue)
+                        this.dbParameters.Add(ormProvider.CreateParameter(parameterName, memberMapper.NativeDbType.Value, sqlSegment.Value));
+                    else this.dbParameters.Add(ormProvider.CreateParameter(parameterName, sqlSegment.Value));
+                    sqlSegment.IsParameter = true;
+                    sqlSegment.IsConstantValue = false;
                 }
             }
+            else builder.Append(sqlSegment.ToString());
         }
     }
 }
-

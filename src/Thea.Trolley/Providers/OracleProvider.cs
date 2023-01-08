@@ -2,7 +2,7 @@
 using System.Data;
 using System.Text;
 
-namespace Thea.Trolley;.Providers;
+namespace Trolley;.Providers;
 
 public class OracleProvider : BaseOrmProvider
 {

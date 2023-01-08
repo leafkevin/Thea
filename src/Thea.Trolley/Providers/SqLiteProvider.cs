@@ -1,6 +1,6 @@
 ﻿using System.Data;
 
-namespace Thea.Trolley;
+namespace Trolley;
 
 public class SqLiteProvider : BaseOrmProvider
 {

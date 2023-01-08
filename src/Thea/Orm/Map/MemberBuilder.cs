@@ -1,6 +1,4 @@
-﻿using System.Data;
-
-namespace Thea.Orm;
+﻿namespace Thea.Orm;
 
 public class MemberBuilder
 {

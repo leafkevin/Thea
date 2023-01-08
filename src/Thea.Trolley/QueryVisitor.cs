@@ -26,7 +26,6 @@ class QueryVisitor : SqlVisitor
     private int? limit = null;
     private bool isDistinct = false;
     private bool isUnion = false;
-    private bool hasIncludeMany = false;
     private List<TableSegment> includeSegments = null;
     private TableSegment lastIncludeSegment = null;
     private List<ReaderField> groupFields = null;
@@ -51,6 +50,7 @@ class QueryVisitor : SqlVisitor
         {
             foreach (var tableSegment in this.tables)
             {
+                if (tableSegment.IsInclude && !tableSegment.IsUsed) continue;
                 var tableName = tableSegment.Body;
                 if (string.IsNullOrEmpty(tableName))
                 {
@@ -121,7 +121,7 @@ class QueryVisitor : SqlVisitor
         {
             foreach (var tableSegment in this.tables)
             {
-                if (!tableSegment.IsUsed) continue;
+                if (tableSegment.IsInclude && !tableSegment.IsUsed) continue;
                 var tableName = tableSegment.Body;
                 if (string.IsNullOrEmpty(tableName))
                 {
@@ -296,7 +296,7 @@ class QueryVisitor : SqlVisitor
     }
     public void Include(Expression memberSelector, bool isIncludeMany = false, Expression filter = null)
     {
-        if (!isIncludeMany) isNeedAlias = true;
+        if (!isIncludeMany) this.isNeedAlias = true;
         var lambdaExpr = memberSelector as LambdaExpression;
         var memberExpr = lambdaExpr.Body as MemberExpression;
         this.InitTableAlias(lambdaExpr);
@@ -309,11 +309,11 @@ class QueryVisitor : SqlVisitor
             this.tableAlias.TryAdd(parameterName, includeSegment);
             includeSegment.Filter = this.Visit(new SqlSegment { Expression = filter }).ToString();
         }
-        if (isIncludeMany) this.hasIncludeMany = true;
         this.lastIncludeSegment = includeSegment;
     }
     public void ThenInclude(Expression memberSelector, bool isIncludeMany = false, Expression filter = null)
     {
+        if (!isIncludeMany) this.isNeedAlias = true;
         var lambdaExpr = memberSelector as LambdaExpression;
         var memberExpr = lambdaExpr.Body as MemberExpression;
         lambdaExpr.Body.GetParameters(out var parameters);
@@ -328,7 +328,6 @@ class QueryVisitor : SqlVisitor
             this.tableAlias.TryAdd(parameterName, includeSegment);
             includeSegment.Filter = this.Visit(new SqlSegment { Expression = filter }).ToString();
         }
-        if (isIncludeMany) this.hasIncludeMany = true;
         this.lastIncludeSegment = includeSegment;
     }
     public void Join(string joinType, Type newEntityType, Expression joinOn)
@@ -338,6 +337,13 @@ class QueryVisitor : SqlVisitor
         if (newEntityType != null)
             this.AddTable(joinType, newEntityType);
         var joinTableSegment = this.InitTableAlias(lambdaExpr);
+        if (joinOn != null)
+        {
+            foreach (var tableSegment in this.tableAlias.Values)
+            {
+                tableSegment.IsUsed = true;
+            }
+        }
         var joinOnExpr = this.VisitConditionExpr(lambdaExpr.Body);
         joinTableSegment.JoinType = joinType;
         joinTableSegment.OnExpr = joinOnExpr;
@@ -681,7 +687,7 @@ class QueryVisitor : SqlVisitor
                 else
                 {
                     fieldName = sqlSegment.ToString();
-                    if (sqlSegment.IsParameter || sqlSegment.IsMethodCall || sqlSegment.FromMember.Name != memberInfo.Name)
+                    if (sqlSegment.IsParameter || !sqlSegment.IsConstantValue || sqlSegment.FromMember?.Name != memberInfo.Name)
                         fieldName += " AS " + memberInfo.Name;
                     readerFields.Add(new ReaderField
                     {
@@ -698,7 +704,7 @@ class QueryVisitor : SqlVisitor
                 //常量或方法访问
                 sqlSegment = this.Visit(sqlSegment);
                 fieldName = sqlSegment.ToString();
-                if (sqlSegment.IsParameter || sqlSegment.IsMethodCall || sqlSegment.FromMember.Name != memberInfo.Name)
+                if (sqlSegment.IsParameter || !sqlSegment.IsConstantValue || sqlSegment.FromMember?.Name != memberInfo.Name)
                     fieldName += " AS " + memberInfo.Name;
                 readerFields.Add(new ReaderField
                 {
@@ -716,13 +722,14 @@ class QueryVisitor : SqlVisitor
     {
         foreach (var readerField in readerFields)
         {
-            readerField.TableSegment.IsUsed = true;
+            if (readerField.TableSegment != null)
+                readerField.TableSegment.IsUsed = true;
             if (readerField.Type == ReaderFieldType.Entity)
             {
                 readerField.TableSegment.Mapper ??= this.dbFactory.GetEntityMap(readerField.TableSegment.EntityType);
                 foreach (var memberMapper in readerField.TableSegment.Mapper.MemberMaps)
                 {
-                    if (memberMapper.IsNavigation || memberMapper.MemberType.IsEntityType())
+                    if (memberMapper.IsIgnore || memberMapper.IsNavigation || memberMapper.MemberType.IsEntityType())
                         continue;
                     if (builder.Length > 0)
                         builder.Append(',');
@@ -781,10 +788,13 @@ class QueryVisitor : SqlVisitor
         int index = 0;
         foreach (var parameterExpr in lambdaExpr.Parameters)
         {
-            if (parameterExpr.Type == typeof(IAggregateSelect))
+            if (typeof(IAggregateSelect).IsAssignableFrom(parameterExpr.Type))
                 continue;
             if (!parameters.Contains(parameterExpr.Name))
+            {
+                index++;
                 continue;
+            }
             this.tableAlias.Add(parameterExpr.Name, joinTables[index]);
             tableSegment = joinTables[index];
             index++;

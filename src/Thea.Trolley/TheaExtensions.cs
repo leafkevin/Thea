@@ -7,11 +7,6 @@ namespace Thea.Trolley
 {
     public static class TheaExtensions
     {
-        public static IServiceCollection AddTrolley(this IServiceCollection services, string sectionName)
-        {
-            services.AddSingleton(f => new OrmDbFactoryBuilder().LoadFromConfiguration(f, sectionName));
-            return services;
-        }
         public static IServiceCollection AddTrolley(this IServiceCollection services, Action<OrmDbFactoryBuilder> initializer)
         {
             var builder = new OrmDbFactoryBuilder();

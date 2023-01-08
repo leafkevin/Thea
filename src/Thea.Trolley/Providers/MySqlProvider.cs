@@ -12,6 +12,7 @@ namespace Thea.Trolley;
 public class MySqlProvider : BaseOrmProvider
 {
     private static CreateNativeDbConnectionDelegate createNativeConnectonDelegate = null;
+    private static CreateDefaultNativeParameterDelegate createDefaultNativeParameterDelegate = null;
     private static CreateNativeParameterDelegate createNativeParameterDelegate = null;
     private static ConcurrentDictionary<MemberInfo, MemberAccessSqlFormatter> memberAccessSqlFormatterCahe = new();
     private static ConcurrentDictionary<MethodInfo, MethodCallSqlFormatter> methodCallSqlFormatterCahe = new();
@@ -28,6 +29,7 @@ public class MySqlProvider : BaseOrmProvider
         var dbTypeType = Type.GetType("MySqlConnector.MySqlDbType, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
         var dbParameterType = Type.GetType("MySqlConnector.MySqlParameter, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
         var dbTypePropertyInfo = dbParameterType.GetProperty("MySqlDbType");
+        createDefaultNativeParameterDelegate = base.CreateDefaultParameterDelegate(dbParameterType);
         createNativeParameterDelegate = base.CreateParameterDelegate(dbTypeType, dbParameterType, dbTypePropertyInfo);
 
         nativeDbTypes[typeof(bool)] = -1;
@@ -132,10 +134,9 @@ public class MySqlProvider : BaseOrmProvider
     public override IDbConnection CreateConnection(string connectionString)
         => createNativeConnectonDelegate.Invoke(connectionString);
     public override IDbDataParameter CreateParameter(string parameterName, object value)
-    {
-        var dbType = this.GetNativeDbType(value.GetType());
-        return createNativeParameterDelegate.Invoke(parameterName, dbType, value);
-    }
+        => createDefaultNativeParameterDelegate.Invoke(parameterName, value);
+    public override IDbDataParameter CreateParameter(string parameterName, int nativeDbType, object value)
+        => createNativeParameterDelegate.Invoke(parameterName, nativeDbType, value);
     public override string GetTableName(string entityName) => "`" + entityName + "`";
     public override string GetFieldName(string propertyName) => "`" + propertyName + "`";
     public override int GetNativeDbType(Type type)
@@ -185,7 +186,7 @@ public class MySqlProvider : BaseOrmProvider
 
                             var fieldName = this.GetQuotedValue(args[1]);
                             int notIndex = 0;
-                            if (deferExprs != null)
+                            if (deferExprs != null && deferExprs.Count > 0)
                             {
                                 while (deferExprs.TryPop(f => f.OperationType == OperationType.Not, out var deferrdExpr))
                                 {
@@ -234,7 +235,7 @@ public class MySqlProvider : BaseOrmProvider
                             }
                             var fieldName = this.GetQuotedValue(args[0]);
                             int notIndex = 0;
-                            if (deferExprs != null)
+                            if (deferExprs != null && deferExprs.Count > 0)
                             {
                                 while (deferExprs.TryPop(f => f.OperationType == OperationType.Not, out var deferrdExpr))
                                 {
@@ -267,7 +268,7 @@ public class MySqlProvider : BaseOrmProvider
                             var rightValue = $"'%{args[0]}%'";
 
                             int notIndex = 0;
-                            if (deferExprs != null)
+                            if (deferExprs != null && deferExprs.Count > 0)
                             {
                                 while (deferExprs.TryPop(f => f.OperationType == OperationType.Not, out var deferrdExpr))
                                 {
@@ -425,7 +426,8 @@ public class MySqlProvider : BaseOrmProvider
                         var leftTarget = this.GetQuotedValue(target);
                         var rightValue = this.GetQuotedValue(args[0]);
                         int notIndex = 0;
-                        if (deferExprs != null)
+
+                        if (deferExprs != null && deferExprs.Count > 0)
                         {
                             while (deferExprs.TryPop(f => f.OperationType == OperationType.Not, out var deferrdExpr))
                             {
@@ -443,7 +445,8 @@ public class MySqlProvider : BaseOrmProvider
                         var leftField = this.GetQuotedValue(target);
                         var rightValue = $"'{args[0]}%'";
                         int notIndex = 0;
-                        if (deferExprs != null)
+
+                        if (deferExprs != null && deferExprs.Count > 0)
                         {
                             while (deferExprs.TryPop(f => f.OperationType == OperationType.Not, out var deferrdExpr))
                             {
@@ -461,7 +464,8 @@ public class MySqlProvider : BaseOrmProvider
                         var leftField = this.GetQuotedValue(target);
                         var rightValue = $"'%{args[0]}'";
                         int notIndex = 0;
-                        if (deferExprs != null)
+
+                        if (deferExprs != null && deferExprs.Count > 0)
                         {
                             while (deferExprs.TryPop(f => f.OperationType == OperationType.Not, out var deferrdExpr))
                             {

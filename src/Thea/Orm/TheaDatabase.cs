@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Thea.Orm;
+namespace Thea.Orm; 
 
 public class TheaDatabase
 {

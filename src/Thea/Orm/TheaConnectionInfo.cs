@@ -10,3 +10,4 @@ public class TheaConnectionInfo
     public bool IsDefault { get; set; }
     public List<int> TenantIds { get; set; }
 }
+
