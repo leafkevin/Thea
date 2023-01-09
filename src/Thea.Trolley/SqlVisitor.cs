@@ -197,6 +197,7 @@ public class SqlVisitor
                     case ExpressionType.ExclusiveOr:
                     case ExpressionType.RightShift:
                     case ExpressionType.LeftShift:
+                        sqlSegment.IsExpression = true;
                         sqlSegment.IsConstantValue = false;
                         break;
                 }
@@ -399,6 +400,7 @@ public class SqlVisitor
             args = arguments.ToArray();
         }
         var result = formatter.Invoke(target, sqlSegment.DeferredExprs, args);
+        sqlSegment.IsExpression = true;
         return sqlSegment.Change(result, false);
     }
     public virtual SqlSegment VisitParameter(SqlSegment sqlSegment)
@@ -658,6 +660,7 @@ public class SqlVisitor
     public virtual SqlSegment VisitSqlMethodCall(SqlSegment sqlSegment)
     {
         var methodCallExpr = sqlSegment.Expression as MethodCallExpression;
+        sqlSegment.IsExpression = true;
         sqlSegment.IsConstantValue = false;
         switch (methodCallExpr.Method.Name)
         {

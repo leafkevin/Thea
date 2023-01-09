@@ -141,7 +141,7 @@ public static class TrolleyExtensions
         else returnExpr = Expression.New(target.Constructor, target.Arguments);
 
         blockBodies.Add(Expression.Return(resultLabelExpr, returnExpr));
-        blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Constant(null, entityType)));
+        blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Default(entityType)));
         return Expression.Lambda(returnExpr, readerExpr).Compile();
     }
     private static Delegate CreateReaderDeserializer(IDataReader reader, Type entityType, List<ReaderField> readerFields)
@@ -242,7 +242,7 @@ public static class TrolleyExtensions
         else returnExpr = Expression.New(root.Constructor, root.Arguments);
 
         blockBodies.Add(Expression.Return(resultLabelExpr, returnExpr));
-        blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Constant(null, entityType)));
+        blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Default(entityType)));
         return Expression.Lambda(returnExpr, readerExpr).Compile();
     }
     private static Expression GetReaderValue(ParameterExpression readerExpr, Expression indexExpr, Type targetType, Type fieldType)

@@ -82,7 +82,7 @@ public static class TheaOrmExtensions
 
     public static bool IsEntityType(this Type type)
     {
-        if (valueTypes.Contains(type) || type.IsEnum) return false;
+        if (type.IsEnum || valueTypes.Contains(type)) return false;
         if (type.FullName == "System.Data.Linq.Binary")
             return false;
         if (type.IsValueType)
@@ -100,6 +100,20 @@ public static class TheaOrmExtensions
                 var underlyingType = Nullable.GetUnderlyingType(elementType);
                 if (underlyingType != null && underlyingType.IsEnum)
                     return false;
+            }
+        }
+        if (typeof(IEnumerable).IsAssignableFrom(type))
+        {
+            foreach (var elementType in type.GenericTypeArguments)
+            {
+                if (elementType.IsEnum || valueTypes.Contains(elementType))
+                    return false;
+                if (elementType.IsValueType)
+                {
+                    var underlyingType = Nullable.GetUnderlyingType(elementType);
+                    if (underlyingType != null && underlyingType.IsEnum)
+                        return false;
+                }
             }
         }
         return true;
