@@ -5,9 +5,9 @@ using System;
 
 namespace Thea.Logging;
 
-public static class TheaLoggerExtensions
+public static class TheaLoggingExtensions
 {
-    public static IServiceCollection AddTheaLogger(this IServiceCollection services)
+    public static IServiceCollection AddTheaLogging(this IServiceCollection services)
     {
         services.AddSingleton<ILoggerProcessor, TheaLoggerProcessor>();
         services.AddSingleton<ILoggerProvider, TheaLoggerProvider>();

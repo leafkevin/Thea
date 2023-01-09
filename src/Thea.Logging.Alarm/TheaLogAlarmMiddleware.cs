@@ -9,7 +9,7 @@ using Thea.Alarm;
 
 namespace Thea.Logging.Alarm;
 
-public class TheaLoggerAlarmMiddleware
+public class TheaLogAlarmMiddleware
 {
     private readonly Task task;
     private readonly IAlarmService alarmService;
@@ -18,9 +18,8 @@ public class TheaLoggerAlarmMiddleware
     private readonly ConcurrentQueue<AlarmInfo> messageQueue = new();
     private readonly ConcurrentDictionary<int, AlarmFiredInfo> firedInfos = new();
     private readonly CancellationTokenSource stopTokenSource = new();
-    private readonly EventWaitHandle readyToStart = new EventWaitHandle(false, EventResetMode.AutoReset);
 
-    public TheaLoggerAlarmMiddleware(LoggerHandlerDelegate next, IAlarmService alarmService, IConfiguration configuration, ILogger<TheaLoggerAlarmMiddleware> logger)
+    public TheaLogAlarmMiddleware(LoggerHandlerDelegate next, IAlarmService alarmService, IConfiguration configuration, ILogger<TheaLogAlarmMiddleware> logger)
     {
         this.next = next;
         this.alarmService = alarmService;
@@ -30,7 +29,6 @@ public class TheaLoggerAlarmMiddleware
 
         this.task = Task.Factory.StartNew(async () =>
         {
-            this.readyToStart.WaitOne();
             while (!this.stopTokenSource.IsCancellationRequested)
             {
                 try
@@ -44,12 +42,13 @@ public class TheaLoggerAlarmMiddleware
                         }
 
                         //十分钟后再报一次
-                        if (DateTime.Now - firedInfo.CreatedAt > TimeSpan.FromMinutes(10))
+                        if (DateTime.Now - firedInfo.CreatedAt >= TimeSpan.FromMinutes(10))
                         {
                             var title = new StringBuilder(alarmInfo.Header)
                                .AppendLine($"> Fired Times：{firedInfo.FiredTimes}  ").ToString();
                             await this.alarmService.PostAsync(alarmInfo.SenceKey, title, alarmInfo.Content);
                             this.messageQueue.TryDequeue(out _);
+                            this.firedInfos.TryRemove(alarmInfo.HashKey, out _);
                         }
                     }
                     else Thread.Sleep(10);
@@ -61,12 +60,10 @@ public class TheaLoggerAlarmMiddleware
             }
         }, stopTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
-    public void Start() => this.readyToStart.Set();
     public void Shutdown()
     {
         this.stopTokenSource.Cancel();
         this.task?.Wait();
-        this.readyToStart.Dispose();
         this.stopTokenSource.Dispose();
     }
     public async Task<bool> Invoke(LoggerHandlerContext context)
