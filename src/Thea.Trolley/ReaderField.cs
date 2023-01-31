@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Thea.Orm;
 
 namespace Thea.Trolley;
 
@@ -6,6 +7,9 @@ public enum ReaderFieldType : byte
 {
     Field = 1,
     Entity = 2,
+    /// <summary>
+    /// 像Grouping这种的接口提供的临时实体
+    /// </summary>
     AnonymousField = 3
 }
 public class ReaderField

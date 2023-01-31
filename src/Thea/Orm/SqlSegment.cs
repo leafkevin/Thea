@@ -3,9 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
-using Thea.Orm;
 
-namespace Thea.Trolley;
+namespace Thea.Orm;
 
 public class SqlSegment
 {
@@ -35,6 +34,7 @@ public class SqlSegment
     /// </summary>
     public bool IsConstantValue { get; set; }
     public bool IsExpression { get; set; }
+    public bool IsNeedParentheses { get; set; }
     public string ParameterName { get; set; }
     public MemberInfo FromMember { get; set; }
     public TableSegment TableSegment { get; set; }
@@ -47,7 +47,7 @@ public class SqlSegment
         this.isFixValue = false;
         this.HasField = this.HasField || right.HasField;
         this.IsParameter = this.IsParameter || right.IsParameter;
-        //this.IsExpression = this.IsExpression || right.IsExpression;
+        this.IsExpression = this.IsExpression || right.IsExpression;
         this.IsConstantValue = this.IsConstantValue && right.IsConstantValue;
         this.Value = right.Value;
         if (right.HasDeferred)

@@ -15,10 +15,9 @@ using Thea.Orm;
 namespace Thea.Trolley;
 
 /// <summary>
-/// MySql:
-/// INSERT INTO table2 (column1, column2, column3, ...)
+/// INSERT INTO table1 (column1, column2, column3, ...)
 /// SELECT column1, column2, column3, ...
-/// FROM table1
+/// FROM table2,table3
 /// WHERE condition;
 /// </summary>
 /// <typeparam name="TEntity"></typeparam>
@@ -147,6 +146,7 @@ class Created<TEntity> : ICreated<TEntity>
             int result = 0, index = 0;
             var sqlBuilder = new StringBuilder();
             using var command = this.connection.CreateCommand();
+            command.Transaction = this.transaction;
             foreach (var entity in entities)
             {
                 commandInitializer.Invoke(command, this.connection.OrmProvider, sqlBuilder, index, entity);
@@ -248,6 +248,7 @@ class Created<TEntity> : ICreated<TEntity>
             var sqlBuilder = new StringBuilder();
 
             using var cmd = this.connection.CreateCommand();
+            cmd.Transaction = this.transaction;
             if (cmd is not DbCommand command)
                 throw new NotSupportedException("当前数据库驱动不支持异步SQL查询");
 
@@ -387,12 +388,12 @@ class Created<TEntity> : ICreated<TEntity>
     }
     private Action<IDbCommand, IOrmProvider, StringBuilder, int, object> BuildBatchCommandInitializer(Type entityType, Type parameterType)
     {
-        var cacheKey = HashCode.Combine("CreateBatch", connection.OrmProvider, string.Empty, entityType, parameterType);
+        var cacheKey = HashCode.Combine("CreateBatch", this.connection, string.Empty, entityType, parameterType);
         if (!commandInitializerCache.TryGetValue(cacheKey, out var commandInitializerDelegate))
         {
             int columnIndex = 0;
-            var entityMapper = dbFactory.GetEntityMap(entityType);
-            var parameterMapper = dbFactory.GetEntityMap(parameterType);
+            var entityMapper = this.dbFactory.GetEntityMap(entityType);
+            var parameterMapper = this.dbFactory.GetEntityMap(parameterType);
             var ormProvider = this.connection.OrmProvider;
             var commandExpr = Expression.Parameter(typeof(IDbCommand), "cmd");
             var ormProviderExpr = Expression.Parameter(typeof(IOrmProvider), "ormProvider");
@@ -403,6 +404,7 @@ class Created<TEntity> : ICreated<TEntity>
             var typedParameterExpr = Expression.Variable(parameterType, "typedParameter");
             var blockParameters = new List<ParameterExpression>();
             var blockBodies = new List<Expression>();
+            var localParameters = new Dictionary<Type, ParameterExpression>();
             blockParameters.Add(typedParameterExpr);
             blockBodies.Add(Expression.Assign(typedParameterExpr, Expression.Convert(parameterExpr, parameterType)));
 
@@ -410,7 +412,8 @@ class Created<TEntity> : ICreated<TEntity>
             foreach (var parameterMemberMapper in parameterMapper.MemberMaps)
             {
                 if (!entityMapper.TryGetMemberMap(parameterMemberMapper.MemberName, out var propMapper)
-                    || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
+                    || propMapper.IsIgnore || propMapper.IsNavigation
+                    || (propMapper.MemberType.IsEntityType() && propMapper.TypeHandler == null))
                     continue;
 
                 if (columnIndex > 0)
@@ -434,7 +437,8 @@ class Created<TEntity> : ICreated<TEntity>
             foreach (var parameterMemberMapper in parameterMapper.MemberMaps)
             {
                 if (!entityMapper.TryGetMemberMap(parameterMemberMapper.MemberName, out var propMapper)
-                    || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
+                    || propMapper.IsIgnore || propMapper.IsNavigation
+                    || (propMapper.MemberType.IsEntityType() && propMapper.TypeHandler == null))
                     continue;
 
                 if (columnIndex > 0)
@@ -444,7 +448,8 @@ class Created<TEntity> : ICreated<TEntity>
                 var suffixExpr = Expression.Call(indexExpr, typeof(int).GetMethod(nameof(int.ToString), Type.EmptyTypes));
                 var parameterNameExpr = Expression.Call(methodInfo3, Expression.Constant(parameterName), suffixExpr);
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, parameterNameExpr));
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.MemberName, propMapper.NativeDbType, blockBodies);
+
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.IsNullable, propMapper.NativeDbType, propMapper, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
             blockBodies.Add(Expression.Call(builderExpr, methodInfo1, Expression.Constant(')')));
@@ -456,7 +461,7 @@ class Created<TEntity> : ICreated<TEntity>
     }
     private Func<IDbCommand, IOrmProvider, object, string> BuildCommandInitializer(Type entityType, Type parameterType)
     {
-        var cacheKey = HashCode.Combine("Create", connection.OrmProvider, string.Empty, entityType, parameterType);
+        var cacheKey = HashCode.Combine("Create", this.connection, string.Empty, entityType, parameterType);
         if (!commandInitializerCache.TryGetValue(cacheKey, out var commandInitializerDelegate))
         {
             int columnIndex = 0;
@@ -466,10 +471,11 @@ class Created<TEntity> : ICreated<TEntity>
             var commandExpr = Expression.Parameter(typeof(IDbCommand), "cmd");
             var ormProviderExpr = Expression.Parameter(typeof(IOrmProvider), "ormProvider");
             var parameterExpr = Expression.Parameter(typeof(object), "parameter");
-            var typedParameterExpr = Expression.Parameter(parameterType, "typedParameter");
 
+            var typedParameterExpr = Expression.Variable(parameterType, "typedParameter");
             var blockParameters = new List<ParameterExpression>();
             var blockBodies = new List<Expression>();
+            var localParameters = new Dictionary<Type, ParameterExpression>();
             blockParameters.Add(typedParameterExpr);
             blockBodies.Add(Expression.Assign(typedParameterExpr, Expression.Convert(parameterExpr, parameterType)));
 
@@ -478,7 +484,8 @@ class Created<TEntity> : ICreated<TEntity>
             foreach (var parameterMemberMapper in parameterMapper.MemberMaps)
             {
                 if (!entityMapper.TryGetMemberMap(parameterMemberMapper.MemberName, out var propMapper)
-                    || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
+                    || propMapper.IsIgnore || propMapper.IsNavigation
+                    || (propMapper.MemberType.IsEntityType() && propMapper.TypeHandler == null))
                     continue;
 
                 if (columnIndex > 0)
@@ -490,7 +497,8 @@ class Created<TEntity> : ICreated<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName;
                 valuesBuilder.Append(parameterName);
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.MemberName, propMapper.NativeDbType, blockBodies);
+
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.IsNullable, propMapper.NativeDbType, propMapper, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
             insertBuilder.Append(')');
@@ -504,7 +512,7 @@ class Created<TEntity> : ICreated<TEntity>
 
             var resultLabelExpr = Expression.Label(typeof(string));
             blockBodies.Add(Expression.Return(resultLabelExpr, returnExpr));
-            blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Constant(null, typeof(string))));
+            blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Default(typeof(string))));
 
             commandInitializerDelegate = Expression.Lambda<Func<IDbCommand, IOrmProvider, object, string>>(Expression.Block(blockParameters, blockBodies), commandExpr, ormProviderExpr, parameterExpr).Compile();
             commandInitializerCache.TryAdd(cacheKey, commandInitializerDelegate);
@@ -513,7 +521,7 @@ class Created<TEntity> : ICreated<TEntity>
     }
     private Action<IDbCommand, IOrmProvider, object> BuildCommandInitializer(string sql, Type entityType, Type parameterType)
     {
-        var cacheKey = HashCode.Combine("Create", connection.OrmProvider, sql, entityType, parameterType);
+        var cacheKey = HashCode.Combine("Create", this.connection, sql, entityType, parameterType);
         if (!commandInitializerCache.TryGetValue(cacheKey, out var commandInitializerDelegate))
         {
             var parameterMapper = this.dbFactory.GetEntityMap(parameterType);
@@ -521,10 +529,11 @@ class Created<TEntity> : ICreated<TEntity>
             var commandExpr = Expression.Parameter(typeof(IDbCommand), "cmd");
             var ormProviderExpr = Expression.Parameter(typeof(IOrmProvider), "ormProvider");
             var parameterExpr = Expression.Parameter(typeof(object), "parameter");
-            var typedParameterExpr = Expression.Parameter(parameterType, "typedParameter");
 
+            var typedParameterExpr = Expression.Variable(parameterType, "typedParameter");
             var blockParameters = new List<ParameterExpression>();
             var blockBodies = new List<Expression>();
+            var localParameters = new Dictionary<Type, ParameterExpression>();
             blockParameters.Add(typedParameterExpr);
             blockBodies.Add(Expression.Assign(typedParameterExpr, Expression.Convert(parameterExpr, parameterType)));
 
@@ -533,8 +542,9 @@ class Created<TEntity> : ICreated<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + parameterMemberMapper.MemberName;
                 if (!Regex.IsMatch(sql, parameterName + @"([^\p{L}\p{N}_]+|$)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant))
                     continue;
+
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.MemberName, null, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.IsNullable, parameterMemberMapper.NativeDbType, parameterMemberMapper, localParameters, blockParameters, blockBodies);
             }
             commandInitializerDelegate = Expression.Lambda<Action<IDbCommand, IOrmProvider, object>>(Expression.Block(blockParameters, blockBodies), commandExpr, ormProviderExpr, parameterExpr).Compile();
             commandInitializerCache.TryAdd(cacheKey, commandInitializerDelegate);
@@ -554,7 +564,8 @@ class Created<TEntity> : ICreated<TEntity>
                 foreach (var item in dict)
                 {
                     if (!entityMapper.TryGetMemberMap(item.Key, out var propMapper)
-                        || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
+                        || propMapper.IsIgnore || propMapper.IsNavigation
+                        || (propMapper.MemberType.IsEntityType() && propMapper.TypeHandler == null))
                         continue;
                     if (columnIndex > 0)
                         builder.Append(',');
@@ -569,7 +580,8 @@ class Created<TEntity> : ICreated<TEntity>
             foreach (var item in dict)
             {
                 if (!entityMapper.TryGetMemberMap(item.Key, out var propMapper)
-                    || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
+                    || propMapper.IsIgnore || propMapper.IsNavigation
+                    || (propMapper.MemberType.IsEntityType() && propMapper.TypeHandler == null))
                     continue;
 
                 if (columnIndex > 0)
@@ -597,7 +609,8 @@ class Created<TEntity> : ICreated<TEntity>
             foreach (var item in dict)
             {
                 if (!entityMapper.TryGetMemberMap(item.Key, out var propMapper)
-                    || propMapper.IsIgnore || propMapper.IsNavigation || propMapper.MemberType.IsEntityType())
+                    || propMapper.IsIgnore || propMapper.IsNavigation
+                    || (propMapper.MemberType.IsEntityType() && propMapper.TypeHandler == null))
                     continue;
 
                 if (index > 0)
@@ -687,16 +700,25 @@ class CreateBase
     public string ToSql(out List<IDbDataParameter> dbParameters)
         => this.visitor.BuildSql(out dbParameters);
 }
-class Create<TEntity, TSource> : CreateBase, ICreate<TEntity, TSource>
+class Create<TEntity, T1> : CreateBase, ICreate<TEntity, T1>
 {
     public Create(CreateVisitor visitor)
         : base(visitor) { }
-    public ICreate<TEntity, TSource> Where(Expression<Func<TSource, bool>> predicate)
+    public ICreate<TEntity, T1> Where(Expression<Func<T1, bool>> predicate)
     {
         if (predicate == null)
             throw new ArgumentNullException(nameof(predicate));
 
         this.visitor.Where(predicate);
+        return this;
+    }
+    public ICreate<TEntity, T1> And(bool condition, Expression<Func<T1, bool>> predicate)
+    {
+        if (predicate == null)
+            throw new ArgumentNullException(nameof(predicate));
+
+        if (condition)
+            this.visitor.And(predicate);
         return this;
     }
 }
@@ -712,6 +734,15 @@ class Create<TEntity, T1, T2> : CreateBase, ICreate<TEntity, T1, T2>
         this.visitor.Where(predicate);
         return this;
     }
+    public ICreate<TEntity, T1, T2> And(bool condition, Expression<Func<T1, T2, bool>> predicate)
+    {
+        if (predicate == null)
+            throw new ArgumentNullException(nameof(predicate));
+
+        if (condition)
+            this.visitor.And(predicate);
+        return this;
+    }
 }
 class Create<TEntity, T1, T2, T3> : CreateBase, ICreate<TEntity, T1, T2, T3>
 {
@@ -723,6 +754,15 @@ class Create<TEntity, T1, T2, T3> : CreateBase, ICreate<TEntity, T1, T2, T3>
             throw new ArgumentNullException(nameof(predicate));
 
         this.visitor.Where(predicate);
+        return this;
+    }
+    public ICreate<TEntity, T1, T2, T3> And(bool condition, Expression<Func<T1, T2, T3, bool>> predicate)
+    {
+        if (predicate == null)
+            throw new ArgumentNullException(nameof(predicate));
+
+        if (condition)
+            this.visitor.And(predicate);
         return this;
     }
 }
@@ -738,6 +778,15 @@ class Create<TEntity, T1, T2, T3, T4> : CreateBase, ICreate<TEntity, T1, T2, T3,
         this.visitor.Where(predicate);
         return this;
     }
+    public ICreate<TEntity, T1, T2, T3, T4> And(bool condition, Expression<Func<T1, T2, T3, T4, bool>> predicate)
+    {
+        if (predicate == null)
+            throw new ArgumentNullException(nameof(predicate));
+
+        if (condition)
+            this.visitor.And(predicate);
+        return this;
+    }
 }
 class Create<TEntity, T1, T2, T3, T4, T5> : CreateBase, ICreate<TEntity, T1, T2, T3, T4, T5>
 {
@@ -749,6 +798,15 @@ class Create<TEntity, T1, T2, T3, T4, T5> : CreateBase, ICreate<TEntity, T1, T2,
             throw new ArgumentNullException(nameof(predicate));
 
         this.visitor.Where(predicate);
+        return this;
+    }
+    public ICreate<TEntity, T1, T2, T3, T4, T5> And(bool condition, Expression<Func<T1, T2, T3, T4, T5, bool>> predicate)
+    {
+        if (predicate == null)
+            throw new ArgumentNullException(nameof(predicate));
+
+        if (condition)
+            this.visitor.And(predicate);
         return this;
     }
 }

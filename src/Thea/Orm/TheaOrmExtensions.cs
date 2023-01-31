@@ -28,19 +28,20 @@ public static class TheaOrmExtensions
 
         initializer.Invoke(new ModelBuilder(dbFactory));
     }
+    public static void AddTypeHandler<TTypeHandler>(this IOrmDbFactory dbFactory) where TTypeHandler : class, ITypeHandler, new()
+        => dbFactory.AddTypeHandler(new TTypeHandler());
+    public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
+        => (T)typeHandler.Parse(ormProvider, typeof(T), value);
+
 
     public static TEntity QueryFirst<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)
-        => repository.From<TEntity>().Where(predicate).First();
+       => repository.From<TEntity>().Where(predicate).First();
     public static async Task<TEntity> QueryFirstAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
         => await repository.From<TEntity>().Where(predicate).FirstAsync(cancellationToken);
     public static List<TEntity> Query<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)
         => repository.From<TEntity>().Where(predicate).ToList();
     public static async Task<List<TEntity>> QueryAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
         => await repository.From<TEntity>().Where(predicate).ToListAsync(cancellationToken);
-    public static IPagedList<TEntity> QueryPage<TEntity>(this IRepository repository, int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate = null)
-        => repository.From<TEntity>().Where(predicate).ToPageList(pageIndex, pageSize);
-    public static async Task<IPagedList<TEntity>> QueryPageAsync<TEntity>(this IRepository repository, int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
-        => await repository.From<TEntity>().Where(predicate).ToPageListAsync(pageIndex, pageSize, cancellationToken);
     public static Dictionary<TKey, TValue> QueryDictionary<TEntity, TKey, TValue>(this IRepository repository, Expression<Func<TEntity, bool>> predicate, Func<TEntity, TKey> keySelector, Func<TEntity, TValue> valueSelector) where TKey : notnull
         => repository.From<TEntity>().Where(predicate).ToDictionary(keySelector, valueSelector);
     public static async Task<Dictionary<TKey, TValue>> QueryDictionaryAsync<TEntity, TKey, TValue>(this IRepository repository, Expression<Func<TEntity, bool>> predicate, Func<TEntity, TKey> keySelector, Func<TEntity, TValue> valueSelector, CancellationToken cancellationToken = default) where TKey : notnull
@@ -80,6 +81,7 @@ public static class TheaOrmExtensions
     public static async Task<int> DeleteAsync<TEntity>(this IRepository repository, object keys, CancellationToken cancellationToken = default)
         => await repository.Delete<TEntity>().Where(keys).ExecuteAsync(cancellationToken);
 
+
     public static bool IsEntityType(this Type type)
     {
         if (type.IsEnum || valueTypes.Contains(type)) return false;
@@ -117,5 +119,11 @@ public static class TheaOrmExtensions
             }
         }
         return true;
+    }
+    public static bool TryPop<T>(this Stack<T> stack, Func<T, bool> filter, out T element)
+    {
+        if (stack.TryPeek(out element) && filter.Invoke(element))
+            return stack.TryPop(out _);
+        return false;
     }
 }

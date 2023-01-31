@@ -13,6 +13,7 @@ namespace Thea.Trolley;
 public static class TrolleyExtensions
 {
     private static readonly ConcurrentDictionary<int, Delegate> typeReaderDeserializerCache = new();
+    private static readonly ConcurrentDictionary<int, Delegate> valueTupleReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> queryReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> readerValueConverterCache = new();
 
@@ -71,13 +72,25 @@ public static class TrolleyExtensions
         parameterName = null;
         return false;
     }
-    public static bool GetParameters(this Expression expr, out List<string> parameterNames)
+    public static bool GetParameters(this Expression expr, out List<ParameterExpression> parameters)
     {
         var visitor = new TestVisitor();
         visitor.Visit(expr);
         if (visitor.IsParameter)
         {
-            parameterNames = visitor.ParameterNames;
+            parameters = visitor.Parameters;
+            return visitor.IsParameter;
+        }
+        parameters = null;
+        return false;
+    }
+    public static bool GetParameterNames(this Expression expr, out List<string> parameterNames)
+    {
+        var visitor = new TestVisitor();
+        visitor.Visit(expr);
+        if (visitor.IsParameter)
+        {
+            parameterNames = visitor.Parameters.Select(f => f.Name).ToList();
             return visitor.IsParameter;
         }
         parameterNames = null;
@@ -96,39 +109,58 @@ public static class TrolleyExtensions
     internal static TEntity To<TEntity>(this IDataReader reader, IOrmDbFactory dbFactory, TheaConnection connection)
     {
         var entityType = typeof(TEntity);
-        var cacheKey = GetReaderKey(entityType, connection, reader);
-        if (!typeReaderDeserializerCache.TryGetValue(cacheKey, out var deserializer))
+        var isValueTuple = entityType.FullName.StartsWith("System.ValueTuple`");
+
+        int cacheKey = 0;
+        ConcurrentDictionary<int, Delegate> deserializerCache = null;
+        if (isValueTuple)
         {
-            deserializer = CreateReaderDeserializer(reader, dbFactory, entityType);
-            typeReaderDeserializerCache.TryAdd(cacheKey, deserializer);
+            cacheKey = GetValueTupleReaderKey(entityType, connection, reader);
+            deserializerCache = valueTupleReaderDeserializerCache;
+        }
+        else
+        {
+            cacheKey = GetTypeReaderKey(entityType, connection, reader);
+            deserializerCache = typeReaderDeserializerCache;
+        }
+        if (!deserializerCache.TryGetValue(cacheKey, out var deserializer))
+        {
+            deserializer = CreateReaderDeserializer(connection, reader, dbFactory, entityType, isValueTuple);
+            deserializerCache.TryAdd(cacheKey, deserializer);
         }
         return ((Func<IDataReader, TEntity>)deserializer).Invoke(reader);
     }
     internal static TEntity To<TEntity>(this IDataReader reader, TheaConnection connection, List<ReaderField> readerFields)
     {
         var entityType = typeof(TEntity);
-        var cacheKey = GetReaderKey(entityType, connection, reader);
+        var cacheKey = GetTypeReaderKey(entityType, connection, reader);
         if (!queryReaderDeserializerCache.TryGetValue(cacheKey, out var deserializer))
         {
-            deserializer = CreateReaderDeserializer(reader, entityType, readerFields);
+            deserializer = CreateReaderDeserializer(connection, reader, entityType, readerFields);
             queryReaderDeserializerCache.TryAdd(cacheKey, deserializer);
         }
         return ((Func<IDataReader, TEntity>)deserializer).Invoke(reader);
     }
-    private static Delegate CreateReaderDeserializer(IDataReader reader, IOrmDbFactory dbFactory, Type entityType)
+    private static Delegate CreateReaderDeserializer(TheaConnection connection, IDataReader reader, IOrmDbFactory dbFactory, Type entityType, bool isValueTuple)
     {
-        var blockBodies = new List<Expression>();
         var readerExpr = Expression.Parameter(typeof(IDataReader), "reader");
+        var ormProviderExpr = Expression.Constant(connection.OrmProvider);
         var entityMapper = dbFactory.GetEntityMap(entityType);
         var index = 0;
         var target = NewBuildInfo(entityType);
-        foreach (var memberMapper in entityMapper.MemberMaps)
+        var blockParameters = new List<ParameterExpression>();
+        var blockBodies = new List<Expression>();
+
+        while (index < reader.FieldCount)
         {
-            if (memberMapper.IsIgnore || memberMapper.IsNavigation || memberMapper.MemberType.IsEntityType())
-                continue;
+            var memberName = isValueTuple ? $"Item{index + 1}" : reader.GetName(index);
+            //使用原始SQL才有可能SQL中的字段名与成员名不一致，或是没有加 AS成员名
+            if (!entityMapper.TryGetMemberMap(memberName, out var memberMapper))
+                throw new Exception($"SQL中字段{memberName}映射不到模型{entityType.FullName}任何栏位,或者没有添加AS子句");
 
             var fieldType = reader.GetFieldType(index);
-            var readerValueExpr = GetReaderValue(readerExpr, Expression.Constant(index), memberMapper.MemberType, fieldType);
+            var readerValueExpr = GetReaderValue(ormProviderExpr, readerExpr, Expression.Constant(index),
+                memberMapper.MemberType, fieldType, memberMapper.TypeHandler, blockParameters, blockBodies);
 
             if (target.IsDefault)
                 target.Bindings.Add(Expression.Bind(memberMapper.Member, readerValueExpr));
@@ -142,12 +174,14 @@ public static class TrolleyExtensions
 
         blockBodies.Add(Expression.Return(resultLabelExpr, returnExpr));
         blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Default(entityType)));
-        return Expression.Lambda(returnExpr, readerExpr).Compile();
+        return Expression.Lambda(Expression.Block(blockParameters, blockBodies), readerExpr).Compile();
     }
-    private static Delegate CreateReaderDeserializer(IDataReader reader, Type entityType, List<ReaderField> readerFields)
+    private static Delegate CreateReaderDeserializer(TheaConnection connection, IDataReader reader, Type entityType, List<ReaderField> readerFields)
     {
+        var blockParameters = new List<ParameterExpression>();
         var blockBodies = new List<Expression>();
         var readerExpr = Expression.Parameter(typeof(IDataReader), "reader");
+        var ormProviderExpr = Expression.Constant(connection.OrmProvider);
 
         int index = 0, readerIndex = 0;
         var root = NewBuildInfo(entityType);
@@ -181,7 +215,8 @@ public static class TrolleyExtensions
                     while (index < endIndex)
                     {
                         var fieldType = reader.GetFieldType(index);
-                        var readerValueExpr = GetReaderValue(readerExpr, Expression.Constant(index), readerFields[index].FromMember.GetMemberType(), fieldType);
+                        var readerValueExpr = GetReaderValue(ormProviderExpr, readerExpr, Expression.Constant(index),
+                            readerFields[index].FromMember.GetMemberType(), fieldType, null, blockParameters, blockBodies);
                         if (current.IsDefault) current.Bindings.Add(Expression.Bind(readerFields[index].FromMember, readerValueExpr));
                         else current.Arguments.Add(readerValueExpr);
                         index++;
@@ -190,13 +225,16 @@ public static class TrolleyExtensions
                 }
                 else
                 {
-                    var memberMappers = readerField.TableSegment.Mapper.MemberMaps;
-                    foreach (var memberMapper in memberMappers)
+                    var entityMapper = readerField.TableSegment.Mapper;
+                    var fieldCount = index + readerField.FieldCount;
+                    while (index < fieldCount)
                     {
-                        if (memberMapper.IsIgnore || memberMapper.IsNavigation || memberMapper.MemberType.IsEntityType())
-                            continue;
+                        var memberName = reader.GetName(index);
+                        if (!entityMapper.TryGetMemberMap(memberName, out var memberMapper))
+                            break;
                         var fieldType = reader.GetFieldType(index);
-                        var readerValueExpr = GetReaderValue(readerExpr, Expression.Constant(index), memberMapper.MemberType, fieldType);
+                        var readerValueExpr = GetReaderValue(ormProviderExpr, readerExpr, Expression.Constant(index),
+                            memberMapper.MemberType, fieldType, memberMapper.TypeHandler, blockParameters, blockBodies);
                         if (current.IsDefault) current.Bindings.Add(Expression.Bind(memberMapper.Member, readerValueExpr));
                         else current.Arguments.Add(readerValueExpr);
                         index++;
@@ -228,7 +266,8 @@ public static class TrolleyExtensions
             else
             {
                 var fieldType = reader.GetFieldType(index);
-                var readerValueExpr = GetReaderValue(readerExpr, Expression.Constant(index), readerField.FromMember.GetMemberType(), fieldType);
+                var readerValueExpr = GetReaderValue(ormProviderExpr, readerExpr, Expression.Constant(index),
+                    readerField.FromMember.GetMemberType(), fieldType, null, blockParameters, blockBodies);
                 if (root.IsDefault) root.Bindings.Add(Expression.Bind(readerField.FromMember, readerValueExpr));
                 else root.Arguments.Add(readerValueExpr);
                 index++;
@@ -243,30 +282,43 @@ public static class TrolleyExtensions
 
         blockBodies.Add(Expression.Return(resultLabelExpr, returnExpr));
         blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Default(entityType)));
-        return Expression.Lambda(returnExpr, readerExpr).Compile();
+        return Expression.Lambda(Expression.Block(blockParameters, blockBodies), readerExpr).Compile();
     }
-    private static Expression GetReaderValue(ParameterExpression readerExpr, Expression indexExpr, Type targetType, Type fieldType)
+    private static Expression GetReaderValue(ParameterExpression readerExpr, Expression indexExpr, Type targetType, Type fieldType, List<ParameterExpression> blockParameters, List<Expression> blockBodies)
+        => GetReaderValue(null, readerExpr, indexExpr, targetType, fieldType, null, blockParameters, blockBodies);
+    private static Expression GetReaderValue(Expression ormProviderExpr, ParameterExpression readerExpr, Expression indexExpr, Type targetType, Type fieldType, ITypeHandler typeHandler, List<ParameterExpression> blockParameters, List<Expression> blockBodies)
     {
         var underlyingType = Nullable.GetUnderlyingType(targetType);
         bool isNullable = underlyingType != null;
         underlyingType ??= targetType;
         var methodInfo = typeof(IDataRecord).GetMethod(nameof(IDataRecord.GetValue), new Type[] { typeof(int) });
-        var valueExpr = Expression.Call(readerExpr, methodInfo, indexExpr);
+        var objLocalExpr = AssignLocalParameter(typeof(object), Expression.Call(readerExpr, methodInfo, indexExpr), blockParameters, blockBodies);
         Expression typedValueExpr = null;
 
+        if (typeHandler != null)
+        {
+            methodInfo = typeof(ITypeHandler).GetMethod(nameof(ITypeHandler.Parse), new Type[] { typeof(IOrmProvider), typeof(Type), typeof(object) });
+            var typeHandlerExpr = Expression.Constant(typeHandler);
+            var typeExpr = Expression.Constant(underlyingType);
+            var objTargetExpr = Expression.Call(typeHandlerExpr, methodInfo, ormProviderExpr, typeExpr, objLocalExpr);
+            blockBodies.Add(Expression.Assign(objLocalExpr, objTargetExpr));
+            typedValueExpr = Expression.Convert(objLocalExpr, targetType);
+            var equalsNullExpr = Expression.Equal(objLocalExpr, Expression.Constant(null));
+            return Expression.Condition(equalsNullExpr, Expression.Default(targetType), typedValueExpr);
+        }
         if (underlyingType.IsAssignableFrom(fieldType))
-            typedValueExpr = Expression.Convert(valueExpr, underlyingType);
+            typedValueExpr = Expression.Convert(objLocalExpr, underlyingType);
         else if (underlyingType == typeof(char))
         {
             if (fieldType == typeof(string))
             {
-                typedValueExpr = Expression.Convert(valueExpr, typeof(string));
-                var lengthExpr = Expression.Property(typedValueExpr, nameof(string.Length));
+                var strLocalExpr = AssignLocalParameter(typeof(string), Expression.Convert(objLocalExpr, typeof(string)), blockParameters, blockBodies);
+                var lengthExpr = Expression.Property(strLocalExpr, nameof(string.Length));
                 var compareExpr = Expression.GreaterThan(lengthExpr, Expression.Constant(0, typeof(int)));
                 methodInfo = typeof(string).GetProperties(BindingFlags.Instance | BindingFlags.Public)
                     .Where(p => p.GetIndexParameters().Length > 0 && p.GetIndexParameters()[0].ParameterType == typeof(int))
                     .Select(p => p.GetGetMethod()).First();
-                var getCharExpr = Expression.Call(typedValueExpr, methodInfo, Expression.Constant(0, typeof(int)));
+                var getCharExpr = Expression.Call(strLocalExpr, methodInfo, Expression.Constant(0, typeof(int)));
                 typedValueExpr = Expression.IfThenElse(compareExpr, getCharExpr, Expression.Default(underlyingType));
             }
             else throw new Exception($"暂时不支持的类型,FieldType:{fieldType.FullName},TargetType:{targetType.FullName}");
@@ -275,12 +327,12 @@ public static class TrolleyExtensions
         {
             if (fieldType != typeof(string) && fieldType != typeof(byte[]))
                 throw new Exception($"暂时不支持的类型,FieldType:{fieldType.FullName},TargetType:{targetType.FullName}");
-            typedValueExpr = Expression.New(typeof(Guid).GetConstructor(new Type[] { fieldType }), Expression.Convert(valueExpr, fieldType));
+            typedValueExpr = Expression.New(typeof(Guid).GetConstructor(new Type[] { fieldType }), Expression.Convert(objLocalExpr, fieldType));
         }
         else if (targetType.FullName == "System.Data.Linq.Binary")
         {
             methodInfo = typeof(Activator).GetMethod(nameof(Activator.CreateInstance), new Type[] { typeof(Type), typeof(object[]) });
-            typedValueExpr = Expression.Call(methodInfo, Expression.Constant(targetType), Expression.Constant(new object[] { valueExpr }));
+            typedValueExpr = Expression.Call(methodInfo, Expression.Constant(targetType), Expression.Constant(new object[] { objLocalExpr }));
             typedValueExpr = Expression.Convert(typedValueExpr, targetType);
         }
         else
@@ -289,7 +341,7 @@ public static class TrolleyExtensions
             {
                 if (fieldType == typeof(string))
                 {
-                    typedValueExpr = Expression.Convert(valueExpr, typeof(string));
+                    typedValueExpr = Expression.Convert(objLocalExpr, typeof(string));
                     methodInfo = typeof(Enum).GetMethod(nameof(Enum.Parse), new Type[] { typeof(Type), typeof(string), typeof(bool) });
                     var toEnumExpr = Expression.Call(methodInfo, Expression.Constant(underlyingType), typedValueExpr, Expression.Constant(true));
                     typedValueExpr = Expression.Convert(toEnumExpr, underlyingType);
@@ -298,7 +350,7 @@ public static class TrolleyExtensions
                     || fieldType == typeof(ushort) || fieldType == typeof(int) || fieldType == typeof(uint)
                     || fieldType == typeof(long) || fieldType == typeof(ulong))
                 {
-                    typedValueExpr = Expression.Convert(valueExpr, fieldType);
+                    typedValueExpr = Expression.Convert(objLocalExpr, fieldType);
                     methodInfo = typeof(Enum).GetMethod(nameof(Enum.ToObject), new Type[] { typeof(Type), fieldType });
                     var toEnumExpr = Expression.Call(methodInfo, Expression.Constant(underlyingType), typedValueExpr);
                     typedValueExpr = Expression.Convert(toEnumExpr, underlyingType);
@@ -330,14 +382,15 @@ public static class TrolleyExtensions
                 if (!string.IsNullOrEmpty(toTypeMethod))
                 {
                     methodInfo = typeof(Convert).GetMethod(toTypeMethod, new Type[] { typeof(object), typeof(IFormatProvider) });
-                    typedValueExpr = Expression.Call(methodInfo, valueExpr, Expression.Constant(CultureInfo.CurrentCulture));
+                    typedValueExpr = Expression.Call(methodInfo, objLocalExpr, Expression.Constant(CultureInfo.CurrentCulture));
                 }
-                else typedValueExpr = Expression.Convert(Expression.Convert(valueExpr, fieldType), underlyingType);
+                else typedValueExpr = Expression.Convert(Expression.Convert(objLocalExpr, fieldType), underlyingType);
             }
         }
         if (underlyingType.IsValueType && isNullable)
             typedValueExpr = Expression.Convert(typedValueExpr, targetType);
-        var isNullExpr = Expression.TypeIs(valueExpr, typeof(DBNull));
+
+        var isNullExpr = Expression.TypeIs(objLocalExpr, typeof(DBNull));
         return Expression.Condition(isNullExpr, Expression.Default(targetType), typedValueExpr);
     }
     private static EntityBuildInfo NewBuildInfo(Type targetType, MemberInfo fromMember = null, EntityBuildInfo parent = null)
@@ -369,25 +422,46 @@ public static class TrolleyExtensions
     }
     private static Delegate CreateReaderValueConverter(Type targetType, Type fieldType)
     {
+        var blockParameters = new List<ParameterExpression>();
         var blockBodies = new List<Expression>();
         var readerExpr = Expression.Parameter(typeof(IDataReader), "reader");
         var indexExpr = Expression.Parameter(typeof(int), "index");
+
         var resultLabelExpr = Expression.Label(targetType);
-        var bodyExpr = GetReaderValue(readerExpr, indexExpr, targetType, fieldType);
-        blockBodies.Add(Expression.Return(resultLabelExpr, bodyExpr));
+        var readerValueExpr = GetReaderValue(readerExpr, indexExpr, targetType, fieldType, blockParameters, blockBodies);
+        blockBodies.Add(Expression.Return(resultLabelExpr, readerValueExpr));
         blockBodies.Add(Expression.Label(resultLabelExpr, Expression.Default(targetType)));
-        return Expression.Lambda(Expression.Block(blockBodies), readerExpr, indexExpr).Compile();
+        return Expression.Lambda(Expression.Block(blockParameters, blockBodies), readerExpr, indexExpr).Compile();
     }
-    private static int GetReaderKey(Type entityType, TheaConnection connection, IDataReader reader)
+    private static ParameterExpression AssignLocalParameter(Type type, Expression valueExpr, List<ParameterExpression> blockParameters, List<Expression> blockBodies)
+    {
+        var objLocalExpr = Expression.Variable(type, $"local{blockParameters.Count}");
+        blockParameters.Add(objLocalExpr);
+        blockBodies.Add(Expression.Assign(objLocalExpr, valueExpr));
+        return objLocalExpr;
+    }
+    private static int GetTypeReaderKey(Type entityType, TheaConnection connection, IDataReader reader)
     {
         var hashCode = new HashCode();
-        hashCode.Add(entityType);
         hashCode.Add(connection);
-        hashCode.Add(connection.OrmProvider);
+        hashCode.Add(entityType);
         hashCode.Add(reader.FieldCount);
         for (int i = 0; i < reader.FieldCount; i++)
         {
             hashCode.Add(reader.GetName(i));
+        }
+        return hashCode.ToHashCode();
+    }
+    private static int GetValueTupleReaderKey(Type entityType, TheaConnection connection, IDataReader reader)
+    {
+        var hashCode = new HashCode();
+        hashCode.Add(connection);
+        hashCode.Add(entityType);
+        hashCode.Add(reader.FieldCount);
+        for (int i = 0; i < reader.FieldCount; i++)
+        {
+            hashCode.Add(reader.GetName(i));
+            hashCode.Add(reader.GetFieldType(i));
         }
         return hashCode.ToHashCode();
     }

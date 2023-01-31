@@ -72,9 +72,19 @@ class CreateVisitor : SqlVisitor
     }
     public CreateVisitor Where(Expression whereExpr)
     {
+        this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
         this.InitTableAlias(lambdaExpr);
         this.whereSql = " WHERE " + this.VisitConditionExpr(lambdaExpr.Body);
+        this.isWhere = false;
+        return this;
+    }
+    public CreateVisitor And(Expression whereExpr)
+    {
+        this.isWhere = true;
+        var lambdaExpr = whereExpr as LambdaExpression;
+        this.whereSql += " AND " + this.VisitConditionExpr(lambdaExpr.Body);
+        this.isWhere = false;
         return this;
     }
     public override SqlSegment VisitMemberAccess(SqlSegment sqlSegment)
@@ -101,7 +111,7 @@ class CreateVisitor : SqlVisitor
             }
 
             //各种类型值的属性访问，如：DateTime,TimeSpan,String.Length,List.Count,
-            if (this.ormProvider.TryGetMemberAccessSqlFormatter(memberExpr.Member, out formatter))
+            if (this.ormProvider.TryGetMemberAccessSqlFormatter(sqlSegment, memberExpr.Member, out formatter))
             {
                 //Where(f=>... && f.OrderNo.Length==10 && ...)
                 //Where(f=>... && f.Order.OrderNo.Length==10 && ...)
@@ -124,19 +134,16 @@ class CreateVisitor : SqlVisitor
                 var tableSegment = this.tableAlias[parameterName];
                 tableSegment.Mapper ??= this.dbFactory.GetEntityMap(tableSegment.EntityType);
                 var memberMapper = tableSegment.Mapper.GetMemberMap(memberExpr.Member.Name);
+
+                if (memberMapper.IsIgnore)
+                    throw new Exception($"类{tableSegment.EntityType.FullName}的成员{memberMapper.MemberName}是忽略成员无法访问");
+                if (memberMapper.MemberType.IsEntityType() && !memberMapper.IsNavigation && memberMapper.TypeHandler == null)
+                    throw new Exception($"类{tableSegment.EntityType.FullName}的成员{memberExpr.Member.Name}不是值类型，未配置为导航属性也没有配置TypeHandler");
+
                 var fieldName = this.ormProvider.GetFieldName(memberMapper.FieldName);
                 //都需要带有别名
                 fieldName = tableSegment.AliasName + "." + fieldName;
 
-                if (sqlSegment.HasDeferred)
-                {
-                    sqlSegment.HasField = true;
-                    sqlSegment.IsConstantValue = false;
-                    sqlSegment.TableSegment = tableSegment;
-                    sqlSegment.FromMember = memberMapper.Member;
-                    sqlSegment.Value = fieldName;
-                    return this.VisitBooleanDeferred(sqlSegment);
-                }
                 sqlSegment.HasField = true;
                 sqlSegment.IsConstantValue = false;
                 sqlSegment.TableSegment = tableSegment;
@@ -150,7 +157,7 @@ class CreateVisitor : SqlVisitor
             return SqlSegment.Null;
 
         //各种类型的常量或是静态成员访问，如：DateTime.Now,int.MaxValue,string.Empty
-        if (this.ormProvider.TryGetMemberAccessSqlFormatter(memberExpr.Member, out formatter))
+        if (this.ormProvider.TryGetMemberAccessSqlFormatter(sqlSegment, memberExpr.Member, out formatter))
             return sqlSegment.Change(formatter(null), false);
 
         //访问局部变量或是成员变量，当作常量处理,直接计算，如果是字符串变成参数@p
@@ -201,6 +208,9 @@ class CreateVisitor : SqlVisitor
     private void InitTableAlias(LambdaExpression lambdaExpr)
     {
         this.tableAlias.Clear();
+        lambdaExpr.Body.GetParameterNames(out var parameters);
+        if (parameters == null || parameters.Count == 0)
+            return;
         for (int i = 0; i < lambdaExpr.Parameters.Count; i++)
         {
             var parameterExpr = lambdaExpr.Parameters[i];
@@ -230,9 +240,14 @@ class CreateVisitor : SqlVisitor
                 if (!sqlSegment.IsParameter)
                 {
                     this.dbParameters ??= new();
+                    IDbDataParameter dbParameter = null;
                     if (memberMapper.NativeDbType.HasValue)
-                        this.dbParameters.Add(ormProvider.CreateParameter(parameterName, memberMapper.NativeDbType.Value, sqlSegment.Value));
-                    else this.dbParameters.Add(ormProvider.CreateParameter(parameterName, sqlSegment.Value));
+                        dbParameter = this.ormProvider.CreateParameter(parameterName, memberMapper.NativeDbType.Value, sqlSegment.Value);
+                    else dbParameter = this.ormProvider.CreateParameter(parameterName, sqlSegment.Value);
+
+                    if (memberMapper.TypeHandler != null)
+                        memberMapper.TypeHandler.SetValue(this.ormProvider, dbParameter, sqlSegment.Value);
+                    this.dbParameters.Add(dbParameter);
                     sqlSegment.IsParameter = true;
                     sqlSegment.IsConstantValue = false;
                 }

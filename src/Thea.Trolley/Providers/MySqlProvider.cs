@@ -21,17 +21,8 @@ public class MySqlProvider : BaseOrmProvider
 
     public override DatabaseType DatabaseType => DatabaseType.MySql;
     public override string SelectIdentitySql => " RETURNING {0}";
-
-    public MySqlProvider()
+    static MySqlProvider()
     {
-        var connectionType = Type.GetType("MySqlConnector.MySqlConnection, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
-        createNativeConnectonDelegate = base.CreateConnectionDelegate(connectionType);
-        var dbTypeType = Type.GetType("MySqlConnector.MySqlDbType, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
-        var dbParameterType = Type.GetType("MySqlConnector.MySqlParameter, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
-        var dbTypePropertyInfo = dbParameterType.GetProperty("MySqlDbType");
-        createDefaultNativeParameterDelegate = base.CreateDefaultParameterDelegate(dbParameterType);
-        createNativeParameterDelegate = base.CreateParameterDelegate(dbTypeType, dbParameterType, dbTypePropertyInfo);
-
         nativeDbTypes[typeof(bool)] = -1;
         nativeDbTypes[typeof(sbyte)] = 1;
         nativeDbTypes[typeof(short)] = 2;
@@ -92,6 +83,16 @@ public class MySqlProvider : BaseOrmProvider
         castTos[typeof(ulong?)] = "UNSIGNED";
         castTos[typeof(decimal?)] = "DECIMAL(36,18)";
         castTos[typeof(DateTime?)] = "DATETIME";
+    }
+    public MySqlProvider()
+    {
+        var connectionType = Type.GetType("MySqlConnector.MySqlConnection, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
+        createNativeConnectonDelegate = base.CreateConnectionDelegate(connectionType);
+        var dbTypeType = Type.GetType("MySqlConnector.MySqlDbType, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
+        var dbParameterType = Type.GetType("MySqlConnector.MySqlParameter, MySqlConnector, Version=2.0.0.0, Culture=neutral, PublicKeyToken=d33d3e53aa5f8c92");
+        var dbTypePropertyInfo = dbParameterType.GetProperty("MySqlDbType");
+        createDefaultNativeParameterDelegate = base.CreateDefaultParameterDelegate(dbParameterType);
+        createNativeParameterDelegate = base.CreateParameterDelegate(dbTypeType, dbParameterType, dbTypePropertyInfo);
 
         memberAccessSqlFormatterCahe.TryAdd(typeof(string).GetMember(nameof(string.Empty))[0], target => "''");
         memberAccessSqlFormatterCahe.TryAdd(typeof(string).GetProperty(nameof(string.Length)), target => $"CHAR_LENGTH({this.GetQuotedValue(target)})");
@@ -151,9 +152,9 @@ public class MySqlProvider : BaseOrmProvider
             return dbType;
         return type.ToString().ToLower();
     }
-    public override bool TryGetMemberAccessSqlFormatter(MemberInfo memberInfo, out MemberAccessSqlFormatter formatter)
+    public override bool TryGetMemberAccessSqlFormatter(SqlSegment originalSegment, MemberInfo memberInfo, out MemberAccessSqlFormatter formatter)
         => memberAccessSqlFormatterCahe.TryGetValue(memberInfo, out formatter);
-    public override bool TryGetMethodCallSqlFormatter(MethodInfo methodInfo, out MethodCallSqlFormatter formatter)
+    public override bool TryGetMethodCallSqlFormatter(SqlSegment originalSegment, MethodInfo methodInfo, out MethodCallSqlFormatter formatter)
     {
         if (!methodCallSqlFormatterCahe.TryGetValue(methodInfo, out formatter))
         {
@@ -165,7 +166,7 @@ public class MySqlProvider : BaseOrmProvider
                     //public static bool Contains<TSource>(this IEnumerable<TSource> source, TSource value);
                     //public static bool Contains<TSource>(this IEnumerable<TSource> source, TSource value, IEqualityComparer<TSource>? comparer);
                     if (methodInfo.IsStatic && parameterInfos.Length >= 2 && parameterInfos[0].ParameterType.GenericTypeArguments.Length > 0
-                        && parameterInfos[0].ParameterType.IsAssignableFrom(typeof(IEnumerable<>).MakeGenericType(parameterInfos[0].ParameterType.GenericTypeArguments[0])))
+                        && typeof(IEnumerable<>).MakeGenericType(parameterInfos[0].ParameterType.GenericTypeArguments[0]).IsAssignableFrom(parameterInfos[0].ParameterType))
                     {
                         //数组调用
                         methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
@@ -209,7 +210,7 @@ public class MySqlProvider : BaseOrmProvider
                     //IEnumerable<T>,List<T>
                     //public bool Contains(T item);
                     if (!methodInfo.IsStatic && parameterInfos.Length == 1 && methodInfo.DeclaringType.GenericTypeArguments.Length > 0
-                        && methodInfo.DeclaringType.IsAssignableFrom(typeof(IEnumerable<>).MakeGenericType(methodInfo.DeclaringType.GenericTypeArguments[0])))
+                        && typeof(IEnumerable<>).MakeGenericType(methodInfo.DeclaringType.GenericTypeArguments[0]).IsAssignableFrom(methodInfo.DeclaringType))
                     {
                         methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
@@ -225,13 +226,6 @@ public class MySqlProvider : BaseOrmProvider
                                     builder.Append(',');
                                 //目前数组元素是原来的值，没有SqlSegment包装
                                 builder.Append(this.GetQuotedValue(element));
-                            }
-
-                            foreach (var element in enumerable)
-                            {
-                                if (builder.Length > 0)
-                                    builder.Append(',');
-                                builder.Append(element);
                             }
                             var fieldName = this.GetQuotedValue(args[0]);
                             int notIndex = 0;
@@ -260,7 +254,7 @@ public class MySqlProvider : BaseOrmProvider
                     //public bool Contains(char value, StringComparison comparisonType);
                     //public bool Contains(String value);
                     //public bool Contains(String value, StringComparison comparisonType);
-                    if (!methodInfo.IsStatic && parameterInfos.Length >= 1 && methodInfo.DeclaringType.IsAssignableFrom(typeof(string)))
+                    if (!methodInfo.IsStatic && parameterInfos.Length >= 1 && typeof(string).IsAssignableFrom(methodInfo.DeclaringType))
                     {
                         methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
@@ -282,141 +276,210 @@ public class MySqlProvider : BaseOrmProvider
                     }
                     break;
                 case "Concat":
-                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
+                    //public static String Concat(IEnumerable<String?> values);
+                    //public static String Concat(params String?[] values);
+                    //public static String Concat<T>(IEnumerable<T> values);
+                    //public static String Concat(params object?[] args);
+                    //public static String Concat(object? arg0);
+                    //public static String Concat(object? arg0, object? arg1, object? arg2);
+                    //public static String Concat(String? str0, String? str1, String? str2, String? str3);
+                    //public static String Concat(ReadOnlySpan<char> str0, ReadOnlySpan<char> str1, ReadOnlySpan<char> str2, ReadOnlySpan<char> str3);
+                    //public static IEnumerable<TSource> Concat<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second);
+                    //TODO:测试一下IEnumerable<TSource> Concat<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second)
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                     {
-                        //public static String Concat(IEnumerable<String?> values);
-                        //public static String Concat(params String?[] values);
-                        //public static String Concat<T>(IEnumerable<T> values);
-                        //public static String Concat(params object?[] args);
-                        //public static String Concat(object? arg0);
-                        //public static String Concat(object? arg0, object? arg1, object? arg2);
-                        //public static String Concat(String? str0, String? str1, String? str2, String? str3);
-                        //public static String Concat(ReadOnlySpan<char> str0, ReadOnlySpan<char> str1, ReadOnlySpan<char> str2, ReadOnlySpan<char> str3);
-                        //public static IEnumerable<TSource> Concat<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second);
-                        //TODO:测试一下IEnumerable<TSource> Concat<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second)
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                        var builder = new StringBuilder();
+                        foreach (var arg in args)
                         {
-                            var builder = new StringBuilder();
-                            foreach (var arg in args)
+                            if (arg is IEnumerable enumerable && arg is not string)
                             {
-                                if (arg is IEnumerable enumerable && arg is not string)
-                                {
-                                    foreach (var element in enumerable)
-                                    {
-                                        if (builder.Length > 0)
-                                            builder.Append(',');
-                                        builder.Append(this.GetQuotedValue(element));
-                                    }
-                                }
-                                else
+                                foreach (var element in enumerable)
                                 {
                                     if (builder.Length > 0)
                                         builder.Append(',');
-                                    builder.Append(this.GetQuotedValue(arg));
+
+                                    if (element is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                                        builder.Append(sqlSegment);
+                                    else builder.Append(this.GetQuotedValue(typeof(string), element));
                                 }
                             }
-                            if (builder.Length > 0)
+                            else
                             {
-                                builder.Insert(0, "CONCAT(");
-                                builder.Append(')');
+                                if (builder.Length > 0)
+                                    builder.Append(',');
+                                builder.Append(this.GetQuotedValue(arg));
                             }
-                            return builder.ToString();
-                        });
-                        result = true;
-                    }
+                        }
+                        if (builder.Length > 0)
+                        {
+                            builder.Insert(0, "CONCAT(");
+                            builder.Append(')');
+                        }
+                        return builder.ToString();
+                    });
+                    result = true;
                     break;
                 case "Format":
-                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
+                    //public static String Format(String format, object? arg0);
+                    //public static String Format(String format, object? arg0, object? arg1); 
+                    //public static String Format(String format, object? arg0, object? arg1, object? arg2); 
+                    //public static String Format(String format, params object?[] args);
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                     {
-                        //public static String Format(String format, object? arg0);
-                        //public static String Format(String format, object? arg0, object? arg1); 
-                        //public static String Format(String format, object? arg0, object? arg1, object? arg2); 
-                        //public static String Format(String format, params object?[] args);
-                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                        var parameters = new List<object>(args);
+                        parameters.RemoveAt(0);
+                        var result = args[0].ToString();
+                        var concatIndices = new List<int>();
+                        var count = parameters.Count;
+                        for (int i = 0; i < count; i++)
                         {
-                            var parameters = new List<object>(args);
-                            parameters.RemoveAt(0);
-                            //直接计算
-                            return string.Format(args[0] as string, parameters.ToArray());
-                        });
-                        result = true;
-                    }
+                            if (parameters[i] is SqlSegment sqlSegment && sqlSegment.IsConstantValue)
+                            {
+                                string strValue = null;
+                                if (sqlSegment != SqlSegment.Null)
+                                {
+                                    if (sqlSegment.Value is IEnumerable enumerable && sqlSegment.Value is not string)
+                                    {
+                                        parameters.RemoveAt(i);
+                                        int eleIndex = 0;
+                                        foreach (var element in enumerable)
+                                        {
+                                            if (element is SqlSegment eleSegment && eleSegment.IsConstantValue)
+                                            {
+                                                strValue = eleSegment.ToString();
+                                                result = result.Replace("{" + eleIndex + "}", strValue);
+                                            }
+                                            else concatIndices.Add(eleIndex);
+                                            parameters.Add(element);
+                                            eleIndex++;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        strValue = this.GetQuotedValue(sqlSegment);
+                                        result = result.Replace("{" + i + "}", strValue);
+                                    }
+                                }
+                            }
+                            else concatIndices.Add(i);
+                        }
+                        if (concatIndices.Count > 0)
+                        {
+                            int index = 0;
+                            int lastIndex = 0;
+                            var concatParameters = new List<object>();
+                            var formatSpan = result.AsSpan();
+                            foreach (var concatIndex in concatIndices)
+                            {
+                                index = formatSpan.IndexOf('{');
+                                if (index > 0)
+                                {
+                                    var concatParameter = formatSpan.Slice(0, index);
+                                    concatParameters.Add(concatParameter.ToString());
+                                }
+                                concatParameters.Add(parameters[concatIndex]);
+                                lastIndex = formatSpan.IndexOf('}') + 1;
+                                formatSpan = formatSpan.Slice(lastIndex);
+                            }
+                            if (formatSpan.Length > 0)
+                                concatParameters.Add(formatSpan.ToString());
+
+                            var methodInfo = typeof(string).GetMethod(nameof(string.Concat), new Type[] { typeof(string).MakeArrayType() });
+                            this.TryGetMethodCallSqlFormatter(originalSegment, methodInfo, out var concatFormater);
+                            result = concatFormater.Invoke(null, null, concatParameters);
+                        }
+                        return result;
+                    });
+                    result = true;
                     break;
                 case "Compare":
-                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
-                    {
-                        //String.Compare  不区分大小写
-                        //public static int Compare(String? strA, String? strB);
-                        //public static int Compare(String? strA, String? strB, bool ignoreCase);
-                        //public static int Compare(String? strA, String? strB, bool ignoreCase, CultureInfo? culture);
-                        if (parameterInfos.Length >= 2 && parameterInfos.Length <= 4)
-                        {
-                            methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
-                            {
-                                var leftArgument = this.GetQuotedValue(args[0]);
-                                var rightArgument = this.GetQuotedValue(args[1]);
-                                return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
-                            });
-                            result = true;
-                        }
-                    }
-                    break;
                 case "CompareOrdinal":
-                    if (methodInfo.IsStatic && methodInfo.DeclaringType == typeof(string))
+                    //String.Compare  不区分大小写
+                    //public static int Compare(String? strA, String? strB);
+                    //public static int Compare(String? strA, String? strB, bool ignoreCase);
+                    //public static int Compare(String? strA, String? strB, bool ignoreCase, CultureInfo? culture);
+                    if (parameterInfos.Length >= 2)
                     {
-                        //public static int CompareOrdinal(String? strA, String? strB);
-                        if (parameterInfos.Length == 2)
-                        {
-                            methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
-                            {
-                                var leftArgument = this.GetQuotedValue(args[0]);
-                                var rightArgument = this.GetQuotedValue(args[1]);
-                                return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
-                            });
-                            result = true;
-                        }
-                    }
-                    break;
-                case "CompareTo":
-                    if (!methodCallSqlFormatterCahe.TryGetValue(methodInfo, out formatter))
-                    {
-                        //各种类型都有CompareTo方法
-                        //public int CompareTo(Boolean value);
-                        //public int CompareTo(Int32 value);
-                        //public int CompareTo(Double value);
-                        //public int CompareTo(DateTime value);
-                        //public int CompareTo(object? value);
                         methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                         {
-                            var leftArgument = this.GetQuotedValue(target);
-                            var rightArgument = this.GetQuotedValue(args[0]);
+                            var leftArgument = this.GetQuotedValue(args[0]);
+                            var rightArgument = this.GetQuotedValue(args[1]);
                             return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
                         });
                         result = true;
                     }
                     break;
+                case "CompareTo":
+                    //各种类型都有CompareTo方法
+                    //public int CompareTo(Boolean value);
+                    //public int CompareTo(Int32 value);
+                    //public int CompareTo(Double value);
+                    //public int CompareTo(DateTime value);
+                    //public int CompareTo(object? value);                       
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
+                    {
+                        var leftArgument = this.GetQuotedValue(target);
+                        var rightArgument = this.GetQuotedValue(args[0]);
+                        return $"(CASE WHEN {leftArgument}={rightArgument} THEN 0 WHEN {leftArgument}>{rightArgument} THEN 1 ELSE -1 END)";
+                    });
+                    result = true;
+                    break;
                 case "Trim":
-                    formatter = (target, deferExprs, args) => $"ltrim(rtrim({target}))";
-                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
-                    result = true;
+                    if (parameterInfos.Length == 0)
+                    {
+                        formatter = (target, deferExprs, args) =>
+                        {
+                            if (target is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                                return $"LTRIM(RTRIM({target}))";
+                            else return $"LTRIM(RTRIM('{target}'))";
+                        };
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                        result = true;
+                    }
                     break;
-                case "LTrim":
-                    formatter = (target, deferExprs, args) => $"ltrim({target})";
-                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
-                    result = true;
+                case "TrimStart":
+                    if (parameterInfos.Length == 0)
+                    {
+                        formatter = (target, deferExprs, args) =>
+                        {
+                            if (target is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                                return $"LTRIM({target})";
+                            else return $"LTRIM('{target}')";
+                        };
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                        result = true;
+                    }
                     break;
-                case "RTrim":
-                    formatter = (target, deferExprs, args) => $"rtrim({target})";
-                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
-                    result = true;
+                case "TrimEnd":
+                    if (parameterInfos.Length == 0)
+                    {
+                        formatter = (target, deferExprs, args) =>
+                        {
+                            if (target is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                                return $"RTRIM({target})";
+                            else return $"RTRIM('{target}')";
+                        };
+                        methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                        result = true;
+                    }
                     break;
                 case "ToUpper":
-                    formatter = (target, deferExprs, args) => $"upper({target})";
+                    formatter = (target, deferExprs, args) =>
+                    {
+                        if (target is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                            return $"UPPER({target})";
+                        else return $"UPPER('{target}')";
+                    };
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
                 case "ToLower":
-                    formatter = (target, deferExprs, args) => $"lower({target})";
+                    formatter = (target, deferExprs, args) =>
+                    {
+                        if (target is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                            return $"LOWER({target})";
+                        else return $"LOWER('{target}')";
+                    };
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
@@ -507,7 +570,7 @@ public class MySqlProvider : BaseOrmProvider
                     break;
                 case "Parse":
                 case "TryParse":
-                    formatter = (target, deferExprs, args) => $"CAST({args[0]} AS {this.CastTo(methodInfo.DeclaringType)})";
+                    formatter = (target, deferExprs, args) => $"CAST('{args[0]}' AS {this.CastTo(methodInfo.DeclaringType)})";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
                     break;
@@ -673,6 +736,84 @@ public class MySqlProvider : BaseOrmProvider
                     formatter = (target, deferExprs, args) => $"TRUNCATE({args[0]}, 0)";
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
                     result = true;
+                    break;
+
+                //DateTime方法
+                case "DaysInMonth":
+                    formatter = (target, deferExprs, args) => $"DAYOFMONTH(LAST_DAY(CONCAT({args[0]},'-',{args[1]},'-01')))";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "IsLeapYear":
+                    formatter = (target, deferExprs, args) => $"(({args[0]})%4=0 AND ({args[0]})%100<>0 OR ({args[0]})%400=0)"; ;
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "ParseExact":
+                case "TryParseExact":
+                    formatter = (target, deferExprs, args) => $"CAST({args[0]} AS {this.CastTo(methodInfo.DeclaringType)})";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "Add":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) MICROSECOND)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddDays":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) DAY)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddHours":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) HOUR)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddMilliseconds":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]})*1000 MICROSECOND)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddMinutes":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) MINUTE)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddMonths":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) MONTH)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddSeconds":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) SECOND)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddTicks":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]})/10 MICROSECOND)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "AddYears":
+                    formatter = (target, deferExprs, args) => $"DATE_ADD({args[0]},INTERVAL({args[1]}) YEAR)";
+                    methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                    result = true;
+                    break;
+                case "Subtract":
+                    switch (originalSegment.Expression.Type.FullName)
+                    {
+                        case "System.DateTime":
+                            formatter = (target, deferExprs, args) => $"TIMESTAMPDIFF(MICROSECOND,{args[1]},{args[0]})";
+                            methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                            result = true;
+                            break;
+                        case "System.TimeSpan":
+                            formatter = (target, deferExprs, args) => $"DATE_SUB({args[0]},INTERVAL({args[1]}) MICROSECOND)";
+                            methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter);
+                            result = true;
+                            break;
+                    }
                     break;
                 default: formatter = null; result = false; break;
             }

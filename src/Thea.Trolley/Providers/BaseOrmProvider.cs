@@ -31,25 +31,23 @@ public abstract class BaseOrmProvider : IOrmProvider
     }
     public abstract int GetNativeDbType(Type type);
     public abstract string CastTo(Type type);
-    public virtual string GetQuotedValue(Type fieldType, object value)
+    public virtual string GetQuotedValue(Type expectType, object value)
     {
-        if (fieldType == typeof(bool))
+        if (expectType == typeof(bool))
             return (bool)value ? "1" : "0";
-        if (fieldType == typeof(string))
+        if (expectType == typeof(string))
             return "'" + value.ToString().Replace("\\", "\\\\").Replace("'", @"\'") + "'";
-        if (fieldType == typeof(DateTime))
+        if (expectType == typeof(DateTime))
             return $"'{value:yyyy-MM-dd HH:mm:ss}'";
         if (value is SqlSegment sqlSegment)
         {
-            if (!sqlSegment.IsConstantValue)
+            if (sqlSegment == SqlSegment.Null || !sqlSegment.IsConstantValue)
                 return sqlSegment.Value.ToString();
             return this.GetQuotedValue(sqlSegment.Value);
         }
         return value.ToString();
     }
-    public abstract bool TryGetMemberAccessSqlFormatter(MemberInfo memberInfo, out MemberAccessSqlFormatter formatter);
-    public abstract bool TryGetMethodCallSqlFormatter(MethodInfo methodInfo, out MethodCallSqlFormatter formatter);
-    protected virtual CreateNativeDbConnectionDelegate CreateConnectionDelegate(Type connectionType)
+    public virtual CreateNativeDbConnectionDelegate CreateConnectionDelegate(Type connectionType)
     {
         var constructor = connectionType.GetConstructor(new Type[] { typeof(string) });
         var connStringExpr = Expression.Parameter(typeof(string), "connectionString");
@@ -58,7 +56,7 @@ public abstract class BaseOrmProvider : IOrmProvider
              Expression.Convert(instanceExpr, typeof(IDbConnection))
              , connStringExpr).Compile();
     }
-    protected virtual CreateDefaultNativeParameterDelegate CreateDefaultParameterDelegate(Type dbParameterType)
+    public virtual CreateDefaultNativeParameterDelegate CreateDefaultParameterDelegate(Type dbParameterType)
     {
         var constructor = dbParameterType.GetConstructor(new Type[] { typeof(string), typeof(object) });
         var parametersExpr = new ParameterExpression[] {
@@ -68,7 +66,7 @@ public abstract class BaseOrmProvider : IOrmProvider
         var convertExpr = Expression.Convert(instanceExpr, typeof(IDbDataParameter));
         return Expression.Lambda<CreateDefaultNativeParameterDelegate>(convertExpr, parametersExpr).Compile();
     }
-    protected virtual CreateNativeParameterDelegate CreateParameterDelegate(Type dbTypeType, Type dbParameterType, PropertyInfo dbTypePropertyInfo)
+    public virtual CreateNativeParameterDelegate CreateParameterDelegate(Type dbTypeType, Type dbParameterType, PropertyInfo dbTypePropertyInfo)
     {
         var constructor = dbParameterType.GetConstructor(new Type[] { typeof(string), typeof(object) });
         var parametersExpr = new ParameterExpression[] {
@@ -86,4 +84,31 @@ public abstract class BaseOrmProvider : IOrmProvider
                 Expression.Label(returnLabel, Expression.Default(typeof(IDbDataParameter))))
             , parametersExpr).Compile();
     }
+    public virtual string GetBinaryOperator(ExpressionType nodeType) =>
+       nodeType switch
+       {
+           ExpressionType.Equal => "=",
+           ExpressionType.NotEqual => "<>",
+           ExpressionType.GreaterThan => ">",
+           ExpressionType.GreaterThanOrEqual => ">=",
+           ExpressionType.LessThan => "<",
+           ExpressionType.LessThanOrEqual => "<=",
+           ExpressionType.AndAlso => "AND",
+           ExpressionType.OrElse => "OR",
+           ExpressionType.Add => "+",
+           ExpressionType.Subtract => "-",
+           ExpressionType.Multiply => "*",
+           ExpressionType.Divide => "/",
+           ExpressionType.Modulo => "%",
+           ExpressionType.Coalesce => "COALESCE",
+           ExpressionType.And => "&",
+           ExpressionType.Or => "|",
+           ExpressionType.ExclusiveOr => "^",
+           ExpressionType.LeftShift => "<<",
+           ExpressionType.RightShift => ">>",
+           _ => nodeType.ToString()
+       };
+    public abstract bool TryGetMemberAccessSqlFormatter(SqlSegment originalSegment, MemberInfo memberInfo, out MemberAccessSqlFormatter formatter);
+    public abstract bool TryGetMethodCallSqlFormatter(SqlSegment originalSegment, MethodInfo methodInfo, out MethodCallSqlFormatter formatter);
+    public override int GetHashCode() => HashCode.Combine(this.DatabaseType);
 }

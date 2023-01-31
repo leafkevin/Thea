@@ -41,11 +41,6 @@ class GroupingQuery<T, TGrouping> : IGroupingQuery<T, TGrouping>
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, TGrouping> : IGroupingQuery<T1, T2, TGrouping>
 {
@@ -82,11 +77,6 @@ class GroupingQuery<T1, T2, TGrouping> : IGroupingQuery<T1, T2, TGrouping>
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, TGrouping> : IGroupingQuery<T1, T2, T3, TGrouping>
@@ -125,11 +115,6 @@ class GroupingQuery<T1, T2, T3, TGrouping> : IGroupingQuery<T1, T2, T3, TGroupin
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, TGrouping> : IGroupingQuery<T1, T2, T3, T4, TGrouping>
 {
@@ -166,11 +151,6 @@ class GroupingQuery<T1, T2, T3, T4, TGrouping> : IGroupingQuery<T1, T2, T3, T4, 
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, TGrouping>
@@ -209,11 +189,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, TGrouping> : IGroupingQuery<T1, T2, T3, 
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, TGrouping>
 {
@@ -250,11 +225,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, TGrouping> : IGroupingQuery<T1, T2, 
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, TGrouping>
@@ -293,11 +263,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, TGrouping> : IGroupingQuery<T1, 
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, TGrouping>
 {
@@ -334,11 +299,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, TGrouping> : IGroupingQuery<
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, TGrouping>
@@ -377,11 +337,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, TGrouping> : IGroupingQu
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, TGrouping>
 {
@@ -418,11 +373,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, TGrouping> : IGroup
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, TGrouping>
@@ -461,11 +411,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, TGrouping> : I
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, TGrouping>
 {
@@ -502,11 +447,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, TGrouping
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, TGrouping>
@@ -545,11 +485,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, TGro
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, TGrouping>
 {
@@ -586,11 +521,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14,
     {
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, TGrouping>
@@ -629,11 +559,6 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14,
         this.visitor.Select(null, fieldsExpr);
         return new Query<TTarget>(this.visitor);
     }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
-    }
 }
 class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, TGrouping> : IGroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, TGrouping>
 {
@@ -645,10 +570,5 @@ class GroupingQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14,
         Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
         this.visitor.Select(null, defaultExpr);
         return new Query<TGrouping>(this.visitor);
-    }
-    public string ToSql()
-    {
-        Expression<Func<TGrouping, TGrouping>> defaultExpr = f => f;
-        return this.visitor.BuildSql(defaultExpr, out _, out _);
     }
 }
