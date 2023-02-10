@@ -11,14 +11,15 @@ namespace Thea.Job
         public static IServiceCollection AddJob(this IServiceCollection services, Action<JobSchedulerBuilder> optionsInitializer)
         {
             services.AddSingleton<IJobService>(f =>
-           {
-               var jobService = new JobService(f);
-               var dbFactory = f.GetService<IOrmDbFactory>();
-               new ModelConfiguration().OnModelCreating(new ModelBuilder(dbFactory));
-               var options = new JobSchedulerBuilder(jobService);
-               optionsInitializer?.Invoke(options);
-               return jobService;
-           });
+            {
+                var jobService = new JobService(f);
+                var options = new JobSchedulerBuilder(jobService);
+                optionsInitializer?.Invoke(options);
+                var dbFactory = f.GetService<IOrmDbFactory>();
+                var mapProvider = dbFactory.GetEntityMapProvider(jobService.DbKey);
+                new ModelConfiguration().OnModelCreating(new ModelBuilder(mapProvider));
+                return jobService;
+            });
             return services;
         }
         public static DateTimeOffset ToHalfMinute(this DateTimeOffset dateTime)

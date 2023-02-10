@@ -18,6 +18,22 @@ public static class TheaOrmExtensions
         typeof(bool?),typeof(char?),typeof(Guid?) ,typeof(DateTime?),typeof(DateTimeOffset?),typeof(TimeSpan?) };
 
 
+    public static IOrmProvider GetOrmProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
+    {
+        var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
+        var database = dbProvider.GetDatabase(tenantId);
+        if (dbFactory.TryGetOrmProvider(database.OrmProviderType, out var ormProvider))
+            return ormProvider;
+        return null;
+    }
+    public static IEntityMapProvider GetEntityMapProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
+    {
+        var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
+        var database = dbProvider.GetDatabase(tenantId);
+        if (dbProvider.TryGetEntityMapProvider(database.OrmProviderType, out var entityMapProvider))
+            return entityMapProvider;
+        return null;
+    }
     public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
        => (T)typeHandler.Parse(ormProvider, typeof(T), value);
     public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType)
