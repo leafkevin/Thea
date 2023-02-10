@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
-using Thea.Orm;
 
-namespace Thea.Trolley;
+namespace Thea.Orm;
 
 public class Sql
 {

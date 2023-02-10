@@ -17,21 +17,28 @@ public static class TheaOrmExtensions
         typeof(int?),typeof(uint?),typeof(long?),typeof(ulong?),typeof(float?),typeof(double?),typeof(decimal?),
         typeof(bool?),typeof(char?),typeof(Guid?) ,typeof(DateTime?),typeof(DateTimeOffset?),typeof(TimeSpan?) };
 
-    public static void Configure(this IOrmDbFactory dbFactory, IModelConfiguration configuration)
-        => configuration.OnModelCreating(new ModelBuilder(dbFactory));
-    public static void Configure<TModelConfiguration>(this IOrmDbFactory dbFactory) where TModelConfiguration : class, IModelConfiguration, new()
-        => new TModelConfiguration().OnModelCreating(new ModelBuilder(dbFactory));
-    public static void Configure(this IOrmDbFactory dbFactory, Action<ModelBuilder> initializer)
-    {
-        if (initializer == null)
-            throw new ArgumentNullException(nameof(initializer));
 
-        initializer.Invoke(new ModelBuilder(dbFactory));
-    }
-    public static void AddTypeHandler<TTypeHandler>(this IOrmDbFactory dbFactory) where TTypeHandler : class, ITypeHandler, new()
-        => dbFactory.AddTypeHandler(new TTypeHandler());
     public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
-        => (T)typeHandler.Parse(ormProvider, typeof(T), value);
+       => (T)typeHandler.Parse(ormProvider, typeof(T), value);
+    public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType)
+    {
+        if (!mapProvider.TryGetEntityMap(entityType, out var mapper))
+        {
+            mapper = EntityMap.CreateDefaultMap(entityType);
+            mapProvider.AddEntityMap(entityType, mapper);
+        }
+        return mapper;
+    }
+    public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType, Type mapToType)
+    {
+        if (!mapProvider.TryGetEntityMap(entityType, out var mapper))
+        {
+            var mapToMapper = mapProvider.GetEntityMap(mapToType);
+            mapper = EntityMap.CreateDefaultMap(entityType, mapToMapper);
+            mapProvider.AddEntityMap(entityType, mapper);
+        }
+        return mapper;
+    }
 
 
     public static TEntity QueryFirst<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)

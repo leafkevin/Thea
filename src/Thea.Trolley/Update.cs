@@ -54,22 +54,24 @@ namespace Thea.Trolley;
 /// <typeparam name="TEntity"></typeparam>
 class Update<TEntity> : IUpdate<TEntity>
 {
-    private readonly IOrmDbFactory dbFactory;
     private readonly TheaConnection connection;
     private readonly IDbTransaction transaction;
+    private readonly IOrmProvider ormProvider;
+    private readonly IEntityMapProvider mapProvider;
 
-    public Update(IOrmDbFactory dbFactory, TheaConnection connection, IDbTransaction transaction)
+    public Update(TheaConnection connection, IDbTransaction transaction, IOrmProvider ormProvider, IEntityMapProvider mapProvider)
     {
-        this.dbFactory = dbFactory;
         this.connection = connection;
         this.transaction = transaction;
+        this.ormProvider = ormProvider;
+        this.mapProvider = mapProvider;
     }
     public IUpdateSet<TEntity> WithBy<TField>(TField parameters, int bulkCount = 500)
     {
         if (parameters == null)
             throw new ArgumentNullException(nameof(parameters));
 
-        return new UpdateSet<TEntity>(this.dbFactory, this.connection, this.transaction, null, parameters, bulkCount);
+        return new UpdateSet<TEntity>(this.connection, this.transaction, this.ormProvider, this.mapProvider, null, parameters, bulkCount);
     }
     public IUpdateSet<TEntity> WithBy<TFields>(Expression<Func<TEntity, TFields>> fieldsExpr, object parameters, int bulkCount = 500)
     {
@@ -81,7 +83,7 @@ class Update<TEntity> : IUpdate<TEntity>
             throw new NotSupportedException($"不支持的表达式{nameof(fieldsExpr)},只支持MemberAccess或New类型表达式");
 
         var setFields = new List<SetField>();
-        var entityMapper = this.dbFactory.GetEntityMap(typeof(TEntity));
+        var entityMapper = this.mapProvider.GetEntityMap(typeof(TEntity));
         MemberMap memberMapper = null;
         switch (fieldsExpr.Body.NodeType)
         {
@@ -112,7 +114,7 @@ class Update<TEntity> : IUpdate<TEntity>
                         List<IDbDataParameter> dbParameters = null;
                         if (visitor == null)
                         {
-                            visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
+                            visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
                             sqlSegment = visitor.SetValue(fieldsExpr, argumentExpr, out dbParameters);
                         }
                         else sqlSegment = visitor.SetValue(argumentExpr, out dbParameters);
@@ -128,7 +130,7 @@ class Update<TEntity> : IUpdate<TEntity>
                     throw new NotSupportedException("WithBy方法参数fieldsExpr需要有直接成员访问的栏位才能被parameters参数进行设置，如：WithBy(f => new { f.OrderNo ,f.TotalAmount }, parameters)");
                 break;
         }
-        return new UpdateSet<TEntity>(this.dbFactory, this.connection, this.transaction, setFields, parameters, bulkCount);
+        return new UpdateSet<TEntity>(this.connection, this.transaction, this.ormProvider, this.mapProvider, setFields, parameters, bulkCount);
     }
     public IUpdateSetting<TEntity> Set<TFields>(Expression<Func<TEntity, TFields>> fieldsExpr)
     {
@@ -137,8 +139,8 @@ class Update<TEntity> : IUpdate<TEntity>
         if (fieldsExpr.Body.NodeType != ExpressionType.New && fieldsExpr.Body.NodeType != ExpressionType.MemberInit)
             throw new NotSupportedException($"不支持的表达式{nameof(fieldsExpr)},只支持New或MemberInit类型表达式");
 
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
-        return new UpdateSetting<TEntity>(visitor.Set(fieldsExpr));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor.Set(fieldsExpr));
     }
     public IUpdateSetting<TEntity> Set<TFields>(Expression<Func<IFromQuery, TEntity, TFields>> fieldsExpr)
     {
@@ -147,8 +149,8 @@ class Update<TEntity> : IUpdate<TEntity>
         if (fieldsExpr.Body.NodeType != ExpressionType.New && fieldsExpr.Body.NodeType != ExpressionType.MemberInit)
             throw new NotSupportedException($"不支持的表达式{nameof(fieldsExpr)},只支持New或MemberInit类型表达式");
 
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
-        return new UpdateSetting<TEntity>(visitor.SetFromQuery(fieldsExpr));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor.SetFromQuery(fieldsExpr));
     }
     public IUpdateSetting<TEntity> Set<TFields>(bool condition, Expression<Func<TEntity, TFields>> fieldsExpr)
     {
@@ -157,9 +159,9 @@ class Update<TEntity> : IUpdate<TEntity>
         if (fieldsExpr.Body.NodeType != ExpressionType.New && fieldsExpr.Body.NodeType != ExpressionType.MemberInit)
             throw new NotSupportedException($"不支持的表达式{nameof(fieldsExpr)},只支持New或MemberInit类型表达式");
 
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
         if (condition) visitor.Set(fieldsExpr);
-        return new UpdateSetting<TEntity>(visitor);
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor);
     }
     public IUpdateSetting<TEntity> Set<TFields>(bool condition, Expression<Func<IFromQuery, TEntity, TFields>> fieldsExpr)
     {
@@ -168,9 +170,9 @@ class Update<TEntity> : IUpdate<TEntity>
         if (fieldsExpr.Body.NodeType != ExpressionType.New && fieldsExpr.Body.NodeType != ExpressionType.MemberInit)
             throw new NotSupportedException($"不支持的表达式{nameof(fieldsExpr)},只支持New或MemberInit类型表达式");
 
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
         if (condition) visitor.SetFromQuery(fieldsExpr, null);
-        return new UpdateSetting<TEntity>(visitor);
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor);
     }
 
     public IUpdateSetting<TEntity> Set<TField>(Expression<Func<TEntity, TField>> fieldExpr, TField fieldValue)
@@ -182,8 +184,8 @@ class Update<TEntity> : IUpdate<TEntity>
         if (fieldExpr.Body.NodeType != ExpressionType.MemberAccess)
             throw new NotSupportedException($"不支持的表达式{nameof(fieldExpr)},只支持MemberAccess类型表达式");
 
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
-        return new UpdateSetting<TEntity>(visitor.Set(fieldExpr, fieldValue));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor.Set(fieldExpr, fieldValue));
     }
     public IUpdateSetting<TEntity> Set<TField>(Expression<Func<TEntity, TField>> fieldExpr, Expression<Func<IFromQuery, TEntity, IFromQuery<TField>>> subQueryExpr)
     {
@@ -195,8 +197,8 @@ class Update<TEntity> : IUpdate<TEntity>
             throw new NotSupportedException($"不支持的表达式{nameof(fieldExpr)},只支持MemberAccess类型表达式");
 
         var entityType = typeof(TEntity);
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, entityType);
-        return new UpdateSetting<TEntity>(visitor.SetFromQuery(fieldExpr, subQueryExpr));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, entityType);
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor.SetFromQuery(fieldExpr, subQueryExpr));
     }
     public IUpdateSetting<TEntity> Set<TField>(bool condition, Expression<Func<TEntity, TField>> fieldExpr, TField fieldValue)
     {
@@ -207,9 +209,9 @@ class Update<TEntity> : IUpdate<TEntity>
         if (fieldExpr.Body.NodeType != ExpressionType.MemberAccess)
             throw new NotSupportedException($"不支持的表达式{nameof(fieldExpr)},只支持MemberAccess类型表达式");
 
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity));
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
         if (condition) visitor.Set(fieldExpr, fieldValue);
-        return new UpdateSetting<TEntity>(visitor);
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor);
     }
     public IUpdateSetting<TEntity> Set<TField>(bool condition, Expression<Func<TEntity, TField>> fieldExpr, Expression<Func<IFromQuery, TEntity, IFromQuery<TField>>> subQueryExpr)
     {
@@ -221,53 +223,53 @@ class Update<TEntity> : IUpdate<TEntity>
             throw new NotSupportedException($"不支持的表达式{nameof(fieldExpr)},只支持MemberAccess类型表达式");
 
         var entityType = typeof(TEntity);
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, entityType);
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, entityType);
         if (condition) visitor.SetFromQuery(fieldExpr, subQueryExpr);
-        return new UpdateSetting<TEntity>(visitor);
+        return new UpdateSetting<TEntity>(this.connection, this.transaction, visitor);
     }
 
     public IUpdateFrom<TEntity, T> From<T>()
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
             .From(typeof(T));
-        return new UpdateFrom<TEntity, T>(visitor);
+        return new UpdateFrom<TEntity, T>(this.connection, this.transaction, visitor);
     }
     public IUpdateFrom<TEntity, T1, T2> From<T1, T2>()
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
             .From(typeof(T1), typeof(T2));
-        return new UpdateFrom<TEntity, T1, T2>(visitor);
+        return new UpdateFrom<TEntity, T1, T2>(this.connection, this.transaction, visitor);
     }
     public IUpdateFrom<TEntity, T1, T2, T3> From<T1, T2, T3>()
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
              .From(typeof(T1), typeof(T2), typeof(T3));
-        return new UpdateFrom<TEntity, T1, T2, T3>(visitor);
+        return new UpdateFrom<TEntity, T1, T2, T3>(this.connection, this.transaction, visitor);
     }
     public IUpdateFrom<TEntity, T1, T2, T3, T4> From<T1, T2, T3, T4>()
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
              .From(typeof(T1), typeof(T2), typeof(T3), typeof(T4));
-        return new UpdateFrom<TEntity, T1, T2, T3, T4>(visitor);
+        return new UpdateFrom<TEntity, T1, T2, T3, T4>(this.connection, this.transaction, visitor);
     }
     public IUpdateFrom<TEntity, T1, T2, T3, T4, T5> From<T1, T2, T3, T4, T5>()
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
              .From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5));
-        return new UpdateFrom<TEntity, T1, T2, T3, T4, T5>(visitor);
+        return new UpdateFrom<TEntity, T1, T2, T3, T4, T5>(this.connection, this.transaction, visitor);
     }
 
     public IUpdateJoin<TEntity, T> InnerJoin<T>(Expression<Func<TEntity, T, bool>> joinOn)
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
             .Join("INNER JOIN", typeof(T), joinOn);
-        return new UpdateJoin<TEntity, T>(visitor);
+        return new UpdateJoin<TEntity, T>(this.connection, this.transaction, visitor);
     }
     public IUpdateJoin<TEntity, T> LeftJoin<T>(Expression<Func<TEntity, T, bool>> joinOn)
     {
-        var visitor = new UpdateVisitor(this.dbFactory, this.connection, this.transaction, typeof(TEntity))
+        var visitor = new UpdateVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity))
            .Join("INNER JOIN", typeof(T), joinOn);
-        return new UpdateJoin<TEntity, T>(visitor);
+        return new UpdateJoin<TEntity, T>(this.connection, this.transaction, visitor);
     }
 }
 class UpdateSet<TEntity> : IUpdateSet<TEntity>
@@ -275,18 +277,22 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
     private static ConcurrentDictionary<int, object> objCommandInitializerCache = new();
     private static ConcurrentDictionary<int, object> sqlCommandInitializerCache = new();
     private static ConcurrentDictionary<int, object> setFieldsCommandInitializerCache = new();
-    private readonly IOrmDbFactory dbFactory;
+
     private readonly TheaConnection connection;
     private readonly IDbTransaction transaction;
+    private readonly IOrmProvider ormProvider;
+    private readonly IEntityMapProvider mapProvider;
+
     private List<SetField> setFields = null;
     private object parameters = null;
     private int? bulkCount = null;
 
-    public UpdateSet(IOrmDbFactory dbFactory, TheaConnection connection, IDbTransaction transaction, List<SetField> setFields, object parameters, int? bulkCount = null)
+    public UpdateSet(TheaConnection connection, IDbTransaction transaction, IOrmProvider ormProvider, IEntityMapProvider mapProvider, List<SetField> setFields, object parameters, int? bulkCount = null)
     {
-        this.dbFactory = dbFactory;
         this.connection = connection;
         this.transaction = transaction;
+        this.ormProvider = ormProvider;
+        this.mapProvider = mapProvider;
         this.setFields = setFields;
         this.parameters = parameters;
         this.bulkCount = bulkCount;
@@ -317,20 +323,19 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
         string fixSetSql = null;
         bool isFixSetSql = false;
-        var ormProvider = this.connection.OrmProvider;
         using var command = this.connection.CreateCommand();
         command.Transaction = this.transaction;
         if (this.setFields != null)
         {
             var builder = new StringBuilder();
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
             int index = 0;
             foreach (var setField in this.setFields)
             {
                 if (string.IsNullOrEmpty(setField.Value))
                     continue;
                 if (index > 0) builder.Append(',');
-                builder.Append(ormProvider.GetFieldName(setField.MemberMapper.FieldName));
+                builder.Append(this.ormProvider.GetFieldName(setField.MemberMapper.FieldName));
                 builder.Append('=');
                 builder.Append(setField.Value);
                 if (setField.DbParameters != null && setField.DbParameters.Count > 0)
@@ -339,7 +344,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             }
             if (index > 0)
             {
-                builder.Insert(0, $"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
+                builder.Insert(0, $"UPDATE {this.ormProvider.GetTableName(entityMapper.TableName)} SET ");
                 fixSetSql = builder.ToString();
                 isFixSetSql = true;
             }
@@ -359,7 +364,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             {
                 if (index > 0) sqlBuilder.Append(';');
                 if (isFixSetSql) sqlBuilder.Append(fixSetSql);
-                commandInitializer.Invoke(command, this.connection.OrmProvider, sqlBuilder, index, entity);
+                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
 
                 if (index >= this.bulkCount)
                 {
@@ -392,8 +397,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             else commandInitializer = this.BuildCommandInitializer(entityType, parameterType, isFixSetSql);
 
             if (isFixSetSql)
-                sql = fixSetSql + commandInitializer.Invoke(command, this.connection.OrmProvider, this.parameters);
-            else sql = commandInitializer.Invoke(command, this.connection.OrmProvider, this.parameters);
+                sql = fixSetSql + commandInitializer.Invoke(command, this.ormProvider, this.parameters);
+            else sql = commandInitializer.Invoke(command, this.ormProvider, this.parameters);
 
             command.CommandText = sql;
             command.CommandType = CommandType.Text;
@@ -428,20 +433,19 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
         string fixSetSql = null;
         bool isFixSetSql = false;
-        var ormProvider = this.connection.OrmProvider;
         using var cmd = this.connection.CreateCommand();
         cmd.Transaction = this.transaction;
         if (this.setFields != null)
         {
             var builder = new StringBuilder();
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
             int index = 0;
             foreach (var setField in this.setFields)
             {
                 if (string.IsNullOrEmpty(setField.Value))
                     continue;
                 if (index > 0) builder.Append(',');
-                builder.Append(ormProvider.GetFieldName(setField.MemberMapper.FieldName));
+                builder.Append(this.ormProvider.GetFieldName(setField.MemberMapper.FieldName));
                 builder.Append('=');
                 builder.Append(setField.Value);
                 if (setField.DbParameters != null && setField.DbParameters.Count > 0)
@@ -450,7 +454,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             }
             if (index > 0)
             {
-                builder.Insert(0, $"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
+                builder.Insert(0, $"UPDATE {this.ormProvider.GetTableName(entityMapper.TableName)} SET ");
                 fixSetSql = builder.ToString();
                 isFixSetSql = true;
             }
@@ -473,7 +477,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             {
                 if (index > 0) sqlBuilder.Append(';');
                 if (isFixSetSql) sqlBuilder.Append(fixSetSql);
-                commandInitializer.Invoke(command, this.connection.OrmProvider, sqlBuilder, index, entity);
+                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
 
                 if (index >= this.bulkCount)
                 {
@@ -506,8 +510,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             else commandInitializer = this.BuildCommandInitializer(entityType, parameterType, isFixSetSql);
 
             if (isFixSetSql)
-                sql = fixSetSql + commandInitializer.Invoke(cmd, this.connection.OrmProvider, this.parameters);
-            else sql = commandInitializer.Invoke(cmd, this.connection.OrmProvider, this.parameters);
+                sql = fixSetSql + commandInitializer.Invoke(cmd, this.ormProvider, this.parameters);
+            else sql = commandInitializer.Invoke(cmd, this.ormProvider, this.parameters);
 
             cmd.CommandText = sql;
             cmd.CommandType = CommandType.Text;
@@ -546,20 +550,19 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
         string fixSetSql = null;
         bool isFixSetSql = false;
-        var ormProvider = this.connection.OrmProvider;
         using var command = this.connection.CreateCommand();
 
         if (this.setFields != null)
         {
             var builder = new StringBuilder();
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
             int index = 0;
             foreach (var setField in this.setFields)
             {
                 if (string.IsNullOrEmpty(setField.Value))
                     continue;
                 if (index > 0) builder.Append(',');
-                builder.Append(ormProvider.GetFieldName(setField.MemberMapper.FieldName));
+                builder.Append(this.ormProvider.GetFieldName(setField.MemberMapper.FieldName));
                 builder.Append('=');
                 builder.Append(setField.Value);
                 if (setField.DbParameters != null && setField.DbParameters.Count > 0)
@@ -568,7 +571,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             }
             if (index > 0)
             {
-                builder.Insert(0, $"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
+                builder.Insert(0, $"UPDATE {this.ormProvider.GetTableName(entityMapper.TableName)} SET ");
                 fixSetSql = builder.ToString();
                 isFixSetSql = true;
             }
@@ -588,7 +591,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             {
                 if (index > 0) sqlBuilder.Append(';');
                 if (isFixSetSql) sqlBuilder.Append(fixSetSql);
-                commandInitializer.Invoke(command, this.connection.OrmProvider, sqlBuilder, index, entity);
+                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
 
                 if (index >= this.bulkCount)
                     break;
@@ -611,8 +614,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             else commandInitializer = this.BuildCommandInitializer(entityType, parameterType, isFixSetSql);
 
             if (isFixSetSql)
-                sql = fixSetSql + commandInitializer.Invoke(command, this.connection.OrmProvider, this.parameters);
-            else sql = commandInitializer.Invoke(command, this.connection.OrmProvider, this.parameters);
+                sql = fixSetSql + commandInitializer.Invoke(command, this.ormProvider, this.parameters);
+            else sql = commandInitializer.Invoke(command, this.ormProvider, this.parameters);
 
             if (command.Parameters != null && command.Parameters.Count > 0)
                 dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
@@ -632,15 +635,14 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
         }
         else
         {
-            cacheKey = this.GetCacheKey("UpdateBatch", connection.OrmProvider, entityType, parameterType, isFixSetSql, this.setFields);
+            cacheKey = this.GetCacheKey("UpdateBatch", this.connection, entityType, parameterType, isFixSetSql, this.setFields);
             commandInitializerCache = setFieldsCommandInitializerCache;
         }
         if (!commandInitializerCache.TryGetValue(cacheKey, out var commandInitializerDelegate))
         {
             int columnIndex = 0;
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
-            var parameterMapper = this.dbFactory.GetEntityMap(parameterType);
-            var ormProvider = this.connection.OrmProvider;
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
+            var parameterMapper = this.mapProvider.GetEntityMap(parameterType);
             var commandExpr = Expression.Parameter(typeof(IDbCommand), "cmd");
             var ormProviderExpr = Expression.Parameter(typeof(IOrmProvider), "ormProvider");
             var builderExpr = Expression.Parameter(typeof(StringBuilder), "builder");
@@ -651,7 +653,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             var parameterNameExpr = Expression.Variable(typeof(string), "parameterName");
             var blockParameters = new List<ParameterExpression>();
             var blockBodies = new List<Expression>();
-            var localParameters = new Dictionary<Type, ParameterExpression>();
+            var localParameters = new Dictionary<string, int>();
             blockParameters.Add(typedParameterExpr);
             blockParameters.Add(parameterNameExpr);
             blockBodies.Add(Expression.Assign(typedParameterExpr, Expression.Convert(parameterExpr, parameterType)));
@@ -682,17 +684,17 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                     if (propMapper.IsKey) continue;
                 }
 
-                var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName;
+                var parameterName = this.ormProvider.ParameterPrefix + propMapper.MemberName;
                 var suffixExpr = Expression.Call(indexExpr, typeof(int).GetMethod(nameof(int.ToString), Type.EmptyTypes));
                 var concatExpr = Expression.Call(methodInfo3, Expression.Constant(parameterName), suffixExpr);
                 blockBodies.Add(Expression.Assign(parameterNameExpr, concatExpr));
 
                 if (isFixSetSql || columnIndex > 0)
                     blockBodies.Add(Expression.Call(builderExpr, methodInfo1, Expression.Constant(',')));
-                blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(ormProvider.GetFieldName(propMapper.FieldName) + "=")));
+                blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(this.ormProvider.GetFieldName(propMapper.FieldName) + "=")));
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, parameterNameExpr));
 
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.IsNullable, parameterMemberMapper.NativeDbType, propMapper, localParameters, blockParameters, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, parameterMemberMapper.NativeDbType, propMapper, this.ormProvider, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
             columnIndex = 0;
@@ -704,16 +706,16 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
                 if (columnIndex > 0)
                     blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(" AND ")));
-                var fieldExpr = Expression.Constant(ormProvider.GetFieldName(keyMapper.FieldName) + "=");
+                var fieldExpr = Expression.Constant(this.ormProvider.GetFieldName(keyMapper.FieldName) + "=");
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, fieldExpr));
 
-                var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
+                var parameterName = this.ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
                 var suffixExpr = Expression.Call(indexExpr, typeof(int).GetMethod(nameof(int.ToString), Type.EmptyTypes));
                 var concatExpr = Expression.Call(methodInfo3, Expression.Constant(parameterName), suffixExpr);
                 blockBodies.Add(Expression.Assign(parameterNameExpr, concatExpr));
                 blockBodies.Add(Expression.Call(builderExpr, methodInfo2, parameterNameExpr));
 
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, keyMapper.NativeDbType, keyMapper, localParameters, blockParameters, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, keyMapper.NativeDbType, keyMapper, this.ormProvider, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
             commandInitializerDelegate = Expression.Lambda<Action<IDbCommand, IOrmProvider, StringBuilder, int, object>>(Expression.Block(blockParameters, blockBodies), commandExpr, ormProviderExpr, builderExpr, indexExpr, parameterExpr).Compile();
@@ -732,15 +734,14 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
         }
         else
         {
-            cacheKey = this.GetCacheKey("Update", connection.OrmProvider, entityType, parameterType, isFixSetSql, this.setFields);
+            cacheKey = this.GetCacheKey("Update", this.connection, entityType, parameterType, isFixSetSql, this.setFields);
             commandInitializerCache = setFieldsCommandInitializerCache;
         }
         if (!commandInitializerCache.TryGetValue(cacheKey, out var commandInitializerDelegate))
         {
             int columnIndex = 0;
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
-            var parameterMapper = this.dbFactory.GetEntityMap(parameterType);
-            var ormProvider = this.connection.OrmProvider;
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
+            var parameterMapper = this.mapProvider.GetEntityMap(parameterType);
             var commandExpr = Expression.Parameter(typeof(IDbCommand), "cmd");
             var ormProviderExpr = Expression.Parameter(typeof(IOrmProvider), "ormProvider");
             var parameterExpr = Expression.Parameter(typeof(object), "parameter");
@@ -748,7 +749,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             var typedParameterExpr = Expression.Variable(parameterType, "typedParameter");
             var blockParameters = new List<ParameterExpression>();
             var blockBodies = new List<Expression>();
-            var localParameters = new Dictionary<Type, ParameterExpression>();
+            var localParameters = new Dictionary<string, int>();
             blockParameters.Add(typedParameterExpr);
             blockBodies.Add(Expression.Assign(typedParameterExpr, Expression.Convert(parameterExpr, parameterType)));
 
@@ -758,7 +759,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
             var sqlBuilder = new StringBuilder();
             if (!isFixSetSql)
-                sqlBuilder.Append($"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
+                sqlBuilder.Append($"UPDATE {this.ormProvider.GetTableName(entityMapper.TableName)} SET ");
             foreach (var parameterMemberMapper in parameterMapper.MemberMaps)
             {
                 if (!entityMapper.TryGetMemberMap(parameterMemberMapper.MemberName, out var propMapper)
@@ -779,10 +780,11 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
                 if (isFixSetSql || columnIndex > 0)
                     sqlBuilder.Append(',');
-                var parameterName = ormProvider.ParameterPrefix + propMapper.MemberName;
-                sqlBuilder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
+                var parameterName = this.ormProvider.ParameterPrefix + propMapper.MemberName;
+                sqlBuilder.Append($"{this.ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
+
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, parameterMemberMapper.IsNullable, parameterMemberMapper.NativeDbType, propMapper, localParameters, blockParameters, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, parameterMemberMapper.NativeDbType, propMapper, this.ormProvider, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
             columnIndex = 0;
@@ -794,10 +796,10 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
                 if (columnIndex > 0)
                     sqlBuilder.Append(" AND ");
-                var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
-                sqlBuilder.Append($"{ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
+                var parameterName = this.ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
+                sqlBuilder.Append($"{this.ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
                 var parameterNameExpr = Expression.Constant(parameterName);
-                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, keyMapper.NativeDbType, keyMapper, localParameters, blockParameters, blockBodies);
+                RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, keyMapper.NativeDbType, keyMapper, this.ormProvider, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
             var resultLabelExpr = Expression.Label(typeof(string));
@@ -816,7 +818,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
         {
             int updateIndex = 0;
             var dict = parameter as Dictionary<string, object>;
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
 
             if (!isFixSetSql)
                 builder.Append($"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
@@ -846,8 +848,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + item.Key + index.ToString();
                 builder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
 
-                if (propMapper.NativeDbType.HasValue)
-                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType.Value, item.Value));
+                if (propMapper.NativeDbType != null)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType, item.Value));
                 else command.Parameters.Add(ormProvider.CreateParameter(parameterName, item.Value));
                 updateIndex++;
             }
@@ -863,8 +865,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName + index.ToString();
                 builder.Append($"{ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
 
-                if (keyMapper.NativeDbType.HasValue)
-                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, keyMapper.NativeDbType.Value, dict[keyMapper.MemberName]));
+                if (keyMapper.NativeDbType != null)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, keyMapper.NativeDbType, dict[keyMapper.MemberName]));
                 else command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[keyMapper.MemberName]));
                 updateIndex++;
             }
@@ -876,7 +878,7 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
         {
             int index = 0;
             var dict = parameter as Dictionary<string, object>;
-            var entityMapper = this.dbFactory.GetEntityMap(entityType);
+            var entityMapper = this.mapProvider.GetEntityMap(entityType);
             var sqlBuilder = new StringBuilder();
             if (!isFixSetSql)
                 sqlBuilder.Append($"UPDATE {ormProvider.GetTableName(entityMapper.TableName)} SET ");
@@ -906,8 +908,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + item.Key;
                 sqlBuilder.Append($"{ormProvider.GetFieldName(propMapper.FieldName)}={parameterName}");
 
-                if (propMapper.NativeDbType.HasValue)
-                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType.Value, item.Value));
+                if (propMapper.NativeDbType != null)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, propMapper.NativeDbType, item.Value));
                 else command.Parameters.Add(ormProvider.CreateParameter(parameterName, item.Value));
                 index++;
             }
@@ -924,19 +926,19 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 var parameterName = ormProvider.ParameterPrefix + "k" + keyMapper.MemberName;
                 sqlBuilder.Append($"{ormProvider.GetFieldName(keyMapper.FieldName)}={parameterName}");
 
-                if (keyMapper.NativeDbType.HasValue)
-                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, keyMapper.NativeDbType.Value, dict[keyMapper.MemberName]));
+                if (keyMapper.NativeDbType != null)
+                    command.Parameters.Add(ormProvider.CreateParameter(parameterName, keyMapper.NativeDbType, dict[keyMapper.MemberName]));
                 else command.Parameters.Add(ormProvider.CreateParameter(parameterName, dict[keyMapper.MemberName]));
                 index++;
             }
             return sqlBuilder.ToString();
         };
     }
-    private int GetCacheKey(string category, IOrmProvider ormProvider, Type entityType, Type parameterType, bool isFixSetSql, List<SetField> setFields)
+    private int GetCacheKey(string category, TheaConnection connection, Type entityType, Type parameterType, bool isFixSetSql, List<SetField> setFields)
     {
         var hashCode = new HashCode();
         hashCode.Add(category);
-        hashCode.Add(ormProvider);
+        hashCode.Add(connection);
         hashCode.Add(entityType);
         hashCode.Add(parameterType);
         hashCode.Add(isFixSetSql);
@@ -956,11 +958,11 @@ class UpdateBase
     protected readonly IDbTransaction transaction;
     protected readonly UpdateVisitor visitor;
 
-    public UpdateBase(UpdateVisitor visitor)
+    public UpdateBase(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
     {
+        this.connection = connection;
+        this.transaction = transaction;
         this.visitor = visitor;
-        this.connection = visitor.connection;
-        this.transaction = visitor.transaction;
     }
 
     public int Execute()
@@ -998,7 +1000,8 @@ class UpdateBase
 }
 class UpdateSetting<TEntity> : UpdateBase, IUpdateSetting<TEntity>
 {
-    public UpdateSetting(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateSetting(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateSetting<TEntity> Set<TFields>(Expression<Func<TEntity, TFields>> fieldsExpr)
     {
@@ -1120,7 +1123,8 @@ class SetField
 }
 class UpdateFrom<TEntity, T1> : UpdateBase, IUpdateFrom<TEntity, T1>
 {
-    public UpdateFrom(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateFrom(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateFrom<TEntity, T1> Set<TFields>(Expression<Func<TEntity, T1, TFields>> fieldsExpr)
     {
@@ -1236,7 +1240,8 @@ class UpdateFrom<TEntity, T1> : UpdateBase, IUpdateFrom<TEntity, T1>
 }
 class UpdateJoin<TEntity, T1> : UpdateBase, IUpdateJoin<TEntity, T1>
 {
-    public UpdateJoin(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateJoin(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateJoin<TEntity, T1, T2> InnerJoin<T2>(Expression<Func<TEntity, T1, T2, bool>> joinOn)
     {
@@ -1244,7 +1249,7 @@ class UpdateJoin<TEntity, T1> : UpdateBase, IUpdateJoin<TEntity, T1>
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("INNER JOIN", typeof(T2), joinOn);
-        return new UpdateJoin<TEntity, T1, T2>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2>(this.connection, this.transaction, this.visitor);
     }
     public IUpdateJoin<TEntity, T1, T2> LeftJoin<T2>(Expression<Func<TEntity, T1, T2, bool>> joinOn)
     {
@@ -1252,7 +1257,7 @@ class UpdateJoin<TEntity, T1> : UpdateBase, IUpdateJoin<TEntity, T1>
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("LEFT JOIN", typeof(T2), joinOn);
-        return new UpdateJoin<TEntity, T1, T2>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2>(this.connection, this.transaction, this.visitor);
     }
 
     public IUpdateJoin<TEntity, T1> Set<TFields>(Expression<Func<TEntity, T1, TFields>> fieldsExpr)
@@ -1369,7 +1374,8 @@ class UpdateJoin<TEntity, T1> : UpdateBase, IUpdateJoin<TEntity, T1>
 }
 class UpdateFrom<TEntity, T1, T2> : UpdateBase, IUpdateFrom<TEntity, T1, T2>
 {
-    public UpdateFrom(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateFrom(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateFrom<TEntity, T1, T2> Set<TFields>(Expression<Func<TEntity, T1, T2, TFields>> fieldsExpr)
     {
@@ -1485,7 +1491,8 @@ class UpdateFrom<TEntity, T1, T2> : UpdateBase, IUpdateFrom<TEntity, T1, T2>
 }
 class UpdateJoin<TEntity, T1, T2> : UpdateBase, IUpdateJoin<TEntity, T1, T2>
 {
-    public UpdateJoin(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateJoin(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateJoin<TEntity, T1, T2, T3> InnerJoin<T3>(Expression<Func<TEntity, T1, T2, T3, bool>> joinOn)
     {
@@ -1493,7 +1500,7 @@ class UpdateJoin<TEntity, T1, T2> : UpdateBase, IUpdateJoin<TEntity, T1, T2>
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("INNER JOIN", typeof(T3), joinOn);
-        return new UpdateJoin<TEntity, T1, T2, T3>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2, T3>(this.connection, this.transaction, this.visitor);
     }
     public IUpdateJoin<TEntity, T1, T2, T3> LeftJoin<T3>(Expression<Func<TEntity, T1, T2, T3, bool>> joinOn)
     {
@@ -1501,7 +1508,7 @@ class UpdateJoin<TEntity, T1, T2> : UpdateBase, IUpdateJoin<TEntity, T1, T2>
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("LEFT JOIN", typeof(T3), joinOn);
-        return new UpdateJoin<TEntity, T1, T2, T3>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2, T3>(this.connection, this.transaction, this.visitor);
     }
 
     public IUpdateJoin<TEntity, T1, T2> Set<TFields>(Expression<Func<TEntity, T1, T2, TFields>> fieldsExpr)
@@ -1618,7 +1625,8 @@ class UpdateJoin<TEntity, T1, T2> : UpdateBase, IUpdateJoin<TEntity, T1, T2>
 }
 class UpdateFrom<TEntity, T1, T2, T3> : UpdateBase, IUpdateFrom<TEntity, T1, T2, T3>
 {
-    public UpdateFrom(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateFrom(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateFrom<TEntity, T1, T2, T3> Set<TFields>(Expression<Func<TEntity, T1, T2, T3, TFields>> fieldsExpr)
     {
@@ -1734,7 +1742,8 @@ class UpdateFrom<TEntity, T1, T2, T3> : UpdateBase, IUpdateFrom<TEntity, T1, T2,
 }
 class UpdateJoin<TEntity, T1, T2, T3> : UpdateBase, IUpdateJoin<TEntity, T1, T2, T3>
 {
-    public UpdateJoin(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateJoin(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateJoin<TEntity, T1, T2, T3, T4> InnerJoin<T4>(Expression<Func<TEntity, T1, T2, T3, T4, bool>> joinOn)
     {
@@ -1742,7 +1751,7 @@ class UpdateJoin<TEntity, T1, T2, T3> : UpdateBase, IUpdateJoin<TEntity, T1, T2,
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("INNER JOIN", typeof(T4), joinOn);
-        return new UpdateJoin<TEntity, T1, T2, T3, T4>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2, T3, T4>(this.connection, this.transaction, this.visitor);
     }
     public IUpdateJoin<TEntity, T1, T2, T3, T4> LeftJoin<T4>(Expression<Func<TEntity, T1, T2, T3, T4, bool>> joinOn)
     {
@@ -1750,7 +1759,7 @@ class UpdateJoin<TEntity, T1, T2, T3> : UpdateBase, IUpdateJoin<TEntity, T1, T2,
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("LEFT JOIN", typeof(T4), joinOn);
-        return new UpdateJoin<TEntity, T1, T2, T3, T4>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2, T3, T4>(this.connection, this.transaction, this.visitor);
     }
 
     public IUpdateJoin<TEntity, T1, T2, T3> Set<TFields>(Expression<Func<TEntity, T1, T2, T3, TFields>> fieldsExpr)
@@ -1867,7 +1876,8 @@ class UpdateJoin<TEntity, T1, T2, T3> : UpdateBase, IUpdateJoin<TEntity, T1, T2,
 }
 class UpdateFrom<TEntity, T1, T2, T3, T4> : UpdateBase, IUpdateFrom<TEntity, T1, T2, T3, T4>
 {
-    public UpdateFrom(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateFrom(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateFrom<TEntity, T1, T2, T3, T4> Set<TFields>(Expression<Func<TEntity, T1, T2, T3, T4, TFields>> fieldsExpr)
     {
@@ -1983,7 +1993,8 @@ class UpdateFrom<TEntity, T1, T2, T3, T4> : UpdateBase, IUpdateFrom<TEntity, T1,
 }
 class UpdateJoin<TEntity, T1, T2, T3, T4> : UpdateBase, IUpdateJoin<TEntity, T1, T2, T3, T4>
 {
-    public UpdateJoin(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateJoin(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateJoin<TEntity, T1, T2, T3, T4, T5> InnerJoin<T5>(Expression<Func<TEntity, T1, T2, T3, T4, T5, bool>> joinOn)
     {
@@ -1991,7 +2002,7 @@ class UpdateJoin<TEntity, T1, T2, T3, T4> : UpdateBase, IUpdateJoin<TEntity, T1,
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("INNER JOIN", typeof(T5), joinOn);
-        return new UpdateJoin<TEntity, T1, T2, T3, T4, T5>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2, T3, T4, T5>(this.connection, this.transaction, this.visitor);
     }
     public IUpdateJoin<TEntity, T1, T2, T3, T4, T5> LeftJoin<T5>(Expression<Func<TEntity, T1, T2, T3, T4, T5, bool>> joinOn)
     {
@@ -1999,7 +2010,7 @@ class UpdateJoin<TEntity, T1, T2, T3, T4> : UpdateBase, IUpdateJoin<TEntity, T1,
             throw new ArgumentNullException(nameof(joinOn));
 
         this.visitor.Join("LEFT JOIN", typeof(T5), joinOn);
-        return new UpdateJoin<TEntity, T1, T2, T3, T4, T5>(this.visitor);
+        return new UpdateJoin<TEntity, T1, T2, T3, T4, T5>(this.connection, this.transaction, this.visitor);
     }
 
     public IUpdateJoin<TEntity, T1, T2, T3, T4> Set<TFields>(Expression<Func<TEntity, T1, T2, T3, T4, TFields>> fieldsExpr)
@@ -2116,7 +2127,8 @@ class UpdateJoin<TEntity, T1, T2, T3, T4> : UpdateBase, IUpdateJoin<TEntity, T1,
 }
 class UpdateFrom<TEntity, T1, T2, T3, T4, T5> : UpdateBase, IUpdateFrom<TEntity, T1, T2, T3, T4, T5>
 {
-    public UpdateFrom(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateFrom(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateFrom<TEntity, T1, T2, T3, T4, T5> Set<TFields>(Expression<Func<TEntity, T1, T2, T3, T4, T5, TFields>> fieldsExpr)
     {
@@ -2232,7 +2244,8 @@ class UpdateFrom<TEntity, T1, T2, T3, T4, T5> : UpdateBase, IUpdateFrom<TEntity,
 }
 class UpdateJoin<TEntity, T1, T2, T3, T4, T5> : UpdateBase, IUpdateJoin<TEntity, T1, T2, T3, T4, T5>
 {
-    public UpdateJoin(UpdateVisitor visitor) : base(visitor) { }
+    public UpdateJoin(TheaConnection connection, IDbTransaction transaction, UpdateVisitor visitor)
+        : base(connection, transaction, visitor) { }
 
     public IUpdateJoin<TEntity, T1, T2, T3, T4, T5> Set<TFields>(Expression<Func<TEntity, T1, T2, T3, T4, T5, TFields>> fieldsExpr)
     {

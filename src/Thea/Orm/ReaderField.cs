@@ -1,21 +1,12 @@
-﻿using System.Reflection;
-using Thea.Orm;
+﻿using System.Collections.Generic;
+using System.Reflection;
 
-namespace Thea.Trolley;
+namespace Thea.Orm;
 
-public enum ReaderFieldType : byte
-{
-    Field = 1,
-    Entity = 2,
-    /// <summary>
-    /// 像Grouping这种的接口提供的临时实体
-    /// </summary>
-    AnonymousField = 3
-}
 public class ReaderField
 {
     public int Index { get; set; }
-    public ReaderFieldType Type { get; set; }
+    public ReaderFieldType FieldType { get; set; }
     public int? ParentIndex { get; set; }
     /// <summary>
     /// 当前查询中的Table，如：User表
@@ -34,11 +25,8 @@ public class ReaderField
     /// </summary>
     public string Body { get; set; }
     /// <summary>
-    /// 如果是实体，字段个数，主要用于匿名对象
-    /// </summary>
-    public int FieldCount { get; set; }
-    /// <summary>
     /// 是否有后续的子对象
     /// </summary>
     public bool HasNextInclude { get; set; }
+    public List<ReaderField> ReaderFields { get; set; }
 }
