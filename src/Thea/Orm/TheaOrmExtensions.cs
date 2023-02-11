@@ -18,6 +18,11 @@ public static class TheaOrmExtensions
         typeof(bool?),typeof(char?),typeof(Guid?) ,typeof(DateTime?),typeof(DateTimeOffset?),typeof(TimeSpan?) };
 
 
+    public static TenantDatabaseBuilder Configure<TModelConfiguration>(this TenantDatabaseBuilder builder) where TModelConfiguration : IModelConfiguration, new()
+    {
+        builder.Configure(new TModelConfiguration());
+        return builder;
+    }
     public static IOrmProvider GetOrmProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
     {
         var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
