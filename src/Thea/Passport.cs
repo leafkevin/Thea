@@ -36,23 +36,20 @@ public class Passport : IPassport
     public bool IsAuthenticated { get; private set; }
 
 
-    public static Passport ParseFrom(ClaimsPrincipal user)
+    public Passport(ClaimsPrincipal user)
     {
         if (user == null || user.Identity == null)
-            return null;
-
-        var passport = new Passport();
-        passport.IsAuthenticated = user.Identity.IsAuthenticated;
-        passport.AuthenticationType = user.Identity.AuthenticationType;
+            return;
+        this.IsAuthenticated = user.Identity.IsAuthenticated;
+        this.AuthenticationType = user.Identity.AuthenticationType;
         if (user.Identity.IsAuthenticated)
         {
-            passport.UserId = GetValue<int>(user, JwtClaimTypes.Subject);
-            passport.UserAccount = user.FindFirst("userAccount")?.Value;
-            passport.UserName = user.FindFirst("userName")?.Value;
-            passport.TenantType = GetValue<int>(user, "tenantType");
-            passport.TenantId = GetValue<int>(user, "tenantId");
+            this.UserId = GetValue<int>(user, JwtClaimTypes.Subject);
+            this.UserAccount = user.FindFirst("userAccount")?.Value;
+            this.UserName = user.FindFirst("userName")?.Value;
+            this.TenantType = GetValue<int>(user, "tenantType");
+            this.TenantId = GetValue<int>(user, "tenantId");
         }
-        return passport;
     }
     private static T GetValue<T>(ClaimsPrincipal user, string type, T defaultValue = default)
     {

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
@@ -11,26 +10,12 @@ using Thea.Orm;
 
 namespace Thea.Trolley;
 
-public static class TrolleyExtensions
+public static class Extensions
 {
     private static readonly ConcurrentDictionary<int, Delegate> typeReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> valueTupleReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> queryReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> readerValueConverterCache = new();
-
-
-    public static TenantDatabaseBuilder Add<TOrmProvider>(this TheaDatabaseBuilder builder, string connectionString, bool isDefault) where TOrmProvider : IOrmProvider, new()
-    {
-        return builder.Add(new TheaDatabase
-        {
-            ConnectionString = connectionString,
-            IsDefault = isDefault,
-            OrmProviderType = typeof(TOrmProvider)
-        });
-    }
-    public static OrmDbFactoryBuilder AddTypeHandler<TTypeHandler>(this OrmDbFactoryBuilder builder) where TTypeHandler : class, ITypeHandler, new()
-        => builder.AddTypeHandler(new TTypeHandler());
-
 
     public static string GetQuotedValue(this IOrmProvider ormProvider, object value)
     {

@@ -26,13 +26,4 @@ public class TenantDatabaseBuilder
         this.database.OrmProviderType = ormProviderType;
         return this;
     }
-    public TenantDatabaseBuilder Configure(IModelConfiguration configuration)
-    {
-        if (!this.databaseProvider.TryGetEntityMapProvider(this.database.OrmProviderType, out var mapProvider))
-            this.databaseProvider.AddEntityMapProvider(this.database.OrmProviderType, mapProvider = new EntityMapProvider());
-
-        var modelBuilder = new ModelBuilder(mapProvider);
-        configuration.OnModelCreating(modelBuilder);
-        return this;
-    }
 }

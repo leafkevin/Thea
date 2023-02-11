@@ -18,11 +18,6 @@ public static class TheaOrmExtensions
         typeof(bool?),typeof(char?),typeof(Guid?) ,typeof(DateTime?),typeof(DateTimeOffset?),typeof(TimeSpan?) };
 
 
-    public static TenantDatabaseBuilder Configure<TModelConfiguration>(this TenantDatabaseBuilder builder) where TModelConfiguration : IModelConfiguration, new()
-    {
-        builder.Configure(new TModelConfiguration());
-        return builder;
-    }
     public static IOrmProvider GetOrmProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
     {
         var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
@@ -35,12 +30,19 @@ public static class TheaOrmExtensions
     {
         var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
         var database = dbProvider.GetDatabase(tenantId);
-        if (dbProvider.TryGetEntityMapProvider(database.OrmProviderType, out var entityMapProvider))
+        if (dbFactory.TryGetEntityMapProvider(database.OrmProviderType, out var entityMapProvider))
             return entityMapProvider;
         return null;
     }
-    public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
-       => (T)typeHandler.Parse(ormProvider, typeof(T), value);
+    public static TenantDatabaseBuilder Add<TOrmProvider>(this TheaDatabaseBuilder builder, string connectionString, bool isDefault) where TOrmProvider : IOrmProvider, new()
+    {
+        return builder.Add(new TheaDatabase
+        {
+            ConnectionString = connectionString,
+            IsDefault = isDefault,
+            OrmProviderType = typeof(TOrmProvider)
+        });
+    }
     public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType)
     {
         if (!mapProvider.TryGetEntityMap(entityType, out var mapper))
@@ -60,6 +62,9 @@ public static class TheaOrmExtensions
         }
         return mapper;
     }
+    public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
+       => (T)typeHandler.Parse(ormProvider, typeof(T), value);
+
 
 
     public static TEntity QueryFirst<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)

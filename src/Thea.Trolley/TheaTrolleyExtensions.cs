@@ -5,7 +5,7 @@ using Thea.Orm;
 
 namespace Thea.Trolley
 {
-    public static class TheaExtensions
+    public static class TheaTrolleyExtensions
     {
         public static IServiceCollection AddTrolley(this IServiceCollection services, Action<OrmDbFactoryBuilder> initializer)
         {
@@ -33,6 +33,13 @@ namespace Thea.Trolley
                         f.Add(database).Use(ormProviderType));
                 }
             }
+            return builder;
+        }
+        public static OrmDbFactoryBuilder AddTypeHandler<TTypeHandler>(this OrmDbFactoryBuilder builder) where TTypeHandler : class, ITypeHandler, new()
+            => builder.AddTypeHandler(new TTypeHandler());
+        public static OrmDbFactoryBuilder Configure<TOrmProvider, TModelConfiguration>(this OrmDbFactoryBuilder builder) where TModelConfiguration : class, IModelConfiguration, new()
+        {
+            builder.Configure(typeof(TOrmProvider), new TModelConfiguration());
             return builder;
         }
     }
