@@ -17,11 +17,7 @@ public static class Extensions
     private static readonly ConcurrentDictionary<int, Delegate> queryReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> readerValueConverterCache = new();
 
-    public static string GetQuotedValue(this IOrmProvider ormProvider, object value)
-    {
-        if (value == null) return "NULL";
-        return ormProvider.GetQuotedValue(value.GetType(), value);
-    }
+   
     public static bool IsNullableType(this Type type, out Type underlyingType)
     {
         if (type.IsValueType)
@@ -60,12 +56,6 @@ public static class Extensions
                 return fieldInfo.FieldType;
         }
         throw new NotSupportedException("成员member，不是属性也不是字段");
-    }
-    public static bool TryPop<T>(this Stack<T> stack, Func<T, bool> filter, out T element)
-    {
-        if (stack.TryPeek(out element) && filter.Invoke(element))
-            return stack.TryPop(out _);
-        return false;
     }
     public static bool IsParameter(this Expression expr, out string parameterName)
     {

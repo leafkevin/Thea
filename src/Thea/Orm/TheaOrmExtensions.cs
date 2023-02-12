@@ -43,6 +43,11 @@ public static class TheaOrmExtensions
             OrmProviderType = typeof(TOrmProvider)
         });
     }
+    public static string GetQuotedValue(this IOrmProvider ormProvider, object value)
+    {
+        if (value == null) return "NULL";
+        return ormProvider.GetQuotedValue(value.GetType(), value);
+    }
     public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType)
     {
         if (!mapProvider.TryGetEntityMap(entityType, out var mapper))
@@ -64,7 +69,7 @@ public static class TheaOrmExtensions
     }
     public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
        => (T)typeHandler.Parse(ormProvider, typeof(T), value);
-
+    
 
 
     public static TEntity QueryFirst<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)

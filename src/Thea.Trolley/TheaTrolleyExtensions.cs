@@ -28,7 +28,7 @@ namespace Thea.Trolley
                     connString.Bind(database);
 
                     var ormProviderTypeName = connString.GetValue<string>("OrmProvider");
-                    var ormProviderType = typeof(IOrmDbFactory).Assembly.GetType(ormProviderTypeName);
+                    var ormProviderType = typeof(OrmDbFactory).Assembly.GetType(ormProviderTypeName);
                     builder.Register(database.DbKey, database.IsDefault, f =>
                         f.Add(database).Use(ormProviderType));
                 }
