@@ -85,9 +85,11 @@
     <Content Include="Plugins\Npgsql.dll" />
     <Content Include="SqlServer\Entities.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Entities.cs</LastGenOutput>
     </Content>
     <Content Include="SqlServer\Entity.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Entity.cs</LastGenOutput>
     </Content>
     <Content Include="SqlServer\ModelConfiguration.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
@@ -98,6 +100,7 @@
     </Content>
     <Content Include="MySql\Entity.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Entity.cs</LastGenOutput>
     </Content>
     <Content Include="MySql\ModelConfiguration.tt">
       <Generator>TextTemplatingFileGenerator</Generator>

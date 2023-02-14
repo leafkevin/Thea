@@ -21,7 +21,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Alarm", "Thea.Alarm\Th
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Trolley", "Thea.Trolley\Thea.Trolley.csproj", "{6AD19D00-833D-4A2B-AC5F-91016A1F3491}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thea.Job", "Thea.Job\Thea.Job.csproj", "{705C01AD-026A-497E-9425-B7EF657F4479}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Job", "Thea.Job\Thea.Job.csproj", "{705C01AD-026A-497E-9425-B7EF657F4479}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeTemplate", "CodeTemplate\CodeTemplate.csproj", "{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -57,6 +59,10 @@ Global
 		{705C01AD-026A-497E-9425-B7EF657F4479}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{705C01AD-026A-497E-9425-B7EF657F4479}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{705C01AD-026A-497E-9425-B7EF657F4479}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -40,7 +40,7 @@ class DingtalkAlarmService : IAlarmService
 
             var httpContent = new StringContent(body, Encoding.UTF8);
             httpContent.Headers.ContentType = ApplicationJson;
-            var client = this.clientFactory.CreateClient();
+            using var client = this.clientFactory.CreateClient();
             var url = ApiUrl + this.webhookToken;
             var response = await client.PostAsync(url, httpContent);
             response.EnsureSuccessStatusCode();

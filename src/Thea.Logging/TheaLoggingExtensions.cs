@@ -22,7 +22,7 @@ public static class TheaLoggingExtensions
     }
     public static IApplicationBuilder UseTheaLogHandler<TLogHandlerMiddleware>(this IApplicationBuilder app)
     {
-        var loggerProcessor = app.ApplicationServices.GetService<TheaLoggerProcessor>();
+        var loggerProcessor = app.ApplicationServices.GetService<ILoggerProcessor>();
         loggerProcessor.AddHandler<TLogHandlerMiddleware>();
         loggerProcessor.Build();
         return app;

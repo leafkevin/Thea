@@ -22,16 +22,14 @@
 <#@ import namespace="Microsoft.VisualStudio.TextTemplating"#>
 <#@ output encoding="utf-8" #>
 <#
-    var connectionString = "Server=localhost;Database=fengling;Uid=root;password=123456;charset=utf8mb4;";
-	var dbProvider = new MySqlProvider(connectionString);
-
-    var databaseName = "fengling";
-	var tableName = "sys_user";
+    var tableName = "sys_user";
     var removePrefix = "sys_";
     var separator = '_';
+    var connectionString = "Host=localhost;Username=postgres;Password=123456;Database=fengling;Maximum Pool Size=20";
+	var dbProvider = new NpgSqlProvider(connectionString);
     var className = dbProvider.ToClassName(tableName, removePrefix, separator);
-	var tableInfo = dbProvider.GetTableInfo(databaseName, tableName);
-	var columnList = dbProvider.GetColumnList(databaseName, tableInfo.TableName);
+	var tableInfo = dbProvider.GetTableInfo(tableName);
+	var columnList = dbProvider.GetColumnList(tableName);
 #>
 using PaymentCenter.Domain.Models;
 using Thea.Orm;
@@ -66,4 +64,4 @@ class ModelConfiguration : IModelConfiguration
 }
 <#@ include file="$(ProjectDir)\Manager.ttinclude" once="true"#>
 <#@ include file="$(ProjectDir)\DbEntitries.ttinclude" once="true"#>
-<#@ include file="MySqlProvider.ttinclude" once="true"#>
+<#@ include file="NpgSqlProvider.ttinclude" once="true"#>
