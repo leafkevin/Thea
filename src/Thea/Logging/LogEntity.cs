@@ -18,7 +18,7 @@ public class LogEntity
     public string AppId { get; set; }
     public string Parameters { get; set; }
 
-    public int UserId { get; set; }
+    public string UserId { get; set; }
     public string UserName { get; set; }
     public int TenantType { get; set; }
     public int TenantId { get; set; }

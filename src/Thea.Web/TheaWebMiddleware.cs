@@ -26,8 +26,8 @@ public class TheaWebMiddleware
     public async Task Invoke(HttpContext context)
     {
         var originalStream = context.Response.Body;
-        var logEntityInfo = await this.CreateLogEntity(context);
-        this.Initialize(context, logEntityInfo);
+        var logEntityInfo = this.CreateLogEntity(context);
+        await this.Initialize(context, logEntityInfo);
         var logScope = new TheaLogState { TraceId = logEntityInfo.TraceId, Sequence = logEntityInfo.Sequence, Tag = logEntityInfo.Tag };
         using (this.logger.BeginScope(logScope))
         {
@@ -56,7 +56,7 @@ public class TheaWebMiddleware
         }
     }
 
-    private async Task<LogEntity> CreateLogEntity(HttpContext context)
+    private LogEntity CreateLogEntity(HttpContext context)
     {
         var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = LogLevel.Information };
         if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
@@ -64,11 +64,11 @@ public class TheaWebMiddleware
 
         if (context.User != null)
         {
-            logEntityInfo.UserId = this.GetValue<int>(context.User, "sub");
-            logEntityInfo.UserName = context.User.FindFirst("customerCode")?.Value;
+            logEntityInfo.UserId = context.User.FindFirst("sub")?.Value;
+            logEntityInfo.UserName = context.User.FindFirst("userName")?.Value;
             logEntityInfo.AppId = context.User.FindFirst("client_id")?.Value;
-            logEntityInfo.TenantType = this.GetValue<int>(context.User, "customerId");
-            logEntityInfo.TenantId = this.GetValue<int>(context.User, "customerId");
+            logEntityInfo.TenantType = this.GetValue<int>(context.User, "tenantType");
+            logEntityInfo.TenantId = this.GetValue<int>(context.User, "tenantId");
         }
 
         if (context.Request.Headers.TryGetValue("TraceId", out StringValues traceIds))
@@ -97,23 +97,10 @@ public class TheaWebMiddleware
         logEntityInfo.Path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
         logEntityInfo.CreatedAt = DateTime.Now;
-
-        string queryString = null;
-        if (!string.IsNullOrEmpty(context.Request.QueryString.Value))
-            queryString = HttpUtility.UrlDecode(context.Request.QueryString.Value);
-
-        if (logEntityInfo.ApiType == ApiType.HttpGet)
-            logEntityInfo.Parameters = queryString;
-        else
-        {
-            var body = await this.ReadBody(context.Request.Body);
-            logEntityInfo.Parameters = $"{{QurerString:{queryString},Body:{body}}}";
-        }
-
         return logEntityInfo;
     }
 
-    private void Initialize(HttpContext context, LogEntity logEntityInfo)
+    private async Task Initialize(HttpContext context, LogEntity logEntityInfo)
     {
         context.Request.EnableBuffering();
         context.Response.OnStarting(() =>
@@ -125,6 +112,12 @@ public class TheaWebMiddleware
 
             return Task.CompletedTask;
         });
+        if (logEntityInfo.ApiType == ApiType.HttpGet)
+        {
+            if (context.Request.Query != null && context.Request.Query.Count > 0)
+                logEntityInfo.Parameters = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
+        }
+        else logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
     }
     private async Task<string> ReadBody(Stream stream)
     {

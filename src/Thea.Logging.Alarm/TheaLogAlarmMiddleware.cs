@@ -76,7 +76,7 @@ public class TheaLogAlarmMiddleware
             {
                 this.firedInfos.TryAdd(hashKey, firedInfo = new AlarmFiredInfo
                 {
-                    CreatedAt = firedInfo.CreatedAt,
+                    CreatedAt = DateTime.Now,
                     FiredTimes = 1
                 });
                 var senceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";

@@ -3,7 +3,7 @@
     /// <summary>
     /// 用户ID
     /// </summary>
-    int UserId { get; }
+    string UserId { get; }
     /// <summary>
     /// 用户姓名
     /// </summary>
@@ -16,8 +16,12 @@
     /// 租户类型
     /// </summary>
     public int TenantType { get; }
-    /// <summary>
-    /// 租户ID
+	/// <summary>
+    /// 认证类型
     /// </summary>
-    public int TenantId { get; }
+    string AuthenticationType { get; }
+    /// <summary>
+    /// 是否已认证通过
+    /// </summary>
+    bool IsAuthenticated { get; }
 }

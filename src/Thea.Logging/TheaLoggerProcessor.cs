@@ -55,6 +55,8 @@ namespace Thea.Logging
                             if (this.next != null && !await this.next.Invoke(context))
                                 continue;
                         }
+                        if (logEntities.Count > 0)
+                            logEntities.Clear();
                     }
                     catch (Exception ex)
                     {

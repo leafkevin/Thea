@@ -9,32 +9,31 @@ public class Passport : IPassport
     /// <summary>
     /// 用户ID
     /// </summary>
-    public int UserId { get; private set; }
+    public virtual string UserId { get; protected set; }
     /// <summary>
     /// 用户账号
     /// </summary>
-    public string UserAccount { get; private set; }
+    public virtual string UserAccount { get; protected set; }
     /// <summary>
     /// 用户姓名
     /// </summary>
-    public string UserName { get; private set; }
+    public virtual string UserName { get; protected set; }
     /// <summary>
     /// 租户类型
     /// </summary>
-    public int TenantType { get; set; }
+    public virtual int TenantType { get; protected set; }
     /// <summary>
     /// 租户ID
     /// </summary>
-    public int TenantId { get; private set; }
+    public virtual int TenantId { get; protected set; }
     /// <summary>
     /// 证件类型
     /// </summary>
-    public string AuthenticationType { get; private set; }
+    public virtual string AuthenticationType { get; protected set; }
     /// <summary>
     /// 是否已认证通过
     /// </summary>
-    public bool IsAuthenticated { get; private set; }
-
+    public virtual bool IsAuthenticated { get; protected set; }
 
     public Passport(ClaimsPrincipal user)
     {
@@ -44,7 +43,7 @@ public class Passport : IPassport
         this.AuthenticationType = user.Identity.AuthenticationType;
         if (user.Identity.IsAuthenticated)
         {
-            this.UserId = GetValue<int>(user, JwtClaimTypes.Subject);
+            this.UserId = user.FindFirst(JwtClaimTypes.Subject).Value;
             this.UserAccount = user.FindFirst("userAccount")?.Value;
             this.UserName = user.FindFirst("userName")?.Value;
             this.TenantType = GetValue<int>(user, "tenantType");
