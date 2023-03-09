@@ -47,10 +47,10 @@ public class OrmDbFactoryBuilder
             {
                 mapProvider = new EntityMapProvider();
                 this.dbFactory.AddEntityMapProvider(ormProviderType, mapProvider);
-                foreach (var entityMapper in mapProvider.EntityMaps)
-                {
-                    entityMapper.Build(ormProvider, this.dbFactory.TypeHandlerProvider);
-                }
+            }
+            foreach (var entityMapper in mapProvider.EntityMaps)
+            {
+                entityMapper.Build(ormProvider, this.dbFactory.TypeHandlerProvider);
             }
         }
         return this.dbFactory;

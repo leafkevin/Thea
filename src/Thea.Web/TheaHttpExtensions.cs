@@ -106,11 +106,41 @@ public static class TheaHttpExtensions
     }
     public static string GetToken(this IHttpContextAccessor contextAccessor)
     {
+        if (contextAccessor == null)
+            return null;
+        if (contextAccessor.HttpContext == null)
+            return null;
+        var request = contextAccessor.HttpContext.Request;
+        if (request.Headers.TryGetValue("Authorization", out var token))
+            return token.ToString().Replace("Bearer ", string.Empty);
+
+        return null;
+    }
+    public static string GetToken(this HttpContext context)
+    {
+        if (context == null)
+            return null;
+        var request = context.Request;
+        if (request.Headers.TryGetValue("Authorization", out var token))
+            return token.ToString().Replace("Bearer ", string.Empty);
+
+        return null;
+    }
+    public static string GetTraceId(this IHttpContextAccessor contextAccessor)
+    {
         var curRequest = contextAccessor.HttpContext.Request;
         if (curRequest.Headers.TryGetValue("Authorization", out var token))
         {
             return token.ToString().Replace("Bearer ", String.Empty);
         }
         return String.Empty;
+    }
+    public static string GetTraceId(this HttpContext context)
+    {
+        if (context == null)
+            return null;
+        if (!context.Request.Headers.TryGetValue("TraceId", out var traceId))
+            return null;
+        return traceId.ToString();
     }
 }

@@ -65,10 +65,10 @@ public class TheaWebMiddleware
         if (context.User != null)
         {
             logEntityInfo.UserId = context.User.FindFirst("sub")?.Value;
-            logEntityInfo.UserName = context.User.FindFirst("userName")?.Value;
+            logEntityInfo.UserName = context.User.FindFirst("name")?.Value;
             logEntityInfo.AppId = context.User.FindFirst("client_id")?.Value;
-            logEntityInfo.TenantType = this.GetValue<int>(context.User, "tenantType");
-            logEntityInfo.TenantId = this.GetValue<int>(context.User, "tenantId");
+            logEntityInfo.TenantType = context.User.FindFirst("tenant_type")?.Value;
+            logEntityInfo.TenantId = context.User.ClaimTo<int>("tenant_id", -1);
         }
 
         if (context.Request.Headers.TryGetValue("TraceId", out StringValues traceIds))
@@ -212,11 +212,5 @@ public class TheaWebMiddleware
             case "DELETE": return ApiType.HttpDelete;
         }
         return ApiType.LocalInvoke;
-    }
-    private T GetValue<T>(ClaimsPrincipal claimsPrincipal, string type)
-    {
-        var strValue = claimsPrincipal.FindFirst(type)?.Value;
-        if (string.IsNullOrEmpty(strValue)) return default(T);
-        return (T)Convert.ChangeType(strValue, typeof(T));
     }
 }

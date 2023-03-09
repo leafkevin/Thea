@@ -20,7 +20,7 @@ public class LogEntity
 
     public string UserId { get; set; }
     public string UserName { get; set; }
-    public int TenantType { get; set; }
+    public string TenantType { get; set; }
     public int TenantId { get; set; }
     public string Authorization { get; set; }
 

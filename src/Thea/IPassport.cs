@@ -15,13 +15,13 @@
     /// <summary>
     /// 租户类型
     /// </summary>
-    public int TenantType { get; }
-	/// <summary>
-    /// 认证类型
-    /// </summary>
-    string AuthenticationType { get; }
+    string TenantType { get; }
     /// <summary>
-    /// 是否已认证通过
+    /// 租户ID
     /// </summary>
-    bool IsAuthenticated { get; }
+    int TenantId { get; }
+    /// <summary>
+    /// 应用ID
+    /// </summary>
+    string AppId { get; }
 }
