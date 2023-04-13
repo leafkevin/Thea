@@ -7,7 +7,6 @@ public class TheaResponse<T>
     public string Message { get; set; }
     public T Data { get; set; }
 }
-
 public class TheaResponse : TheaResponse<object>
 {
     private static readonly TheaResponse _success = new TheaResponse { IsSuccess = true };
@@ -17,19 +16,20 @@ public class TheaResponse : TheaResponse<object>
         return new TheaResponse
         {
             IsSuccess = true,
+            Code = 0,
             Data = result
         };
     }
-    public static TheaResponse Fail(int code, string message)
+    public static TheaResponse Succeed(int code, object result = null)
     {
         return new TheaResponse
         {
-            IsSuccess = false,
+            IsSuccess = true,
             Code = code,
-            Message = message
+            Data = result
         };
     }
-    public static TheaResponse Fail(int code, string message, object data)
+    public static TheaResponse Fail(int code, string message, object data = null)
     {
         return new TheaResponse
         {
@@ -37,16 +37,6 @@ public class TheaResponse : TheaResponse<object>
             Code = code,
             Message = message,
             Data = data
-        };
-    }
-    public TheaResponse<T> To<T>()
-    {
-        return new TheaResponse<T>
-        {
-            IsSuccess = IsSuccess,
-            Code = Code,
-            Message = Message,
-            Data = this.Data.ConvertTo<T>()
         };
     }
 }

@@ -1,11 +1,11 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using System;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Web;
 using Thea.Logging;
@@ -15,11 +15,13 @@ namespace Thea.Web;
 public class TheaWebMiddleware
 {
     private readonly RequestDelegate next;
+    private readonly IConfiguration configuation;
     private readonly ILogger<TheaWebMiddleware> logger;
 
-    public TheaWebMiddleware(RequestDelegate next, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, ILogger<TheaWebMiddleware> logger)
     {
         this.next = next;
+        this.configuation = configuation;
         this.logger = logger;
     }
 
@@ -66,7 +68,7 @@ public class TheaWebMiddleware
         {
             logEntityInfo.UserId = context.User.FindFirst("sub")?.Value;
             logEntityInfo.UserName = context.User.FindFirst("name")?.Value;
-            logEntityInfo.AppId = context.User.FindFirst("client_id")?.Value;
+            logEntityInfo.AppId = this.configuation["AppId"] ?? context.User.FindFirst("client_id")?.Value;
             logEntityInfo.TenantType = context.User.FindFirst("tenant_type")?.Value;
             logEntityInfo.TenantId = context.User.ClaimTo<int>("tenant_id", -1);
         }
@@ -91,7 +93,7 @@ public class TheaWebMiddleware
 
         logEntityInfo.Host = GetHost();
         logEntityInfo.ApiType = this.GetApiType(context.Request.Method);
-        logEntityInfo.ClientIp = GetClientIpAddress(context.Request);
+        logEntityInfo.ClientIp = context.GetClientIp();
         var path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
         var apiUrl = $"{context.Request.Scheme}://*{path}{context.Request.QueryString.Value}";
         logEntityInfo.Path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
@@ -148,20 +150,6 @@ public class TheaWebMiddleware
         var result = TheaResponse.Fail(-1, "服务器内部错误，Detail:" + ex.ToString());
         await context.Response.WriteAsync(result.ToJson());
     }
-
-    private string GetClientIpAddress(HttpRequest request)
-    {
-        string result = null;
-        if (TryGetHeaderValue(request, "X-Forwarded-For", "unknown", out result)) return result;
-        else if (TryGetHeaderValue(request, "X-Real-IP", "unknown", out result)) return result;
-        else if (TryGetHeaderValue(request, "X-Original-For", "unknown", out result)) return result;
-        else if (TryGetHeaderValue(request, "Proxy-Client-IP", "unknown", out result)) return result;
-        else if (TryGetHeaderValue(request, "WL-Proxy-Client-IP", "unknown", out result)) return result;
-        else if (TryGetHeaderValue(request, "HTTP_CLIENT_IP", "unknown", out result)) return result;
-        else if (TryGetHeaderValue(request, "HTTP_X_FORWARDED_FOR", "unknown", out result)) return result;
-        else return request.HttpContext.Connection.RemoteIpAddress?.ToString() + ":" + request.HttpContext.Connection.RemotePort;
-    }
-
     private static string GetHost()
     {
         foreach (var item in NetworkInterface.GetAllNetworkInterfaces())
@@ -183,25 +171,6 @@ public class TheaWebMiddleware
         }
         return string.Empty;
     }
-
-    private bool TryGetHeaderValue(HttpRequest request, string key, string ignoreValue, out string result)
-    {
-        if (!request.Headers.ContainsKey(key))
-        {
-            result = null;
-            return false;
-        }
-
-        if (String.Compare(request.Headers[key], ignoreValue, true) == 0)
-        {
-            result = null;
-            return false;
-        }
-
-        result = request.Headers[key];
-        return true;
-    }
-
     private ApiType GetApiType(string httpMethod)
     {
         switch (httpMethod.ToUpper())

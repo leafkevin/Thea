@@ -8,21 +8,24 @@ public class JsonNullableDecimalConverter : JsonConverter<decimal?>
 {
     public override decimal? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        decimal value = 0;
+        decimal result;
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
-                if (reader.TryGetDecimal(out value))
-                    return value;
+                if (reader.TryGetDecimal(out result))
+                    return result;
                 break;
             case JsonTokenType.String:
-                if (decimal.TryParse(reader.GetString(), out value))
-                    return value;
+                var fromString = reader.GetString();
+                if (string.IsNullOrWhiteSpace(fromString))
+                    return null;
+                if (decimal.TryParse(fromString, out result))
+                    return result;
                 break;
             case JsonTokenType.Null:
                 return null;
         }
-        return value;
+        return null;
     }
     public override void Write(Utf8JsonWriter writer, decimal? value, JsonSerializerOptions options)
     {

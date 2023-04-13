@@ -15,97 +15,91 @@ class FromQuery : IFromQuery
     public IFromQuery<T> From<T>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T));
-        return new FromQuery<T>(this.visitor);
-    }
-    public IFromQuery<T> From<T>(string rawSql, object parameters = null, char tableAsStart = 'a')
-    {
-        this.visitor.tableAsStart = tableAsStart;
-        this.visitor.WithTable(typeof(T), rawSql, parameters);
+        this.visitor.From(tableAsStart, typeof(T));
         return new FromQuery<T>(this.visitor);
     }
     public IFromQuery<T1, T2> From<T1, T2>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2));
         return new FromQuery<T1, T2>(this.visitor);
     }
     public IFromQuery<T1, T2, T3> From<T1, T2, T3>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3));
         return new FromQuery<T1, T2, T3>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4> From<T1, T2, T3, T4>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4));
         return new FromQuery<T1, T2, T3, T4>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5> From<T1, T2, T3, T4, T5>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5));
         return new FromQuery<T1, T2, T3, T4, T5>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6> From<T1, T2, T3, T4, T5, T6>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6));
         return new FromQuery<T1, T2, T3, T4, T5, T6>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7> From<T1, T2, T3, T4, T5, T6, T7>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8> From<T1, T2, T3, T4, T5, T6, T7, T8>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9> From<T1, T2, T3, T4, T5, T6, T7, T8, T9>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12), typeof(T13));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12), typeof(T13));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12), typeof(T13), typeof(T14));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12), typeof(T13), typeof(T14));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14>(this.visitor);
     }
     public IFromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>(char tableAsStart = 'a')
     {
         this.visitor.tableAsStart = tableAsStart;
-        this.visitor.From(typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12), typeof(T13), typeof(T14), typeof(T15));
+        this.visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10), typeof(T11), typeof(T12), typeof(T13), typeof(T14), typeof(T15));
         return new FromQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15>(this.visitor);
     }
     public string ToSql(out List<IDbDataParameter> dbParameters)
@@ -123,10 +117,10 @@ class FromQuery<T> : IFromQuery<T>
         if (subQuery == null)
             throw new ArgumentNullException(nameof(subQuery));
 
-        var fromQuery = new FromQuery(this.visitor.Clone('a', $"p{this.unionIndex++}u"));
-        var query = subQuery.Invoke(fromQuery);
-        var sql = " UNION " + query.ToSql(out var dbParameters);
-        this.visitor.Union(typeof(T), sql, dbParameters);
+        var newVisitor = this.visitor.Clone('a', $"p{this.unionIndex++}u");
+        subQuery.Invoke(new FromQuery(newVisitor));
+        var sql = " UNION" + Environment.NewLine + newVisitor.BuildSql(out var dbParameters, out var readerFields, true);
+        this.visitor.Union(sql, readerFields, dbParameters);
         return this;
     }
     public IFromQuery<T> UnionAll(Func<IFromQuery, IFromQuery<T>> subQuery)
@@ -134,10 +128,10 @@ class FromQuery<T> : IFromQuery<T>
         if (subQuery == null)
             throw new ArgumentNullException(nameof(subQuery));
 
-        var fromQuery = new FromQuery(this.visitor.Clone('a', $"p{this.unionIndex++}u"));
-        var query = subQuery.Invoke(fromQuery);
-        var sql = " UNION ALL " + query.ToSql(out var dbParameters);
-        this.visitor.Union(typeof(T), sql, dbParameters);
+        var newVisitor = this.visitor.Clone('a', $"p{this.unionIndex++}u");
+        subQuery.Invoke(new FromQuery(newVisitor));
+        var sql = " UNION ALL" + Environment.NewLine + newVisitor.BuildSql(out var dbParameters, out var readerFields, true);
+        this.visitor.Union(sql, readerFields, dbParameters);
         return this;
     }
     public IFromQuery<T> UnionRecursive(Func<IFromQuery, IFromQuery<T>, IFromQuery<T>> subQuery)
@@ -145,10 +139,10 @@ class FromQuery<T> : IFromQuery<T>
         if (subQuery == null)
             throw new ArgumentNullException(nameof(subQuery));
 
-        var fromQuery = new FromQuery(this.visitor.Clone('a', $"p{this.unionIndex++}u"));
-        var query = subQuery.Invoke(fromQuery, null);
-        var sql = " UNION " + query.ToSql(out var dbParameters);
-        this.visitor.Union(typeof(T), sql, dbParameters);
+        var newVisitor = this.visitor.Clone('a', $"p{this.unionIndex++}u");
+        subQuery.Invoke(new FromQuery(newVisitor), null);
+        var sql = " UNION" + Environment.NewLine + newVisitor.BuildSql(out var dbParameters, out var readerFields, true);
+        this.visitor.Union(sql, readerFields, dbParameters);
         return this;
     }
     public IFromQuery<T> UnionAllRecursive(Func<IFromQuery, IFromQuery<T>, IFromQuery<T>> subQuery)
@@ -156,10 +150,10 @@ class FromQuery<T> : IFromQuery<T>
         if (subQuery == null)
             throw new ArgumentNullException(nameof(subQuery));
 
-        var fromQuery = new FromQuery(this.visitor.Clone('a', $"p{this.unionIndex++}u"));
-        var query = subQuery.Invoke(fromQuery, null);
-        var sql = " UNION ALL " + query.ToSql(out var dbParameters);
-        this.visitor.Union(typeof(T), sql, dbParameters);
+        var newVisitor = this.visitor.Clone('a', $"p{this.unionIndex++}u");
+        subQuery.Invoke(new FromQuery(newVisitor), null);
+        var sql = " UNION ALL" + Environment.NewLine + newVisitor.BuildSql(out var dbParameters, out var readerFields, true);
+        this.visitor.Union(sql, readerFields, dbParameters);
         return this;
     }
     public IFromQuery<T, TOther> InnerJoin<TOther>(Expression<Func<T, TOther, bool>> joinOn)
@@ -254,6 +248,11 @@ class FromQuery<T> : IFromQuery<T>
     public IFromQuery<T> Distinct()
     {
         this.visitor.Distinct();
+        return this;
+    }
+    public IFromQuery<T> Take(int limit)
+    {
+        this.visitor.Take(limit);
         return this;
     }
     public IFromQuery<T> Select()

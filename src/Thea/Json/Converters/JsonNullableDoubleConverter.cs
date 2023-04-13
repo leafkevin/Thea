@@ -8,21 +8,23 @@ public class JsonNullableDoubleConverter : JsonConverter<double?>
 {
     public override double? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        double value = 0;
+        double result;
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
-                if (reader.TryGetDouble(out value))
-                    return value;
+                if (reader.TryGetDouble(out result))
+                    return result;
                 break;
             case JsonTokenType.String:
-                if (double.TryParse(reader.GetString(), out value))
-                    return value;
+                var fromString = reader.GetString();
+                if (string.IsNullOrWhiteSpace(fromString))
+                    return null;
+                if (double.TryParse(fromString, out result))
+                    return result;
                 break;
-            case JsonTokenType.Null:
-                return null;
+            case JsonTokenType.Null: return null;
         }
-        return value;
+        return null;
     }
     public override void Write(Utf8JsonWriter writer, double? value, JsonSerializerOptions options)
     {

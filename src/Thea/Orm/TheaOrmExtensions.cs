@@ -13,9 +13,10 @@ public static class TheaOrmExtensions
     private static Type[] valueTypes = new Type[] {typeof(byte),typeof(sbyte),typeof(short),typeof(ushort),
         typeof(int),typeof(uint),typeof(long),typeof(ulong),typeof(float),typeof(double),typeof(decimal),
         typeof(bool),typeof(string),typeof(char),typeof(Guid),typeof(DateTime),typeof(DateTimeOffset),
-        typeof(TimeSpan),typeof(byte[]),typeof(byte?),typeof(sbyte?),typeof(short?),typeof(ushort?),
-        typeof(int?),typeof(uint?),typeof(long?),typeof(ulong?),typeof(float?),typeof(double?),typeof(decimal?),
-        typeof(bool?),typeof(char?),typeof(Guid?) ,typeof(DateTime?),typeof(DateTimeOffset?),typeof(TimeSpan?) };
+        typeof(TimeSpan),typeof(TimeOnly),typeof(DateOnly),typeof(byte[]),typeof(byte?),typeof(sbyte?),
+        typeof(short?),typeof(ushort?),typeof(int?),typeof(uint?),typeof(long?),typeof(ulong?),typeof(float?),
+        typeof(double?),typeof(decimal?),typeof(bool?),typeof(char?),typeof(Guid?) ,typeof(DateTime?),
+        typeof(DateTimeOffset?),typeof(TimeSpan?),typeof(TimeOnly?),typeof(DateOnly?),};
 
 
     public static IOrmProvider GetOrmProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
@@ -92,12 +93,12 @@ public static class TheaOrmExtensions
         => await repository.Create<TEntity>().WithBy(parameter).ExecuteAsync(cancellationToken);
     public static int Create<TEntity>(this IRepository repository, string rawSql, object parameter)
         => repository.Create<TEntity>().RawSql(rawSql, parameter).Execute();
-    public static async Task<int> CreateAsync<TEntity>(this IRepository repository, string sql, object parameter, CancellationToken cancellationToken = default)
-        => await repository.Create<TEntity>().RawSql(sql, parameter).ExecuteAsync(cancellationToken);
+    public static async Task<int> CreateAsync<TEntity>(this IRepository repository, string rawSql, object parameter, CancellationToken cancellationToken = default)
+        => await repository.Create<TEntity>().RawSql(rawSql, parameter).ExecuteAsync(cancellationToken);
     public static int Create<TEntity>(this IRepository repository, IEnumerable entities, int bulkCount = 500)
-        => repository.Create<TEntity>().WithBy(entities, bulkCount).Execute();
+        => repository.Create<TEntity>().WithByBulk(entities, bulkCount).Execute();
     public static async Task<int> CreateAsync<TEntity>(this IRepository repository, IEnumerable entities, int bulkCount = 500, CancellationToken cancellationToken = default)
-        => await repository.Create<TEntity>().WithBy(entities, bulkCount).ExecuteAsync(cancellationToken);
+        => await repository.Create<TEntity>().WithByBulk(entities, bulkCount).ExecuteAsync(cancellationToken);
 
 
     public static int Update<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, Expression<Func<TEntity, bool>> predicate)

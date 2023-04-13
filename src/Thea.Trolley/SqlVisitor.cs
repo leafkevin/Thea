@@ -10,16 +10,16 @@ using Thea.Orm;
 
 namespace Thea.Trolley;
 
-class SqlVisitor
+class SqlVisitor : ISqlVisitor
 {
-    protected internal char tableAsStart = 'a';
-    protected internal string parameterPrefix;
     protected internal readonly string dbKey;
-    protected internal readonly Type ormProviderType;
     protected internal readonly IOrmProvider ormProvider;
-    protected internal readonly IEntityMapProvider mapProvider;
-    protected internal bool isTarget;
+    protected internal char tableAsStart = 'a';
+    protected readonly IEntityMapProvider mapProvider;
 
+    protected string parameterPrefix = "p";
+    protected bool isParameterized;
+    protected bool isTarget;
     protected List<TableSegment> tables;
     protected Dictionary<string, TableSegment> tableAlias;
     protected List<IDbDataParameter> dbParameters;
@@ -27,111 +27,137 @@ class SqlVisitor
     protected bool isNeedAlias = false;
     protected bool isSelect = false;
     protected bool isWhere = false;
+    protected bool isFromQuery = false;
 
-    public SqlVisitor(string dbKey, IOrmProvider ormProvider, IEntityMapProvider mapProvider, char tableAsStart = 'a', string parameterPrefix = "p")
+    public SqlVisitor(string dbKey, IOrmProvider ormProvider, IEntityMapProvider mapProvider, bool isParameterized = false, char tableAsStart = 'a', string parameterPrefix = "p")
     {
         this.dbKey = dbKey;
-        this.ormProviderType = ormProvider.GetType();
         this.ormProvider = ormProvider;
         this.mapProvider = mapProvider;
+        this.isParameterized = isParameterized;
         this.tableAsStart = tableAsStart;
         this.parameterPrefix = parameterPrefix;
     }
-    public QueryVisitor ToQueryVisitor(char tableAsStart = 'a', string parameterPrefix = "p")
-    {
-        var visitor = new QueryVisitor(this.dbKey, this.ormProvider, this.mapProvider, tableAsStart, parameterPrefix);
-        visitor.isNeedAlias = this.isNeedAlias;
-        return visitor;
-    }
     public virtual SqlSegment VisitAndDeferred(SqlSegment sqlSegment)
-        => this.VisitBooleanDeferred(this.Visit(sqlSegment));
-    public virtual SqlSegment Visit(SqlSegment sqlSegment)
     {
-        if (sqlSegment == SqlSegment.None)
-            return SqlSegment.None;
+        sqlSegment = this.Visit(sqlSegment);
+        if (!sqlSegment.HasDeferred)
+            return sqlSegment;
 
-        SqlSegment result = null;
-        while (sqlSegment.Expression != null)
+        //处理HasValue !逻辑取反操作，这种情况下是一元操作
+        int notIndex = 0;
+        SqlSegment deferredSegment = null;
+        var operationTypes = new OperationType[] { OperationType.Equal, OperationType.Not };
+
+        while (sqlSegment.TryPop(operationTypes, out var deferredExpr))
         {
-            switch (sqlSegment.Expression.NodeType)
+            switch (deferredExpr.OperationType)
             {
-                case ExpressionType.Lambda:
-                    var lambdaExpr = sqlSegment.Expression as LambdaExpression;
-                    if (this.IsFromQuery(lambdaExpr))
-                        return sqlSegment.Change(this.VisitFromQuery(lambdaExpr, out _), false);
-                    sqlSegment.Expression = lambdaExpr.Body;
-                    continue;
-                case ExpressionType.Negate:
-                case ExpressionType.NegateChecked:
-                case ExpressionType.Not:
-                case ExpressionType.Convert:
-                case ExpressionType.ConvertChecked:
-                case ExpressionType.ArrayLength:
-                case ExpressionType.Quote:
-                case ExpressionType.TypeAs:
-                    result = this.VisitUnary(sqlSegment);
+                case OperationType.Equal:
+                    deferredSegment = deferredExpr.Value as SqlSegment;
                     break;
-                case ExpressionType.MemberAccess:
-                    result = this.VisitMemberAccess(sqlSegment);
-                    break;
-                case ExpressionType.Constant:
-                    result = this.VisitConstant(sqlSegment);
-                    break;
-                case ExpressionType.Add:
-                case ExpressionType.AddChecked:
-                case ExpressionType.Subtract:
-                case ExpressionType.SubtractChecked:
-                case ExpressionType.Multiply:
-                case ExpressionType.MultiplyChecked:
-                case ExpressionType.Divide:
-                case ExpressionType.Modulo:
-                case ExpressionType.And:
-                case ExpressionType.AndAlso:
-                case ExpressionType.Or:
-                case ExpressionType.OrElse:
-                case ExpressionType.LessThan:
-                case ExpressionType.LessThanOrEqual:
-                case ExpressionType.GreaterThan:
-                case ExpressionType.GreaterThanOrEqual:
-                case ExpressionType.Equal:
-                case ExpressionType.NotEqual:
-                case ExpressionType.Coalesce:
-                case ExpressionType.ArrayIndex:
-                case ExpressionType.RightShift:
-                case ExpressionType.LeftShift:
-                case ExpressionType.ExclusiveOr:
-                    result = this.VisitBinary(sqlSegment);
-                    break;
-                case ExpressionType.Parameter:
-                    result = this.VisitParameter(sqlSegment);
-                    break;
-                case ExpressionType.Call:
-                    result = this.VisitMethodCall(sqlSegment);
-                    break;
-                case ExpressionType.New:
-                    result = this.VisitNew(sqlSegment);
-                    break;
-                case ExpressionType.NewArrayInit:
-                case ExpressionType.NewArrayBounds:
-                    result = this.VisitNewArray(sqlSegment);
-                    break;
-                case ExpressionType.MemberInit:
-                    result = this.VisitMemberInit(sqlSegment);
-                    break;
-                case ExpressionType.Index:
-                    result = this.VisitIndexExpression(sqlSegment);
-                    break;
-                case ExpressionType.Conditional:
-                    result = this.VisitConditional(sqlSegment);
-                    break;
-                case ExpressionType.ListInit:
-                    result = this.VisitListInit(sqlSegment);
-                    break;
-                case ExpressionType.TypeIs:
-                    result = this.VisitTypeIs(sqlSegment);
+                case OperationType.Not:
+                    notIndex++;
                     break;
             }
-            return result;
+        }
+        if (deferredSegment == null)
+            deferredSegment = SqlSegment.True;
+
+        string strOperator = null;
+        if (notIndex % 2 > 0)
+            strOperator = deferredSegment == SqlSegment.Null ? "IS NOT" : "<>";
+        else strOperator = deferredSegment == SqlSegment.Null ? "IS" : "=";
+        sqlSegment.IsExpression = true;
+
+        //在SELECT语句中，两边加个()，生成的SQL更优雅，在外层会添加
+        if (this.isSelect) sqlSegment.IsNeedParentheses = true;
+        return sqlSegment.Change($"{sqlSegment} {strOperator} {this.GetQuotedValue(deferredSegment)}", false, true);
+    }
+    public virtual SqlSegment Visit(SqlSegment sqlSegment)
+    {
+        SqlSegment result = null;
+        if (sqlSegment.Expression == null)
+            throw new ArgumentNullException("sqlSegment.Expression");
+
+        switch (sqlSegment.Expression.NodeType)
+        {
+            case ExpressionType.Lambda:
+                var lambdaExpr = sqlSegment.Expression as LambdaExpression;
+                if (this.IsFromQuery(lambdaExpr))
+                    result = sqlSegment.ChangeValue(this.VisitFromQuery(lambdaExpr, out _));
+                result = this.Visit(sqlSegment.Next(lambdaExpr.Body));
+                break;
+            case ExpressionType.Negate:
+            case ExpressionType.NegateChecked:
+            case ExpressionType.Not:
+            case ExpressionType.Convert:
+            case ExpressionType.ConvertChecked:
+            case ExpressionType.ArrayLength:
+            case ExpressionType.Quote:
+            case ExpressionType.TypeAs:
+                result = this.VisitUnary(sqlSegment);
+                break;
+            case ExpressionType.MemberAccess:
+                result = this.VisitMemberAccess(sqlSegment);
+                break;
+            case ExpressionType.Constant:
+                result = this.VisitConstant(sqlSegment);
+                break;
+            case ExpressionType.Add:
+            case ExpressionType.AddChecked:
+            case ExpressionType.Subtract:
+            case ExpressionType.SubtractChecked:
+            case ExpressionType.Multiply:
+            case ExpressionType.MultiplyChecked:
+            case ExpressionType.Divide:
+            case ExpressionType.Modulo:
+            case ExpressionType.And:
+            case ExpressionType.AndAlso:
+            case ExpressionType.Or:
+            case ExpressionType.OrElse:
+            case ExpressionType.LessThan:
+            case ExpressionType.LessThanOrEqual:
+            case ExpressionType.GreaterThan:
+            case ExpressionType.GreaterThanOrEqual:
+            case ExpressionType.Equal:
+            case ExpressionType.NotEqual:
+            case ExpressionType.Coalesce:
+            case ExpressionType.ArrayIndex:
+            case ExpressionType.RightShift:
+            case ExpressionType.LeftShift:
+            case ExpressionType.ExclusiveOr:
+                result = this.VisitBinary(sqlSegment);
+                break;
+            case ExpressionType.Parameter:
+                result = this.VisitParameter(sqlSegment);
+                break;
+            case ExpressionType.Call:
+                result = this.VisitMethodCall(sqlSegment);
+                break;
+            case ExpressionType.New:
+                result = this.VisitNew(sqlSegment);
+                break;
+            case ExpressionType.NewArrayInit:
+            case ExpressionType.NewArrayBounds:
+                result = this.VisitNewArray(sqlSegment);
+                break;
+            case ExpressionType.MemberInit:
+                result = this.VisitMemberInit(sqlSegment);
+                break;
+            case ExpressionType.Index:
+                result = this.VisitIndexExpression(sqlSegment);
+                break;
+            case ExpressionType.Conditional:
+                result = this.VisitConditional(sqlSegment);
+                break;
+            case ExpressionType.ListInit:
+                result = this.VisitListInit(sqlSegment);
+                break;
+            case ExpressionType.TypeIs:
+                result = this.VisitTypeIs(sqlSegment);
+                break;
+            default: throw new ArgumentNullException($"不支持的表达式操作，{sqlSegment.Expression}");
         }
         return result;
     }
@@ -143,28 +169,28 @@ class SqlVisitor
             case ExpressionType.Not:
                 if (unaryExpr.Type == typeof(bool))
                 {
-                    //目前只有Not，一元/二元 bool类型才有延时处理,到参数表达式再统一处理
+                    //SELECT/WHERE语句，都会有Defer处理，在最外层再计算bool值
                     sqlSegment.Push(new DeferredExpr { OperationType = OperationType.Not });
                     return this.Visit(sqlSegment.Next(unaryExpr.Operand));
-                    //if (unaryExpr.Operand.IsParameter(out _))
-                    //{
-                    //    //目前只有Not，一元/二元 bool类型才有延时处理,到参数表达式再统一处理
-                    //    sqlSegment.Push(new DeferredExpr { OperationType = OperationType.Not });
-                    //    return this.Visit(sqlSegment.Next(unaryExpr.Operand));
-                    //}
-                    ////TODO:测试Value赋值
-                    //return sqlSegment.Change($"NOT ({this.VisitAndDeferred(sqlSegment.Next(unaryExpr.Operand))})");
                 }
-                return sqlSegment.Change($"~{this.Visit(sqlSegment)}");
+                //TODO:暂时好像没有这种场景待测试
+                return sqlSegment.ChangeValue($"~{this.Visit(sqlSegment)}");
             case ExpressionType.Convert:
                 if (unaryExpr.Method != null)
                 {
-                    //TODO:测试类型转换
                     if (unaryExpr.Operand.IsParameter(out _))
                         return this.Visit(sqlSegment.Next(unaryExpr.Operand));
-                    return this.EvaluateAndParameter(sqlSegment);
+                    return this.Evaluate(sqlSegment);
                 }
-                break;
+                //string.Concat,string.Format,string.Join等方法，参数都是object，
+                //最终变成string，字段访问、表达式需要强制转换,如：a.IntField + 5, b.Field等，常量不需要强转
+                sqlSegment = this.Visit(sqlSegment.Next(unaryExpr.Operand));
+                if (sqlSegment.TargetType != null && sqlSegment.Type != sqlSegment.TargetType && !sqlSegment.IsConstantValue)
+                {
+                    sqlSegment.Type = sqlSegment.TargetType;
+                    return sqlSegment.Change(this.ormProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment)), false, true);
+                }
+                return sqlSegment;
         }
         return this.Visit(sqlSegment.Next(unaryExpr.Operand));
     }
@@ -195,28 +221,46 @@ class SqlVisitor
             case ExpressionType.ExclusiveOr:
             case ExpressionType.RightShift:
             case ExpressionType.LeftShift:
-                //字符串连接单独处理
-                if (binaryExpr.NodeType == ExpressionType.Add && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
-                    return this.VisitConcatAndDeferred(sqlSegment);
-                if (binaryExpr.NodeType == ExpressionType.Subtract && binaryExpr.Left.Type == typeof(DateTime))
-                {
-                    var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Subtract), new Type[] { binaryExpr.Type });
-                    var subtractExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
-                    return this.VisitMethodCall(sqlSegment.Next(subtractExpr));
-                }
+                if (this.IsStringConcatOperator(sqlSegment, out var operatorSegment))
+                    return operatorSegment;
+                if (this.IsDateTimeOperator(sqlSegment, out operatorSegment))
+                    return operatorSegment;
+                if (this.IsTimeSpanOperator(sqlSegment, out operatorSegment))
+                    return operatorSegment;
 
                 var leftSegment = this.Visit(sqlSegment.Next(binaryExpr.Left));
-                var rightSegment = this.Visit(new SqlSegment { Expression = binaryExpr.Right });
+                var rightSegment = this.Visit(new SqlSegment
+                {
+                    Expression = binaryExpr.Right,
+                    ExpectType = leftSegment.ExpectType,
+                    TargetType = leftSegment.TargetType
+                });
+
+                //计算数组访问，a??bb
+                if (leftSegment.IsConstantValue && rightSegment.IsConstantValue)
+                    return this.Evaluate(sqlSegment.Next(binaryExpr));
+
+                if (!leftSegment.HasField && rightSegment.HasField)
+                {
+                    this.Swap(ref leftSegment, ref rightSegment);
+                    if (leftSegment.ExpectType != null && leftSegment.ExpectType.IsEnum && leftSegment.TargetType != null)
+                    {
+                        rightSegment = this.Visit(new SqlSegment
+                        {
+                            Expression = binaryExpr.Right,
+                            ExpectType = leftSegment.ExpectType,
+                            TargetType = leftSegment.TargetType
+                        });
+                    }
+                }
 
                 //bool类型的表达式，这里不做解析，到where、having、joinOn子句中去解析并展开合并
                 if (binaryExpr.NodeType == ExpressionType.Equal || binaryExpr.NodeType == ExpressionType.NotEqual)
                 {
-                    if (!leftSegment.HasField && rightSegment.HasField)
-                        this.Swap(ref leftSegment, ref rightSegment);
-
                     //处理!(a.IsEnabled==true)情况,bool类型，最外层再做defer处理
                     if (binaryExpr.Left.Type == typeof(bool) && leftSegment.HasField && !rightSegment.HasField)
                     {
+                        leftSegment.Push(new DeferredExpr { OperationType = OperationType.Equal, Value = SqlSegment.True });
                         if (!(bool)rightSegment.Value)
                             leftSegment.Push(new DeferredExpr { OperationType = OperationType.Not });
                         if (binaryExpr.NodeType == ExpressionType.NotEqual)
@@ -239,11 +283,16 @@ class SqlVisitor
                         return leftSegment;
                     }
                 }
+                //if (binaryExpr.NodeType == ExpressionType.ArrayIndex)
+                //    throw new NotSupportedException("不支持的数组访问，只支持常量访问");
+
+                leftSegment.Merge(rightSegment);
+                if (leftSegment.Type != rightSegment.Type)
+                    leftSegment.Type = rightSegment.Type;
                 var operators = this.ormProvider.GetBinaryOperator(binaryExpr.NodeType);
                 if (binaryExpr.NodeType == ExpressionType.Coalesce)
-                    return leftSegment.Change($"{operators}({leftSegment},{rightSegment})", false);
-
-                return leftSegment.Change($"{this.GetSqlValue(leftSegment)}{operators}{this.GetSqlValue(rightSegment)}", false);
+                    return leftSegment.Change($"{operators}({this.GetQuotedValue(leftSegment)},{this.GetQuotedValue(rightSegment)})", false, true);
+                return leftSegment.Change($"{this.GetQuotedValue(leftSegment)}{operators}{this.GetQuotedValue(rightSegment)}", false, true);
         }
         return sqlSegment;
     }
@@ -257,7 +306,32 @@ class SqlVisitor
         if (constantExpr.Value == null)
             return SqlSegment.Null;
 
-        return sqlSegment.Change(constantExpr.Value);
+        var objValue = constantExpr.Value;
+        //.NET 枚举类型有时候会解析错误，解析成对应的数值类型，如：a.Gender ?? Gender.Male == Gender.Male
+        //如果枚举类型对应的数据库类型是字符串，就会有问题，需要把数字变为枚举，再把枚举的名字入库。
+        var currentType = constantExpr.Value.GetType();
+        if (sqlSegment.ExpectType != null)
+        {
+            if (sqlSegment.ExpectType != currentType)
+            {
+                if (sqlSegment.ExpectType.IsEnum)
+                    objValue = Enum.ToObject(sqlSegment.ExpectType, objValue);
+                else objValue = Convert.ChangeType(objValue, sqlSegment.ExpectType);
+                sqlSegment.Type = sqlSegment.ExpectType;
+            }
+            if (sqlSegment.TargetType != null)
+            {
+                if (sqlSegment.TargetType == typeof(string))
+                    objValue = objValue.ToString();
+                else objValue = Convert.ChangeType(objValue, sqlSegment.TargetType);
+                sqlSegment.Type = sqlSegment.TargetType;
+            }
+        }
+
+        if (sqlSegment.IsParameterized || this.isParameterized)
+            return this.ToParameter(sqlSegment.ChangeValue(objValue));
+
+        return sqlSegment.Change(objValue);
     }
     public virtual SqlSegment VisitMethodCall(SqlSegment sqlSegment)
     {
@@ -266,43 +340,43 @@ class SqlVisitor
             || typeof(IAggregateSelect).IsAssignableFrom(methodCallExpr.Method.DeclaringType))
             return this.VisitSqlMethodCall(sqlSegment);
 
-        if (!this.ormProvider.TryGetMethodCallSqlFormatter(sqlSegment, methodCallExpr.Method, out var formatter))
-            throw new Exception($"不支持的方法访问，或是{this.ormProvider.GetType().FullName}未实现此方法{methodCallExpr.Method.Name}");
+        if (!this.ormProvider.TryGetMethodCallSqlFormatter(methodCallExpr, out var formatter))
+            throw new NotSupportedException($"不支持的方法访问，或是{this.ormProvider.GetType().FullName}未实现此方法{methodCallExpr.Method.Name}");
 
+        int newStartIndex = 1;
         SqlSegment target = null;
-        object[] args = null;
-        bool isConstantValue = false;
-        //如果方法对象是聚合查询，不做任何处理
         if (methodCallExpr.Object != null)
         {
-            target = this.Visit(new SqlSegment { Expression = methodCallExpr.Object });
-            if (target.IsConstantValue) isConstantValue = true;
+            target = sqlSegment.Next(methodCallExpr.Object);
+            newStartIndex = 0;
         }
 
-        //字符串连接单独特殊处理
+        SqlSegment[] arguments = null;
         if (methodCallExpr.Arguments != null && methodCallExpr.Arguments.Count > 0)
         {
-            var arguments = new List<object>();
-            foreach (var argumentExpr in methodCallExpr.Arguments)
+            var argumentSegments = new List<SqlSegment>();
+            //如果target为null，第一个参数，直接使用现有对象sqlSegment
+            if (newStartIndex > 0) argumentSegments.Add(sqlSegment.Next(methodCallExpr.Arguments[0]));
+            for (int i = newStartIndex; i < methodCallExpr.Arguments.Count; i++)
             {
-                var argumentSegment = this.VisitAndDeferred(new SqlSegment { Expression = argumentExpr });
-                arguments.Add(argumentSegment);
-                if (argumentSegment.IsConstantValue) isConstantValue = true;
+                argumentSegments.Add(new SqlSegment { Expression = methodCallExpr.Arguments[i] });
             }
-            args = arguments.ToArray();
+            arguments = argumentSegments.ToArray();
         }
-        var result = formatter.Invoke(target, sqlSegment.DeferredExprs, args);
-
-        //ToString 原来的值通常都是常量，再以常量值返回
-        if (methodCallExpr.Method.Name == "ToString" && isConstantValue)
-            return sqlSegment.Change(result);
-        sqlSegment.IsExpression = true;
-        return sqlSegment.Change(result, false);
+        return formatter.Invoke(this, target, sqlSegment.DeferredExprs, arguments);
     }
     public virtual SqlSegment VisitParameter(SqlSegment sqlSegment)
     {
         var parameterExpr = sqlSegment.Expression as ParameterExpression;
+
+        if (this.isFromQuery)
+            throw new NotSupportedException($"FROM子查询中不支持实体类型成员MemberAccess表达式访问，只支持基础字段访问访问,{parameterExpr}");
+
         var fromSegment = this.tableAlias[parameterExpr.Name];
+        //参数访问的是模型，通常是成员访问或是SELECT语句的实体访问，成员访问已经处理了参数访问，不会走到此方法
+        //参数访问通常都是SELECT语句的实体访问
+        if (!this.isSelect) throw new NotSupportedException($"不支持的参数表达式访问，{parameterExpr}");
+
         var readerFields = this.AddTableRecursiveReaderFields(sqlSegment.ReaderIndex, fromSegment);
         return sqlSegment.Change(readerFields, false);
     }
@@ -319,63 +393,48 @@ class SqlVisitor
         sqlSegment.IsArray = true;
         var newArrayExpr = sqlSegment.Expression as NewArrayExpression;
         var result = new List<SqlSegment>();
-        bool isConstantValue = false;
+        bool isConstantValue = true;
         foreach (var elementExpr in newArrayExpr.Expressions)
         {
             var elementSegment = new SqlSegment { Expression = elementExpr };
-            elementSegment = this.Visit(elementSegment);
-            if (elementSegment.IsConstantValue)
-                isConstantValue = true;
+            elementSegment = this.VisitAndDeferred(elementSegment);
+            if (!elementSegment.IsConstantValue)
+                isConstantValue = false;
+            sqlSegment.Merge(elementSegment);
             result.Add(elementSegment);
         }
         return sqlSegment.Change(result, isConstantValue);
     }
     public virtual SqlSegment VisitIndexExpression(SqlSegment sqlSegment)
     {
-        var indexExpr = sqlSegment.Expression as IndexExpression;
-        var argExpr = indexExpr.Arguments[0];
-        var objIndex = argExpr is ConstantExpression constant
-            ? constant.Value : this.Evaluate(sqlSegment.Next(argExpr)).Value;
-        var index = (int)Convert.ChangeType(objIndex, typeof(int));
-        var objTarget = this.Evaluate(sqlSegment.Next(indexExpr.Object)).Value;
-        if (objTarget is List<object> objList)
-            return sqlSegment.Change(objList[index]);
-        throw new NotSupportedException("不支持的表达式: " + indexExpr);
+        if (sqlSegment.Expression.IsParameter(out _))
+            throw new NotSupportedException("索引表达式不支持Parameter访问操作");
+        return this.Evaluate(sqlSegment);
     }
     public virtual SqlSegment VisitConditional(SqlSegment sqlSegment)
     {
         var conditionalExpr = sqlSegment.Expression as ConditionalExpression;
-        sqlSegment = this.Visit(sqlSegment.Next(conditionalExpr.Test));
-        var ifTrue = this.Visit(new SqlSegment { Expression = conditionalExpr.IfTrue });
-        var ifFalse = this.Visit(new SqlSegment { Expression = conditionalExpr.IfFalse });
-        if (sqlSegment.HasField && conditionalExpr.Test.Type == typeof(bool))
-        {
-            sqlSegment.Push(new DeferredExpr { OperationType = OperationType.Equal, Value = SqlSegment.True });
-            sqlSegment = this.VisitBooleanDeferred(sqlSegment);
-            return sqlSegment.Change($"CASE WHEN {sqlSegment} THEN {this.GetSqlValue(ifTrue)} ELSE {this.GetSqlValue(ifFalse)} END");
-        }
-        if (sqlSegment.Value is bool)
-        {
-            if ((bool)sqlSegment.Value)
-                return sqlSegment.Change($"CASE WHEN {this.GetSqlValue(ifTrue)} THEN {this.ormProvider.GetQuotedValue(true)} ELSE {this.ormProvider.GetQuotedValue(false)} END");
-            else return sqlSegment.Change($"CASE WHEN {this.GetSqlValue(ifFalse)} THEN {this.ormProvider.GetQuotedValue(true)} ELSE {this.ormProvider.GetQuotedValue(false)} END");
-        }
-        return sqlSegment;
+        sqlSegment = this.VisitAndDeferred(sqlSegment.Next(conditionalExpr.Test));
+        var ifTrueSegment = this.Visit(new SqlSegment { Expression = conditionalExpr.IfTrue });
+        var ifFalseSegment = this.Visit(new SqlSegment { Expression = conditionalExpr.IfFalse });
+        sqlSegment.Merge(ifTrueSegment);
+        sqlSegment.Merge(ifFalseSegment);
+        return sqlSegment.Change($"(CASE WHEN {sqlSegment} THEN {this.GetQuotedValue(ifTrueSegment)} ELSE {this.GetQuotedValue(ifFalseSegment)} END)", false, true);
     }
     public virtual SqlSegment VisitListInit(SqlSegment sqlSegment)
     {
         sqlSegment.IsArray = true;
         var listExpr = sqlSegment.Expression as ListInitExpression;
         var result = new List<SqlSegment>();
-        bool isConstantValue = false;
+        bool isConstantValue = true;
         foreach (var elementInit in listExpr.Initializers)
         {
             if (elementInit.Arguments.Count == 0)
                 continue;
             var elementSegment = new SqlSegment { Expression = elementInit.Arguments[0] };
             elementSegment = this.VisitAndDeferred(elementSegment);
-            if (elementSegment.IsConstantValue)
-                isConstantValue = true;
+            if (!elementSegment.IsConstantValue)
+                isConstantValue = false;
             result.Add(elementSegment);
         }
         return sqlSegment.Change(result, isConstantValue);
@@ -383,7 +442,8 @@ class SqlVisitor
     public virtual SqlSegment VisitTypeIs(SqlSegment sqlSegment)
     {
         var binaryExpr = sqlSegment.Expression as TypeBinaryExpression;
-        sqlSegment = this.Visit(sqlSegment.Next(binaryExpr.Expression));
+        if (!binaryExpr.Expression.IsParameter(out _))
+            return this.Evaluate(sqlSegment);
         if (binaryExpr.TypeOperand == typeof(DBNull))
         {
             sqlSegment.Push(new DeferredExpr
@@ -391,314 +451,139 @@ class SqlVisitor
                 OperationType = OperationType.Equal,
                 Value = SqlSegment.Null
             });
+            return this.Visit(sqlSegment.Next(binaryExpr.Expression));
         }
-        return sqlSegment;
+        throw new NotSupportedException($"不支持的表达式操作，{sqlSegment.Expression}");
     }
-    public virtual SqlSegment VisitBooleanDeferred(SqlSegment fieldSegment)
+    public virtual List<SqlSegment> VisitLogicBinaryExpr(Expression conditionExpr)
     {
-        if (!fieldSegment.HasDeferred)
-            return fieldSegment;
-
-        //处理HasValue !逻辑取反操作，这种情况下是一元操作
-        int notIndex = 0;
-        var sqlSegment = SqlSegment.None;
-        var operationTypes = new OperationType[] { OperationType.Equal, OperationType.Not };
-
-        while (fieldSegment.TryPop(operationTypes, out var deferredExpr))
-        {
-            if (deferredExpr.OperationType == OperationType.Equal)
-            {
-                sqlSegment = deferredExpr.Value as SqlSegment;
-                break;
-            }
-            if (deferredExpr.OperationType == OperationType.Not)
-                notIndex++;
-        }
-        if (sqlSegment == SqlSegment.None)
-            sqlSegment = SqlSegment.True;
-
-        string strOperator = null;
-        if (notIndex % 2 > 0)
-            strOperator = sqlSegment == SqlSegment.Null ? "IS NOT" : "<>";
-        else strOperator = sqlSegment == SqlSegment.Null ? "IS" : "=";
-        fieldSegment.IsExpression = true;
-        if (this.isSelect) fieldSegment.IsNeedParentheses = true;
-        return fieldSegment.Change($"{fieldSegment} {strOperator} {this.GetSqlValue(sqlSegment)}", false);
-    }
-    public virtual SqlSegment VisitConcatAndDeferred(SqlSegment sqlSegment)
-    {
-        var concatSegments = this.VisitConcatExpr(sqlSegment.Expression);
-        bool isConstantValue = true;
-        foreach (var segment in concatSegments)
-        {
-            if (!segment.IsConstantValue)
-            {
-                isConstantValue = false;
-                break;
-            }
-        }
-        if (isConstantValue)
-            return sqlSegment.Change(string.Concat(concatSegments));
-
-        var concatMethodInfo = typeof(string).GetMethod(nameof(string.Concat), new Type[] { typeof(object[]) });
-        this.ormProvider.TryGetMethodCallSqlFormatter(sqlSegment, concatMethodInfo, out var formater);
-        sqlSegment.IsExpression = true;
-        if (this.isSelect)
-        {
-            switch (this.ormProvider.DatabaseType)
-            {
-                case DatabaseType.SqlServer:
-                case DatabaseType.Postgresql:
-                case DatabaseType.Oracle:
-                    sqlSegment.IsNeedParentheses = true;
-                    break;
-            }
-        }
-        return sqlSegment.Change(formater.Invoke(null, null, concatSegments), false);
-    }
-    public virtual List<SqlSegment> VisitConcatExpr(Expression concatExpr)
-    {
-        Func<Expression, bool> isAddBinary = f =>
-        {
-            if (f is BinaryExpression binaryExpr && binaryExpr.NodeType == ExpressionType.Add && binaryExpr.Type == typeof(string)
-                && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
-                return true;
-            return false;
-        };
-        Func<Expression, bool> isConcatCall = f =>
-        {
-            if (f is MethodCallExpression callExpr && callExpr.Method.Name == "Concat")
-                return true;
-            return false;
-        };
-        List<Expression> completedExprs = null;
-        if (isAddBinary(concatExpr))
-            completedExprs = this.FlattenAddConcatParameters(concatExpr);
-        if (isConcatCall(concatExpr))
-            completedExprs = this.FlattenConcatCallParameters(concatExpr);
-        var result = new List<SqlSegment>();
-        foreach (var completedExpr in completedExprs)
-        {
-            result.Add(this.VisitAndDeferred(new SqlSegment { Expression = completedExpr }));
-        }
-        return result;
-    }
-    public virtual List<Expression> FlattenAddConcatParameters(Expression concatExpr)
-    {
-        var completedExprs = new List<Expression>();
-        var deferredExprs = new Stack<Expression>();
-        Func<Expression, bool> isAddBinary = f =>
-        {
-            if (f is BinaryExpression binaryExpr && binaryExpr.NodeType == ExpressionType.Add && binaryExpr.Type == typeof(string)
-                && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
-                return true;
-            return false;
-        };
-        Func<Expression, bool> isConcatCall = f =>
-        {
-            if (f is MethodCallExpression callExpr && callExpr.Method.Name == "Concat")
-                return true;
-            return false;
-        };
-        var nextExpr = concatExpr;
-        while (true)
-        {
-            if (nextExpr is BinaryExpression binaryExpr)
-            {
-                var isLeftBinary = isAddBinary(binaryExpr.Left);
-                if (isLeftBinary)
-                {
-                    deferredExprs.Push(binaryExpr.Right);
-                    nextExpr = binaryExpr.Left as BinaryExpression;
-                    continue;
-                }
-                if (isConcatCall(binaryExpr.Left))
-                    completedExprs.AddRange(this.FlattenConcatCallParameters(binaryExpr.Left));
-                else completedExprs.Add(binaryExpr.Left);
-
-                var isRightBinary = isAddBinary(binaryExpr.Right);
-                if (isRightBinary)
-                {
-                    nextExpr = binaryExpr.Right as BinaryExpression;
-                    continue;
-                }
-
-                if (isConcatCall(binaryExpr.Right))
-                    completedExprs.AddRange(this.FlattenConcatCallParameters(binaryExpr.Right));
-                else completedExprs.Add(binaryExpr.Right);
-
-                if (deferredExprs.TryPop(out var expr))
-                    nextExpr = expr;
-                else break;
-            }
-            else
-            {
-                completedExprs.Add(nextExpr);
-                if (deferredExprs.TryPop(out var expr))
-                    nextExpr = expr;
-                else break;
-            }
-        }
-        return completedExprs;
-    }
-    public virtual List<Expression> FlattenConcatCallParameters(Expression expr)
-    {
-        var concatExpr = expr as MethodCallExpression;
-        var completedExprs = new List<Expression>();
-        Func<Expression, bool> isAddBinary = f =>
-        {
-            if (f is BinaryExpression binaryExpr && binaryExpr.NodeType == ExpressionType.Add && binaryExpr.Type == typeof(string)
-                && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
-                return true;
-            return false;
-        };
-        foreach (var augumentExpr in concatExpr.Arguments)
-        {
-            if (isAddBinary(augumentExpr))
-                completedExprs.AddRange(this.FlattenAddConcatParameters(augumentExpr));
-            else if (augumentExpr is MethodCallExpression callExpr && callExpr.Method.Name == "Concat")
-                completedExprs.AddRange(this.FlattenConcatCallParameters(callExpr));
-            else completedExprs.Add(augumentExpr);
-        }
-        return completedExprs;
-    }
-    public virtual List<SqlSegment> VisitLogicBinaryExpr(Expression expr)
-    {
-        Func<Expression, bool> isLogicBinary = f => f.NodeType != ExpressionType.AndAlso && f.NodeType != ExpressionType.OrElse;
+        Func<Expression, bool> isConditionExpr = f => f.NodeType == ExpressionType.AndAlso || f.NodeType == ExpressionType.OrElse;
 
         int deep = 0;
         var lastOperationType = OperationType.None;
-        var deferredExprs = new Stack<SqlSegment>();
+        var deferredExprs = new Stack<Expression>();
         var completedSegements = new List<SqlSegment>();
-        var binaryExpr = expr as BinaryExpression;
+        var binaryExpr = conditionExpr as BinaryExpression;
 
         while (binaryExpr != null)
         {
+            if (isConditionExpr(binaryExpr.Left))
+            {
+                deferredExprs.Push(binaryExpr.Right);
+                binaryExpr = binaryExpr.Left as BinaryExpression;
+                continue;
+            }
             var operationType = binaryExpr.NodeType == ExpressionType.AndAlso ? OperationType.And : OperationType.Or;
             if (lastOperationType == OperationType.None)
                 lastOperationType = operationType;
             if (operationType != lastOperationType)
+            {
+                lastOperationType = operationType;
                 deep++;
-
-            var isLeftLeaf = isLogicBinary(binaryExpr.Left);
-            var isRightLeaf = isLogicBinary(binaryExpr.Right);
-            if (isLeftLeaf)
-            {
-                var leftSegment = new SqlSegment
-                {
-                    OperationType = operationType,
-                    Expression = binaryExpr.Left,
-                    Deep = deep
-                };
-                if (binaryExpr.Left.NodeType == ExpressionType.MemberAccess)
-                {
-                    leftSegment.DeferredExprs ??= new();
-                    leftSegment.DeferredExprs.Push(new DeferredExpr { OperationType = OperationType.Equal, Value = SqlSegment.True });
-                }
-                completedSegements.Add(leftSegment);
             }
-            if (isRightLeaf)
-            {
-                var rightSegment = new SqlSegment
-                {
-                    OperationType = operationType,
-                    Expression = binaryExpr.Right,
-                    Deep = deep
-                };
-                if (binaryExpr.Right.NodeType == ExpressionType.MemberAccess)
-                {
-                    rightSegment.DeferredExprs ??= new();
-                    rightSegment.DeferredExprs.Push(new DeferredExpr { OperationType = OperationType.Equal, Value = SqlSegment.True });
-                }
-                deferredExprs.Push(rightSegment);
-            }
-            Expression nextExpr = null;
-            if (isLeftLeaf && isRightLeaf) break;
-            if (isLeftLeaf && !isRightLeaf)
-                nextExpr = binaryExpr.Right;
-            if (!isLeftLeaf && isRightLeaf)
-                nextExpr = binaryExpr.Left;
+            var leftSegment = this.CreateConditionSegment(binaryExpr.Left);
+            leftSegment.OperationType = operationType;
+            leftSegment.Deep = deep;
+            completedSegements.Add(leftSegment);
 
-            binaryExpr = nextExpr as BinaryExpression;
-        }
-        while (deferredExprs.TryPop(out var sqlSegment))
-        {
-            completedSegements.Add(sqlSegment);
+            if (isConditionExpr(binaryExpr.Right))
+            {
+                binaryExpr = binaryExpr.Right as BinaryExpression;
+                continue;
+            }
+            var rightSegment = this.CreateConditionSegment(binaryExpr.Right);
+            rightSegment.OperationType = operationType;
+            rightSegment.Deep = deep;
+            completedSegements.Add(rightSegment);
+
+            bool isCompleted = true;
+            while (deferredExprs.TryPop(out var deferredExpr))
+            {
+                if (isConditionExpr(deferredExpr))
+                {
+                    binaryExpr = deferredExpr as BinaryExpression;
+                    isCompleted = false;
+                    break;
+                }
+                var deferredSegment = this.CreateConditionSegment(deferredExpr);
+                deferredSegment.OperationType = operationType;
+                deferredSegment.Deep = deep;
+                completedSegements.Add(deferredSegment);
+            }
+            if (isCompleted) break;
         }
         return completedSegements;
     }
     public virtual SqlSegment Evaluate(SqlSegment sqlSegment)
     {
-        var member = Expression.Convert(sqlSegment.Expression, typeof(object));
-        var lambda = Expression.Lambda<Func<object>>(member);
-        var getter = lambda.Compile();
-        var objValue = getter();
+        var lambdaExpr = Expression.Lambda(sqlSegment.Expression);
+        var objValue = lambdaExpr.Compile().DynamicInvoke();
         if (objValue == null)
             return SqlSegment.Null;
+
+        if (sqlSegment.IsParameterized || this.isParameterized)
+            return this.ToParameter(sqlSegment.ChangeValue(objValue));
+
         return sqlSegment.Change(objValue);
     }
     public virtual T Evaluate<T>(Expression expr)
     {
-        var lambda = Expression.Lambda<Func<T>>(expr);
-        var getter = lambda.Compile();
-        var objValue = getter();
+        var lambdaExpr = Expression.Lambda(expr);
+        var objValue = lambdaExpr.Compile().DynamicInvoke();
         if (objValue == null)
             return default;
-        return objValue;
-    }
-    public virtual SqlSegment EvaluateAndParameter(SqlSegment sqlSegment)
-    {
-        var member = Expression.Convert(sqlSegment.Expression, typeof(object));
-        var lambda = Expression.Lambda<Func<object>>(member);
-        var getter = lambda.Compile();
-        var objValue = getter();
-        if (objValue == null)
-            return SqlSegment.Null;
-
-        sqlSegment.Change(objValue);
-        //只有字符串会变成参数，有可能sql注入
-        var type = sqlSegment.Expression.Type;
-        if (type == typeof(string) || this.IsEnumerableString(type))
-            return this.ToParameter(sqlSegment);
-        return sqlSegment;
+        return (T)objValue;
     }
     public virtual SqlSegment VisitSqlMethodCall(SqlSegment sqlSegment)
     {
         var methodCallExpr = sqlSegment.Expression as MethodCallExpression;
-        sqlSegment.IsExpression = true;
-        sqlSegment.IsConstantValue = false;
         LambdaExpression lambdaExpr = null;
         List<ParameterExpression> visitedParameters = null;
         switch (methodCallExpr.Method.Name)
         {
-            case "ToFlatten":
-                var returnType = methodCallExpr.Method.ReturnType;
-                lambdaExpr = this.EnsureLambda(methodCallExpr.Arguments[1]);
-                Expression flattenExpr = null;
-                var sourceType = methodCallExpr.Arguments[0].Type;
-                if (lambdaExpr.Body.GetParameters(out visitedParameters))
-                    flattenExpr = Expression.Lambda(lambdaExpr.Body, visitedParameters);
-                var readerFields = this.FlattenFieldsTo(returnType, flattenExpr);
-                sqlSegment.Change(readerFields);
+            case "FlattenTo"://通常在最外层的SELECT中转为其他类型
+                if (methodCallExpr.Arguments != null && methodCallExpr.Arguments.Count >= 1)
+                {
+                    Expression flattenExpr = null;
+                    var targetType = methodCallExpr.Method.ReturnType;
+                    var sourceType = methodCallExpr.Arguments[0].Type;
+                    if (methodCallExpr.Arguments.Count > 1)
+                    {
+                        lambdaExpr = this.EnsureLambda(methodCallExpr.Arguments[1]);
+                        flattenExpr = lambdaExpr;
+                        if (lambdaExpr.Body.GetParameters(out visitedParameters))
+                            flattenExpr = Expression.Lambda(lambdaExpr.Body, visitedParameters);
+                    }
+                    var readerFields = this.FlattenFieldsTo(targetType, flattenExpr);
+                    sqlSegment.ChangeValue(readerFields);
+                }
+                break;
+            case "ToParameter":
+                sqlSegment.IsParameterized = true;
+                sqlSegment = this.Visit(sqlSegment.Next(methodCallExpr.Arguments[0]));
+                sqlSegment.IsParameterized = false;
                 break;
             case "In":
                 var elementType = methodCallExpr.Method.GetGenericArguments()[0];
-                if (methodCallExpr.Arguments[1].Type.IsArray || typeof(IEnumerable<>).MakeGenericType(elementType).IsAssignableFrom(methodCallExpr.Arguments[1].Type))
+                var type = methodCallExpr.Arguments[1].Type;
+                if (type.IsArray || typeof(IEnumerable<>).MakeGenericType(elementType).IsAssignableFrom(type))
                 {
-                    sqlSegment = this.Evaluate(sqlSegment.Next(methodCallExpr.Arguments[1]));
+                    sqlSegment = this.Visit(sqlSegment.Next(methodCallExpr.Arguments[1]));
                     if (sqlSegment == SqlSegment.Null)
-                        return sqlSegment.Change("0=1", false);
-                    sqlSegment = this.ToParameter(sqlSegment);
+                        return sqlSegment.Change("1=0", false, true);
+                    var sqlSegments = sqlSegment.Value as List<SqlSegment>;
+                    sqlSegments.ForEach(f => f.Value = this.ormProvider.GetQuotedValue(f));
+                    sqlSegment.ChangeValue(string.Join(',', sqlSegments));
                 }
                 else
                 {
                     lambdaExpr = methodCallExpr.Arguments[1] as LambdaExpression;
-                    var sql = this.VisitFromQuery(lambdaExpr, out bool isNeedAlias);
+                    var sql = this.VisitFromQuery(lambdaExpr, out var isNeedAlias);
                     sqlSegment.Change(sql, false);
                     if (isNeedAlias) this.isNeedAlias = true;
                 }
                 var fieldSegment = this.Visit(new SqlSegment { Expression = methodCallExpr.Arguments[0] });
-                sqlSegment.Change($"{fieldSegment} IN ({sqlSegment})");
+                sqlSegment.Change($"{fieldSegment} IN ({sqlSegment})", false, true);
                 break;
             case "Exists":
                 lambdaExpr = this.EnsureLambda(methodCallExpr.Arguments[0]);
@@ -737,7 +622,7 @@ class SqlVisitor
                 else existsSql = this.VisitFromQuery(lambdaExpr, out _);
                 if (parameters != null && parameters.Count > 0)
                     this.dbParameters.AddRange(parameters);
-                sqlSegment.Change($"EXISTS({existsSql})", false);
+                sqlSegment.Change($"EXISTS({existsSql})", false, true);
                 break;
             case "Count":
             case "LongCount":
@@ -747,9 +632,9 @@ class SqlVisitor
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
 
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"COUNT({sqlSegment})", false);
+                    sqlSegment.Change($"COUNT({sqlSegment})", false, true);
                 }
-                else sqlSegment.Change("COUNT(1)", false);
+                else sqlSegment.Change("COUNT(1)", false, true);
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
                 break;
@@ -761,7 +646,7 @@ class SqlVisitor
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
 
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"COUNT(DISTINCT {sqlSegment})", false);
+                    sqlSegment.Change($"COUNT(DISTINCT {sqlSegment})", false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -772,7 +657,7 @@ class SqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"SUM({sqlSegment})", false);
+                    sqlSegment.Change($"SUM({sqlSegment})", false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -783,7 +668,7 @@ class SqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"AVG({sqlSegment})", false);
+                    sqlSegment.Change($"AVG({sqlSegment})", false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -794,7 +679,7 @@ class SqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"MAX({sqlSegment})", false);
+                    sqlSegment.Change($"MAX({sqlSegment})", false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -805,13 +690,47 @@ class SqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"MIN({sqlSegment})", false);
+                    sqlSegment.Change($"MIN({sqlSegment})", false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
                 break;
         }
         return sqlSegment;
+    }
+    public virtual bool IsStringConcatOperator(SqlSegment sqlSegment, out SqlSegment result)
+    {
+        var binaryExpr = sqlSegment.Expression as BinaryExpression;
+        if (binaryExpr.NodeType == ExpressionType.Add && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
+        {
+            //先打开所有要拼接的部分，最后再拼接
+            var concatSegments = this.SplitConcatList(sqlSegment.Expression);
+
+            //调用拼接方法Concat,每个数据库Provider都实现了这个方法
+            var methodInfo = typeof(string).GetMethod(nameof(string.Concat), new Type[] { typeof(object[]) });
+            var parameters = Expression.NewArrayInit(typeof(object), concatSegments.Select(f => f.Expression));
+            var methodCallExpr = Expression.Call(methodInfo, parameters);
+            sqlSegment.Expression = methodCallExpr;
+            this.ormProvider.TryGetMethodCallSqlFormatter(methodCallExpr, out var formater);
+            //if (this.isSelect)
+            //{
+            //    //SqlServer,Postgresql,Oracle都是使用连接字符串拼接的，
+            //    //在SELECT语句中，加()会优雅一点，在最外层添加()
+            //    switch (this.ormProvider.DatabaseType)
+            //    {
+            //        case DatabaseType.SqlServer:
+            //        case DatabaseType.Postgresql:
+            //        case DatabaseType.Oracle:
+            //            sqlSegment.IsNeedParentheses = true;
+            //            break;
+            //    }
+            //}
+            //返回的SQL表达式中直接拼接好
+            result = formater.Invoke(this, null, null, concatSegments);
+            return true;
+        }
+        result = null;
+        return false;
     }
     public virtual string VisitConditionExpr(Expression conditionExpr)
     {
@@ -861,16 +780,246 @@ class SqlVisitor
                 builder.Append(sqlSegment.ToString());
                 lastDeep = sqlSegment.Deep;
             }
+            if (lastDeep > 0)
+            {
+                while (lastDeep > 0)
+                {
+                    builder.Append(')');
+                    lastDeep--;
+                }
+            }
             return builder.ToString();
         }
-        return this.VisitAndDeferred(new SqlSegment { Expression = conditionExpr }).ToString();
+        return this.VisitAndDeferred(this.CreateConditionSegment(conditionExpr)).ToString();
     }
-    public virtual string GetSqlValue(SqlSegment sqlSegment)
+    public virtual List<SqlSegment> ConvertFormatToConcatList(SqlSegment[] argsSegments)
     {
-        if (sqlSegment == SqlSegment.Null || !sqlSegment.IsConstantValue)
-            return sqlSegment.ToString();
-        return this.ormProvider.GetQuotedValue(sqlSegment.Value);
+        var format = this.Evaluate<string>(argsSegments[0].Expression);
+        int index = 1, formatIndex = 0;
+        var parameters = new List<SqlSegment>();
+        for (int i = 1; i < argsSegments.Length; i++)
+        {
+            switch (argsSegments[i].Expression.NodeType)
+            {
+                case ExpressionType.ListInit:
+                    var listExpr = argsSegments[i].Expression as ListInitExpression;
+                    foreach (var elementInit in listExpr.Initializers)
+                    {
+                        if (elementInit.Arguments.Count == 0)
+                            continue;
+                        parameters.Add(new SqlSegment { Expression = elementInit.Arguments[0] });
+                    }
+                    break;
+                case ExpressionType.NewArrayBounds:
+                case ExpressionType.NewArrayInit:
+                    var newArrayExpr = argsSegments[i].Expression as NewArrayExpression;
+                    foreach (var elementExpr in newArrayExpr.Expressions)
+                    {
+                        parameters.Add(new SqlSegment { Expression = elementExpr });
+                    }
+                    break;
+                default: parameters.Add(argsSegments[i]); break;
+            }
+        }
+        index = 0;
+        var result = new List<SqlSegment>();
+        while (formatIndex < format.Length)
+        {
+            var nextIndex = format.IndexOf('{', formatIndex);
+            if (nextIndex > formatIndex)
+            {
+                var constValue = format.Substring(formatIndex, nextIndex - formatIndex);
+                var constExpr = Expression.Constant(constValue);
+                result.Add(new SqlSegment { Expression = constExpr, Value = constValue, IsConstantValue = true });
+            }
+            result.AddRange(this.SplitConcatList(parameters[index].Expression));
+            index++;
+            formatIndex = format.IndexOf('}', nextIndex + 2) + 1;
+        }
+        return result;
     }
+    public virtual List<SqlSegment> SplitConcatList(SqlSegment[] argsSegments)
+    {
+        var completedExprs = new List<SqlSegment>();
+        var deferredExprs = new Stack<SqlSegment>();
+        Func<Expression, bool> isConcatBinary = f =>
+        {
+            if (f is BinaryExpression binaryExpr && binaryExpr.NodeType == ExpressionType.Add && binaryExpr.Type == typeof(string)
+                && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
+                return true;
+            if (f is MethodCallExpression callExpr && callExpr.Method.Name == "Concat")
+                return true;
+            return false;
+        };
+        SqlSegment nextSegment = null;
+        for (int i = argsSegments.Length - 1; i > 0; i--)
+        {
+            deferredExprs.Push(argsSegments[i]);
+        }
+        nextSegment = argsSegments[0];
+        while (true)
+        {
+            if (isConcatBinary(nextSegment.Expression))
+            {
+                //字符串连接+
+                if (nextSegment.Expression is BinaryExpression binaryExpr)
+                {
+                    if (isConcatBinary(binaryExpr.Left))
+                    {
+                        deferredExprs.Push(nextSegment.Next(binaryExpr.Right));
+                        nextSegment = new SqlSegment { Expression = binaryExpr.Left };
+                        continue;
+                    }
+                    completedExprs.Add(nextSegment);
+                    if (isConcatBinary(binaryExpr.Right))
+                    {
+                        nextSegment = new SqlSegment { Expression = binaryExpr.Right };
+                        continue;
+                    }
+                    completedExprs.Add(new SqlSegment { Expression = binaryExpr.Right });
+                    if (!deferredExprs.TryPop(out nextSegment))
+                        break;
+                    continue;
+                }
+                else
+                {
+                    var callExpr = nextSegment.Expression as MethodCallExpression;
+                    for (int i = callExpr.Arguments.Count - 1; i > 0; i--)
+                    {
+                        deferredExprs.Push(new SqlSegment { Expression = callExpr.Arguments[i] });
+                    }
+                    nextSegment.Next(callExpr.Arguments[0]);
+                    continue;
+                }
+            }
+            completedExprs.Add(nextSegment);
+            if (!deferredExprs.TryPop(out nextSegment))
+                break;
+        }
+        return completedExprs;
+    }
+    public virtual SqlSegment[] SplitConcatList(Expression concatExpr)
+    {
+        var completedExprs = new List<SqlSegment>();
+        var deferredExprs = new Stack<Expression>();
+        Func<Expression, bool> isConcatBinary = f =>
+        {
+            if (f is BinaryExpression binaryExpr && binaryExpr.NodeType == ExpressionType.Add && binaryExpr.Type == typeof(string)
+                && (binaryExpr.Left.Type == typeof(string) || binaryExpr.Right.Type == typeof(string)))
+                return true;
+            if (f is MethodCallExpression callExpr && callExpr.Method.Name == "Concat")
+                return true;
+            return false;
+        };
+        var nextExpr = concatExpr;
+        while (true)
+        {
+            if (isConcatBinary(nextExpr))
+            {
+                //字符串连接+
+                if (nextExpr is BinaryExpression binaryExpr)
+                {
+                    if (isConcatBinary(binaryExpr.Left))
+                    {
+                        deferredExprs.Push(binaryExpr.Right);
+                        nextExpr = binaryExpr.Left;
+                        continue;
+                    }
+                    completedExprs.Add(new SqlSegment { Expression = binaryExpr.Left, TargetType = typeof(string) });
+                    if (isConcatBinary(binaryExpr.Right))
+                    {
+                        nextExpr = binaryExpr.Right;
+                        continue;
+                    }
+                    completedExprs.Add(new SqlSegment { Expression = binaryExpr.Right, TargetType = typeof(string) });
+                    if (!deferredExprs.TryPop(out nextExpr))
+                        break;
+                    continue;
+                }
+                else
+                {
+                    //Concat方法
+                    var callExpr = nextExpr as MethodCallExpression;
+                    for (int i = callExpr.Arguments.Count - 1; i > 0; i--)
+                    {
+                        deferredExprs.Push(callExpr.Arguments[i]);
+                    }
+                    nextExpr = callExpr.Arguments[0];
+                    continue;
+                }
+            }
+            completedExprs.Add(new SqlSegment { Expression = nextExpr, TargetType = typeof(string) });
+            if (!deferredExprs.TryPop(out nextExpr))
+                break;
+        }
+        return completedExprs.ToArray();
+    }
+    public virtual bool IsDateTimeOperator(SqlSegment sqlSegment, out SqlSegment result)
+    {
+        var binaryExpr = sqlSegment.Expression as BinaryExpression;
+        if (binaryExpr.Left.Type == typeof(DateTime) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Add)
+        {
+            var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Add), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(DateTime) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Subtract)
+        {
+            var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Subtract), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        result = null;
+        return false;
+    }
+    public virtual bool IsTimeSpanOperator(SqlSegment sqlSegment, out SqlSegment result)
+    {
+        var binaryExpr = sqlSegment.Expression as BinaryExpression;
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Add)
+        {
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Add), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Subtract)
+        {
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Subtract), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Multiply)
+        {
+            var rightExpr = binaryExpr.Right;
+            if (binaryExpr.Right.Type != typeof(double))
+                rightExpr = Expression.Convert(rightExpr, typeof(double));
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Multiply), new Type[] { typeof(double) });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, rightExpr);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Divide)
+        {
+            Type divideType = null;
+            if (binaryExpr.Right.Type == typeof(TimeSpan))
+                divideType = typeof(TimeSpan);
+            else divideType = typeof(double);
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Divide), new Type[] { divideType });
+            var rightExpr = binaryExpr.Right;
+            if (divideType == typeof(double) && binaryExpr.Right.Type != typeof(double))
+                rightExpr = Expression.Convert(rightExpr, typeof(double));
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, rightExpr);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        result = null;
+        return false;
+    }
+    public virtual string GetQuotedValue(SqlSegment sqlSegment)
+        => this.ormProvider.GetQuotedValue(sqlSegment);
     public virtual TableSegment FindTableSegment(string parameterName, string path)
     {
         var index = path.IndexOf(".");
@@ -902,20 +1051,20 @@ class SqlVisitor
     {
         if (sqlSegment == SqlSegment.Null)
             return SqlSegment.Null;
+
         sqlSegment.IsParameter = true;
         this.dbParameters ??= new();
-        if (sqlSegment.Value is IEnumerable objValues && sqlSegment.Value.GetType() != typeof(string))
+
+        //数组，直接返回@p0,@p1,@p2,@p3或是@Name0,@Name1,@Name2,@Name3
+        if (sqlSegment.Value is IEnumerable objValues && objValues is not string)
         {
-            string paramPrefix = null;
-            if (!string.IsNullOrEmpty(sqlSegment.ParameterName))
-                paramPrefix = sqlSegment.ParameterName;
-            else paramPrefix = this.ormProvider.ParameterPrefix + this.parameterPrefix;
+            var paramPrefix = this.ormProvider.ParameterPrefix + this.parameterPrefix;
             int index = 0;
             var builder = new StringBuilder();
             foreach (var objValue in objValues)
             {
                 if (index > 0) builder.Append(',');
-                var parameterName = paramPrefix + index.ToString();
+                var parameterName = paramPrefix + this.dbParameters.Count.ToString();
                 builder.Append(parameterName);
                 this.dbParameters.Add(this.ormProvider.CreateParameter(parameterName, objValue));
                 index++;
@@ -924,10 +1073,7 @@ class SqlVisitor
         }
         else
         {
-            string parameterName = null;
-            if (!string.IsNullOrEmpty(sqlSegment.ParameterName))
-                parameterName = sqlSegment.ParameterName;
-            else parameterName = this.ormProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
+            var parameterName = this.ormProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
             this.dbParameters.Add(this.ormProvider.CreateParameter(parameterName, sqlSegment.Value));
             return sqlSegment.Change(parameterName, false);
         }
@@ -966,7 +1112,8 @@ class SqlVisitor
                 currentExpr = callExpr.Object;
             }
         }
-        var queryVisitor = this.ToQueryVisitor();
+        var queryVisitor = new QueryVisitor(this.dbKey, this.ormProvider, this.mapProvider, this.isParameterized, tableAsStart, parameterPrefix);
+        queryVisitor.isNeedAlias = this.isNeedAlias;
         while (callStack.TryPop(out var callExpr))
         {
             var genericArguments = callExpr.Method.GetGenericArguments();
@@ -1071,23 +1218,18 @@ class SqlVisitor
         isNeedAlias = queryVisitor.isNeedAlias;
         return result;
     }
-    public List<ReaderField> FlattenFieldsTo(Type entityType, Expression toTargetExpr)
+    public List<ReaderField> FlattenFieldsTo(Type targetType, Expression toTargetExpr = null)
     {
-        var targetType = entityType;
         List<ReaderField> initReaderFields = null;
-        if (toTargetExpr == null)
-            throw new ArgumentNullException(nameof(toTargetExpr));
-        var lambdaExpr = toTargetExpr as LambdaExpression;
-        //临时添加虚拟表
-        this.tableAlias.Clear();
-        this.tableAlias.Add(lambdaExpr.Parameters[0].Name, new TableSegment
-        {
-            TableType = TableType.MapTable,
-            ReaderFields = this.readerFields
-        });
-        initReaderFields = this.ConstructorFieldsTo(lambdaExpr);
-        targetType = lambdaExpr.ReturnType;
+        if (targetType == null)
+            throw new ArgumentNullException(nameof(targetType));
 
+        //通过表达式设置的字段
+        if (toTargetExpr != null)
+        {
+            var lambdaExpr = toTargetExpr as LambdaExpression;
+            initReaderFields = this.ConstructorFieldsTo(lambdaExpr);
+        }
 
         var targetMembers = targetType.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(f => f.MemberType == MemberTypes.Property | f.MemberType == MemberTypes.Field).ToList();
@@ -1121,6 +1263,8 @@ class SqlVisitor
             {
                 case ExpressionType.MemberAccess:
                     sqlSegment = this.VisitMemberAccess(sqlSegment);
+                    //成员访问，最多是Include子表访问或是临时表访问，如：x.Grouping分组，
+                    //可能会有多个子表或是临时表
                     if (sqlSegment.MemberType == ReaderFieldType.Entity
                         || sqlSegment.MemberType == ReaderFieldType.AnonymousObject)
                         result = sqlSegment.Value as List<ReaderField>;
@@ -1128,7 +1272,6 @@ class SqlVisitor
                     {
                         result.Add(new ReaderField
                         {
-                            Index = 0,
                             TableSegment = sqlSegment.TableSegment,
                             FieldType = sqlSegment.MemberType,
                             FromMember = sqlSegment.FromMember,
@@ -1158,7 +1301,6 @@ class SqlVisitor
                     {
                         result.Add(new ReaderField
                         {
-                            Index = 0,
                             TableSegment = sqlSegment.TableSegment,
                             FromMember = sqlSegment.FromMember,
                             Body = sqlSegment.Value.ToString()
@@ -1183,38 +1325,37 @@ class SqlVisitor
             else result.Add(readerField);
         }
     }
+    /// <summary>
+    /// 展开当前表tableSegment的所有字段，tableSegment是实体表(主表或Include表)
+    /// repository.From(f => f.From<Order, OrderDetail, User>()
+    ///         .Where((a, b, c) => a.Id == b.OrderId && a.BuyerId == c.Id)
+    ///         .GroupBy((a, b, c) => new { OrderId = a.Id, a.BuyerId })
+    ///         .Having((x, a, b, c) => c.Age > 20 && x.Sum(b.Amount) > 500)
+    ///         .Select((x, a, b, c) => new { x.Grouping.OrderId, x.Grouping.BuyerId, TotalAmount = x.Sum(b.Amount) }))
+    ///     .InnerJoin<User>((a, b) => a.BuyerId == b.Id)
+    ///     .InnerJoin<Order>((a, b, c) => a.OrderId == c.Id)
+    ///     .Select((a, b, c) => new { a.OrderId, a.BuyerId, Buyer = b, Order = c, a.TotalAmount })
+    ///     .ToSql(out _);
+    /// </summary>
+    /// <param name="tableSegment"></param>
+    /// <returns></returns>
     public List<ReaderField> FlattenTableFields(TableSegment tableSegment)
     {
         var targetFields = new List<ReaderField>();
-        if (tableSegment.TableType == TableType.MapTable)
+        tableSegment.Mapper ??= this.mapProvider.GetEntityMap(tableSegment.EntityType);
+        foreach (var memberMapper in tableSegment.Mapper.MemberMaps)
         {
-            var memberInfos = tableSegment.EntityType.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-               .Where(f => f.MemberType == MemberTypes.Property | f.MemberType == MemberTypes.Field).ToList();
-            foreach (var memberInfo in memberInfos)
+            if (memberMapper.IsIgnore || memberMapper.IsNavigation
+                || (memberMapper.MemberType.IsEntityType() && memberMapper.TypeHandler == null))
+                continue;
+            targetFields.Add(new ReaderField
             {
-                targetFields.Add(new ReaderField
-                {
-                    FromMember = memberInfo,
-                    FieldType = ReaderFieldType.Field,
-                    Body = this.GetFieldName(tableSegment, memberInfo.Name)
-                });
-            }
-        }
-        else
-        {
-            tableSegment.Mapper ??= this.mapProvider.GetEntityMap(tableSegment.EntityType);
-            foreach (var memberMapper in tableSegment.Mapper.MemberMaps)
-            {
-                if (memberMapper.IsIgnore || memberMapper.IsNavigation
-                    || (memberMapper.MemberType.IsEntityType() && memberMapper.TypeHandler == null))
-                    continue;
-                targetFields.Add(new ReaderField
-                {
-                    FromMember = memberMapper.Member,
-                    FieldType = ReaderFieldType.Field,
-                    Body = this.GetFieldName(tableSegment, memberMapper.FieldName)
-                });
-            }
+                FromMember = memberMapper.Member,
+                TableSegment = tableSegment,
+                FieldType = ReaderFieldType.Field,
+                //加表别名
+                Body = this.GetFieldName(tableSegment, memberMapper.FieldName)
+            });
         }
         return targetFields;
     }
@@ -1231,6 +1372,7 @@ class SqlVisitor
         }
         List<ReaderField> currentFields = readerFields;
         ReaderField readerField = null;
+        //From语句生成的临时表，没有Include操作，实体类的成员，只能是参数访问
         while (visitedStack.TryPop(out var memberName))
         {
             readerField = currentFields.Find(f => f.FromMember.Name == memberName);
@@ -1239,18 +1381,39 @@ class SqlVisitor
         }
         return readerField;
     }
+    /// <summary>
+    /// 根据表、字段获取Field表达式,SELECT和WHERE语句都可以使用
+    /// 有表且有别名，将生成a.Field，常量访问没有表则就是字段访问Field
+    /// </summary>
+    /// <param name="tableSegment">表</param> 
+    /// <param name="fieldName">字段名称或是表达式</param>
+    /// <returns></returns>
     public string GetFieldName(TableSegment tableSegment, string fieldName)
     {
         fieldName = this.ormProvider.GetFieldName(fieldName);
-        if (this.isNeedAlias && !string.IsNullOrEmpty(tableSegment.AliasName))
-            return tableSegment.AliasName + "." + fieldName;
+        if (tableSegment != null && !string.IsNullOrEmpty(tableSegment.AliasName) && (this.isNeedAlias || tableSegment.IsNeedAlais))
+            fieldName = tableSegment.AliasName + "." + fieldName;
         return fieldName;
     }
     public string GetFieldAliasName(string fieldName)
     {
-        if (this.ormProvider.DatabaseType == DatabaseType.Postgresql)
-            return this.ormProvider.GetFieldName(fieldName);
-        return fieldName;
+        switch (this.ormProvider.DatabaseType)
+        {
+            case DatabaseType.MySql:
+            case DatabaseType.Postgresql:
+                return this.ormProvider.GetFieldName(fieldName);
+            default: return fieldName;
+        }
+    }
+    private SqlSegment CreateConditionSegment(Expression conditionExpr)
+    {
+        var sqlSegment = new SqlSegment { Expression = conditionExpr };
+        if (conditionExpr.NodeType == ExpressionType.MemberAccess && conditionExpr.Type == typeof(bool))
+        {
+            sqlSegment.DeferredExprs ??= new();
+            sqlSegment.DeferredExprs.Push(new DeferredExpr { OperationType = OperationType.Equal, Value = SqlSegment.True });
+        }
+        return sqlSegment;
     }
     public void Swap<T>(ref T left, ref T right)
     {
@@ -1310,3 +1473,4 @@ class SqlVisitor
         return currentExpr as LambdaExpression;
     }
 }
+

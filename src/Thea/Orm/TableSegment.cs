@@ -8,6 +8,9 @@ public enum TableType : byte
     Master = 1,
     Include = 2,
     IncludeMany = 3,
+    /// <summary>
+    /// 临时映射表
+    /// </summary>
     MapTable = 4
 }
 public class TableSegment
@@ -41,6 +44,7 @@ public class TableSegment
     public string Filter { get; set; }
     public string OnExpr { get; set; }
     public List<ReaderField> ReaderFields { get; set; }
+    public bool IsNeedAlais { get; set; }
     public bool IsUsed { get; set; }
 
     public override bool Equals(object obj)

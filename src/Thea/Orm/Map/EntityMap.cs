@@ -105,17 +105,28 @@ public class EntityMap
 
             if (memberMapper.nativeDbType.HasValue)
                 memberMapper.NativeDbType = ormProvider.GetNativeDbType(memberMapper.nativeDbType.Value);
+            //生成默认的数据库映射类型
+            else
+            {
+                if (!memberMapper.MemberType.IsEntityType() && !memberMapper.IsIgnore && !memberMapper.IsNavigation && memberMapper.TypeHandler != null)
+                    memberMapper.NativeDbType = ormProvider.GetNativeDbType(memberMapper.MemberType);
+            }
         }
         if (this.memberMaps.Count > 0)
         {
             this.KeyMembers ??= new List<MemberMap>();
             foreach (var memberMapper in this.memberMappers)
             {
+                if (!memberMapper.IsKey) continue;
+
                 var fieldName = $"{this.FieldPrefix}{memberMapper.FieldName}";
-                if (memberMapper.IsKey && !this.KeyMembers.Contains(memberMapper))
+                if (!this.KeyMembers.Contains(memberMapper))
                     this.KeyMembers.Add(memberMapper);
                 if (memberMapper.IsAutoIncrement)
+                {
                     this.AutoIncrementField = fieldName;
+                    this.IsAutoIncrement = true;
+                }
             }
         }
     }

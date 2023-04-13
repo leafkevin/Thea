@@ -15,8 +15,8 @@ class UpdateVisitor : SqlVisitor
     private string whereSql = string.Empty;
     private string setSql = string.Empty;
 
-    public UpdateVisitor(string dbKey, IOrmProvider ormProvider, IEntityMapProvider mapProvider, Type entityType, char tableAsStart = 'a')
-        : base(dbKey, ormProvider, mapProvider, tableAsStart)
+    public UpdateVisitor(string dbKey, IOrmProvider ormProvider, IEntityMapProvider mapProvider, Type entityType, bool isParameterized = false, char tableAsStart = 'a', string parameterPrefix = "p")
+        : base(dbKey, ormProvider, mapProvider, isParameterized, tableAsStart, parameterPrefix)
     {
         this.tables = new();
         this.tableAlias = new();
@@ -150,7 +150,7 @@ class UpdateVisitor : SqlVisitor
         var joinTable = new TableSegment
         {
             EntityType = entityType,
-            AliasName = $"{(char)(97 + this.tables.Count)}",
+            AliasName = $"{(char)('a' + this.tables.Count)}",
             JoinType = joinType
         };
         this.tables.Add(joinTable);
@@ -177,6 +177,14 @@ class UpdateVisitor : SqlVisitor
             case ExpressionType.MemberAccess:
                 var memberExpr = lambdaExpr.Body as MemberExpression;
                 memberMapper = entityMapper.GetMemberMap(memberExpr.Member.Name);
+                //.NET 枚举类型有时候会解析错误，解析成对应的数值类型，如：a.Gender ?? Gender.Male == Gender.Male
+                //如果枚举类型对应的数据库类型是字符串，就会有问题，需要把数字变为枚举，再把枚举的名字入库。
+                if (memberMapper.MemberType.IsEnumType(out _, out var underlyingType))
+                {
+                    if (this.ormProvider.MapDefaultType(memberMapper.NativeDbType) == typeof(string))
+                        fieldValue = fieldValue.ToString();
+                    else fieldValue = Convert.ChangeType(fieldValue, underlyingType);
+                }
                 setFields.Add(this.AddMemberElement(fieldValue, memberMapper));
                 break;
             case ExpressionType.New:
@@ -187,12 +195,27 @@ class UpdateVisitor : SqlVisitor
                     var memberInfo = newExpr.Members[i];
                     if (!entityMapper.TryGetMemberMap(memberInfo.Name, out memberMapper))
                         continue;
+                    
+                    var argumentExpr = newExpr.Arguments[i];
+                    //.NET 枚举类型有时候会解析错误，解析成对应的数值类型，如：a.Gender ?? Gender.Male == Gender.Male
+                    //如果枚举类型对应的数据库类型是字符串，就会有问题，需要把数字变为枚举，再把枚举的名字入库。
+                    if (memberMapper.MemberType.IsEnumType(out var expectType, out var targetType))
+                    {
+                        if (this.ormProvider.MapDefaultType(memberMapper.NativeDbType) == typeof(string))
+                            targetType = typeof(string);
+                    }
+
+                    var sqlSegment = this.VisitAndDeferred(new SqlSegment
+                    {
+                        Expression = argumentExpr,
+                        ExpectType = expectType,
+                        TargetType = targetType
+                    });
 
                     //只一个成员访问，没有设置语句，什么也不做，忽略
-                    var argumentExpr = newExpr.Arguments[i];
-                    if (argumentExpr is MemberExpression newMemberExpr && newMemberExpr.Member.Name == memberInfo.Name)
+                    if (sqlSegment.HasField && !sqlSegment.IsExpression && sqlSegment.FromMember.Name == memberInfo.Name)
                         continue;
-                    setFields.Add(this.AddMemberElement(new SqlSegment { Expression = argumentExpr }, memberMapper));
+                    setFields.Add(this.AddMemberElement(sqlSegment, memberMapper));
                 }
                 break;
             case ExpressionType.MemberInit:
@@ -204,11 +227,24 @@ class UpdateVisitor : SqlVisitor
                     if (!entityMapper.TryGetMemberMap(memberAssignment.Member.Name, out memberMapper))
                         continue;
 
-                    //只一个成员访问，没有设置语句，什么也不做，忽略
                     var argumentExpr = memberAssignment.Expression;
-                    if (argumentExpr is MemberExpression newMemberExpr && newMemberExpr.Member.Name == memberAssignment.Member.Name)
+                    //.NET 枚举类型有时候会解析错误，解析成对应的数值类型，如：a.Gender ?? Gender.Male == Gender.Male
+                    //如果枚举类型对应的数据库类型是字符串，就会有问题，需要把数字变为枚举，再把枚举的名字入库。
+                    if (memberMapper.MemberType.IsEnumType(out var expectType, out var targetType))
+                    {
+                        if (this.ormProvider.MapDefaultType(memberMapper.NativeDbType) == typeof(string))
+                            targetType = typeof(string);
+                    }
+                    var sqlSegment = this.VisitAndDeferred(new SqlSegment
+                    {
+                        Expression = argumentExpr,
+                        ExpectType = expectType,
+                        TargetType = targetType
+                    });
+                    //只一个成员访问，没有设置语句，什么也不做，忽略
+                    if (sqlSegment.HasField && !sqlSegment.IsExpression && sqlSegment.FromMember.Name == memberAssignment.Member.Name)
                         continue;
-                    setFields.Add(this.AddMemberElement(new SqlSegment { Expression = argumentExpr }, memberMapper));
+                    setFields.Add(this.AddMemberElement(sqlSegment, memberMapper));
                 }
                 break;
         }
@@ -268,7 +304,7 @@ class UpdateVisitor : SqlVisitor
 
                 if (valueExpr.GetParameters(out argumentParameters)
                    && argumentParameters.Exists(f => f.Type == typeof(IFromQuery)))
-                {                  
+                {
                     var lambdaValuesExpr = valueExpr as LambdaExpression;
                     this.InitTableAlias(lambdaValuesExpr);
                     var newLambdaExpr = Expression.Lambda(lambdaValuesExpr.Body, lambdaValuesExpr.Parameters.ToList());
@@ -276,7 +312,11 @@ class UpdateVisitor : SqlVisitor
                     setFields.Add(new SetField { MemberMapper = memberMapper, Value = $"({sql})" });
                     if (isNeedAlias) this.isNeedAlias = true;
                 }
-                else setFields.Add(this.AddMemberElement(new SqlSegment { Expression = valueExpr }, memberMapper));
+                else
+                {
+                    var sqlSegment = this.VisitAndDeferred(new SqlSegment { Expression = valueExpr });
+                    setFields.Add(this.AddMemberElement(sqlSegment, memberMapper));
+                }
                 break;
             case ExpressionType.New:
                 this.InitTableAlias(lambdaExpr);
@@ -289,8 +329,8 @@ class UpdateVisitor : SqlVisitor
 
                     //只一个成员访问，没有设置语句，什么也不做，忽略
                     var argumentExpr = newExpr.Arguments[i];
-                    if (argumentExpr is MemberExpression newMemberExpr && newMemberExpr.Member.Name == memberInfo.Name)
-                        continue;
+                    //if (argumentExpr is MemberExpression newMemberExpr && newMemberExpr.Member.Name == memberInfo.Name)
+                    //    continue;
 
                     if (argumentExpr.GetParameters(out argumentParameters)
                         && argumentParameters.Exists(f => f.Type == typeof(IFromQuery)))
@@ -300,7 +340,11 @@ class UpdateVisitor : SqlVisitor
                         if (isNeedAlias) this.isNeedAlias = true;
                         setFields.Add(new SetField { MemberMapper = memberMapper, Value = $"({sql})" });
                     }
-                    else setFields.Add(this.AddMemberElement(new SqlSegment { Expression = argumentExpr }, memberMapper));
+                    else
+                    {
+                        var sqlSegment = this.VisitAndDeferred(new SqlSegment { Expression = argumentExpr });
+                        setFields.Add(this.AddMemberElement(sqlSegment, memberMapper));
+                    }
                 }
                 break;
             case ExpressionType.MemberInit:
@@ -325,7 +369,11 @@ class UpdateVisitor : SqlVisitor
                         if (isNeedAlias) this.isNeedAlias = true;
                         setFields.Add(new SetField { MemberMapper = memberMapper, Value = $"({sql})" });
                     }
-                    else setFields.Add(this.AddMemberElement(new SqlSegment { Expression = argumentExpr }, memberMapper));
+                    else
+                    {
+                        var sqlSegment = this.VisitAndDeferred(new SqlSegment { Expression = argumentExpr });
+                        setFields.Add(this.AddMemberElement(sqlSegment, memberMapper));
+                    }
                 }
                 break;
         }
@@ -352,16 +400,20 @@ class UpdateVisitor : SqlVisitor
     }
     public UpdateVisitor Where(Expression whereExpr)
     {
+        this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
         this.InitTableAlias(lambdaExpr);
         this.whereSql = " WHERE " + this.VisitConditionExpr(lambdaExpr.Body);
+        this.isWhere = false;
         return this;
     }
     public UpdateVisitor And(Expression whereExpr)
     {
+        this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
         this.InitTableAlias(lambdaExpr);
         this.whereSql += " AND " + this.VisitConditionExpr(lambdaExpr.Body);
+        this.isWhere = false;
         return this;
     }
     public override SqlSegment VisitMemberAccess(SqlSegment sqlSegment)
@@ -387,13 +439,13 @@ class UpdateVisitor : SqlVisitor
                 else throw new ArgumentException($"不支持的MemberAccess操作，表达式'{memberExpr}'返回值不是boolean类型");
             }
 
-            //各种类型值的属性访问，如：DateTime,TimeSpan,String.Length,List.Count,
-            if (this.ormProvider.TryGetMemberAccessSqlFormatter(sqlSegment, memberExpr.Member, out formatter))
+            //各种类型实例成员访问，如：DateTime,TimeSpan,String.Length,List.Count
+            if (this.ormProvider.TryGetMemberAccessSqlFormatter(memberExpr, out formatter))
             {
                 //Where(f=>... && f.CreatedAt.Month<5 && ...)
                 //Where(f=>... && f.Order.OrderNo.Length==10 && ...)
-                var targetSegment = this.Visit(sqlSegment.Next(memberExpr.Expression));
-                return sqlSegment.Change(formatter.Invoke(targetSegment), false);
+                var targetSegment = sqlSegment.Next(memberExpr.Expression);
+                return formatter.Invoke(this, targetSegment);
             }
 
             if (memberExpr.IsParameter(out var parameterName))
@@ -417,6 +469,18 @@ class UpdateVisitor : SqlVisitor
                 if (memberMapper.MemberType.IsEntityType() && !memberMapper.IsNavigation && memberMapper.TypeHandler == null)
                     throw new Exception($"类{tableSegment.EntityType.FullName}的成员{memberExpr.Member.Name}不是值类型，未配置为导航属性也没有配置TypeHandler");
 
+                //.NET 枚举类型有时候会解析错误，解析成对应的数值类型，如：a.Gender ?? Gender.Male == Gender.Male
+                //如果枚举类型对应的数据库类型是字符串，就会有问题，需要把数字变为枚举，再把枚举的名字入库。
+                if (memberMapper.MemberType.IsEnumType(out var expectType, out _))
+                {
+                    Type targetType = null;
+                    if (this.ormProvider.MapDefaultType(memberMapper.NativeDbType) == typeof(string))
+                        targetType = typeof(string);
+                    else targetType = expectType;
+                    sqlSegment.ExpectType = expectType;
+                    sqlSegment.TargetType = targetType;
+                }
+
                 var fieldName = this.ormProvider.GetFieldName(memberMapper.FieldName);
                 if (this.isNeedAlias)
                     fieldName = tableSegment.AliasName + "." + fieldName;
@@ -433,104 +497,30 @@ class UpdateVisitor : SqlVisitor
         if (memberExpr.Member.DeclaringType == typeof(DBNull))
             return SqlSegment.Null;
 
-        //各种类型的常量或是静态成员访问，如：DateTime.Now,int.MaxValue,string.Empty
-        if (this.ormProvider.TryGetMemberAccessSqlFormatter(sqlSegment, memberExpr.Member, out formatter))
-            return sqlSegment.Change(formatter(null), false);
+        //各种静态成员访问，如：DateTime.Now,int.MaxValue,string.Empty
+        if (this.ormProvider.TryGetMemberAccessSqlFormatter(memberExpr, out formatter))
+            return formatter.Invoke(this, sqlSegment);
 
         //访问局部变量或是成员变量，当作常量处理,直接计算，如果是字符串变成参数@p
         //var orderIds=new List<int>{1,2,3}; Where(f=>orderIds.Contains(f.OrderId)); orderIds
         //private Order order; Where(f=>f.OrderId==this.Order.Id); this.Order.Id
         //var orderId=10; Select(f=>new {OrderId=orderId,...}
         //Select(f=>new {OrderId=this.Order.Id, ...}
-        return this.EvaluateAndParameter(sqlSegment);
+        return this.Evaluate(sqlSegment);
     }
     public override SqlSegment VisitNew(SqlSegment sqlSegment)
     {
         var newExpr = sqlSegment.Expression as NewExpression;
-        if (newExpr.Type.Name.StartsWith("<>"))
-        {
-            var builder = new StringBuilder();
-            var entityMapper = this.tables[0].Mapper;
-            var setFields = new List<SetField>();
-            for (int i = 0; i < newExpr.Arguments.Count; i++)
-            {
-                var memberInfo = newExpr.Members[i];
-                if (!entityMapper.TryGetMemberMap(memberInfo.Name, out var memberMapper))
-                    continue;
-                setFields.Add(this.AddMemberElement(sqlSegment.Next(newExpr.Arguments[i]), memberMapper));
-            }
-            if (setFields != null && setFields.Count > 0)
-            {
-                for (int i = 0; i < setFields.Count; i++)
-                {
-                    if (i > 0) builder.Append(',');
-                    if (this.isNeedAlias)
-                    {
-                        switch (this.ormProvider.DatabaseType)
-                        {
-                            case DatabaseType.MySql:
-                            case DatabaseType.Oracle:
-                                builder.Append("a.");
-                                break;
-                        }
-                    }
-                    builder.Append($"{ormProvider.GetFieldName(setFields[i].MemberMapper.FieldName)}={setFields[i].Value}");
-                }
-            }
-            return sqlSegment.Change(builder.ToString());
-        }
-        return this.EvaluateAndParameter(sqlSegment);
+        if (newExpr.IsParameter(out _))
+            throw new NotSupportedException($"不支持的表达式访问,{newExpr}");
+        return this.Evaluate(sqlSegment);
     }
     public override SqlSegment VisitMemberInit(SqlSegment sqlSegment)
     {
         var memberInitExpr = sqlSegment.Expression as MemberInitExpression;
-        var builder = new StringBuilder();
-        var entityMapper = this.tables[0].Mapper;
-        var setFields = new List<SetField>();
-        for (int i = 0; i < memberInitExpr.Bindings.Count; i++)
-        {
-            if (memberInitExpr.Bindings[i].BindingType != MemberBindingType.Assignment)
-                throw new NotImplementedException($"不支持除MemberBindingType.Assignment类型外的成员绑定表达式, {memberInitExpr.Bindings[i]}");
-            var memberAssignment = memberInitExpr.Bindings[i] as MemberAssignment;
-            if (!entityMapper.TryGetMemberMap(memberAssignment.Member.Name, out var memberMapper))
-                continue;
-            setFields.Add(this.AddMemberElement(sqlSegment.Next(memberAssignment.Expression), memberMapper));
-        }
-        if (setFields != null && setFields.Count > 0)
-        {
-            for (int i = 0; i < setFields.Count; i++)
-            {
-                if (i > 0) builder.Append(',');
-                if (this.isNeedAlias)
-                {
-                    switch (this.ormProvider.DatabaseType)
-                    {
-                        case DatabaseType.MySql:
-                        case DatabaseType.Oracle:
-                            builder.Append("a.");
-                            break;
-                    }
-                }
-                builder.Append($"{ormProvider.GetFieldName(setFields[i].MemberMapper.FieldName)}={setFields[i].Value}");
-            }
-        }
-        return sqlSegment.Change(builder.ToString());
-    }
-    public override SqlSegment EvaluateAndParameter(SqlSegment sqlSegment)
-    {
-        var member = Expression.Convert(sqlSegment.Expression, typeof(object));
-        var lambda = Expression.Lambda<Func<object>>(member);
-        var getter = lambda.Compile();
-        var objValue = getter();
-        if (objValue == null)
-            return SqlSegment.Null;
-
-        var parameterName = sqlSegment.ParameterName;
-        if (string.IsNullOrEmpty(parameterName))
-            parameterName = this.ormProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
-        this.dbParameters ??= new();
-        this.dbParameters.Add(this.ormProvider.CreateParameter(parameterName, sqlSegment.Value));
-        return sqlSegment.Change(sqlSegment.ParameterName, false);
+        if (memberInitExpr.IsParameter(out _))
+            throw new NotSupportedException($"不支持的表达式访问,{memberInitExpr}");
+        return this.Evaluate(sqlSegment);
     }
     private void InitTableAlias(LambdaExpression lambdaExpr)
     {
@@ -560,25 +550,23 @@ class UpdateVisitor : SqlVisitor
             return new SetField { MemberMapper = memberMapper, Value = "NULL" };
         else
         {
-            var parameterName = ormProvider.ParameterPrefix + memberMapper.MemberName;
             this.dbParameters ??= new();
             IDbDataParameter dbParameter = null;
+            var parameterName = this.ormProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
+           
             if (memberMapper.NativeDbType != null)
                 dbParameter = this.ormProvider.CreateParameter(parameterName, memberMapper.NativeDbType, fieldValue);
             else dbParameter = this.ormProvider.CreateParameter(parameterName, fieldValue);
 
             if (memberMapper.TypeHandler != null)
                 memberMapper.TypeHandler.SetValue(this.ormProvider, dbParameter, fieldValue);
+            else dbParameter.Value = this.ormProvider.ToFieldValue(fieldValue, memberMapper.NativeDbType);
             this.dbParameters.Add(dbParameter);
             return new SetField { MemberMapper = memberMapper, Value = parameterName };
         }
     }
     private SetField AddMemberElement(SqlSegment sqlSegment, MemberMap memberMapper)
     {
-        var parameterName = this.ormProvider.ParameterPrefix + memberMapper.MemberName;
-        sqlSegment.ParameterName = parameterName;
-        sqlSegment = this.VisitAndDeferred(sqlSegment);
-
         if (sqlSegment == SqlSegment.Null)
             return new SetField { MemberMapper = memberMapper, Value = "NULL" };
         else
@@ -589,6 +577,7 @@ class UpdateVisitor : SqlVisitor
                 {
                     this.dbParameters ??= new();
                     IDbDataParameter dbParameter = null;
+                    var parameterName = this.ormProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
                     if (memberMapper.NativeDbType != null)
                         dbParameter = this.ormProvider.CreateParameter(parameterName, memberMapper.NativeDbType, sqlSegment.Value);
                     else dbParameter = this.ormProvider.CreateParameter(parameterName, sqlSegment.Value);
@@ -602,9 +591,13 @@ class UpdateVisitor : SqlVisitor
                         }
                         memberMapper.TypeHandler.SetValue(this.ormProvider, dbParameter, sqlSegment.Value);
                     }
+                    else dbParameter.Value = this.ormProvider.ToFieldValue(sqlSegment.Value, memberMapper.NativeDbType);
                     this.dbParameters.Add(dbParameter);
+                    sqlSegment.Value = parameterName;
+                    sqlSegment.IsParameter = true;
+                    sqlSegment.IsConstantValue = false;
                 }
-                return new SetField { MemberMapper = memberMapper, Value = parameterName };
+                return new SetField { MemberMapper = memberMapper, Value = sqlSegment.Value.ToString() };
             }
             return new SetField { MemberMapper = memberMapper, Value = sqlSegment.ToString() };
         }

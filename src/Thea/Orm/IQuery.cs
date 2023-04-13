@@ -7,36 +7,407 @@ using System.Threading.Tasks;
 
 namespace Thea.Orm;
 
+/// <summary>
+/// 查询数据
+/// </summary>
+/// <typeparam name="T">实体类型，需要有对应的模型映射找到要查询的表</typeparam>
 public interface IQuery<T>
 {
     #region Union
+    /// <summary>
+    /// Union操作，用法：
+    /// <code>
+    /// await repository.From&lt;Order&gt;()
+    ///     .Where(x => x.Id == 1)
+    ///     .Select(x => new
+    ///     {
+    ///         x.Id,
+    ///         x.OrderNo,
+    ///         x.SellerId,
+    ///         x.BuyerId
+    ///      })
+    ///     .Union(f => f.From&lt;Order&gt;()
+    ///         .Where(x => x.Id > 1)
+    ///         .Select(x => new
+    ///         {
+    ///             x.Id,
+    ///             x.OrderNo,
+    ///             x.SellerId,
+    ///             x.BuyerId
+    ///         }))
+    ///     .ToListAsync();
+    /// </code>
+    /// 生成的SQL:
+    /// <code>
+    /// SELECT `Id`,`OrderNo`,`SellerId`,`BuyerId` FROM `sys_order` WHERE `Id`=1 UNION
+    /// SELECT `Id`,`OrderNo`,`SellerId`,`BuyerId` FROM `sys_order` WHERE `Id`&gt;1
+    /// </code>
+    /// </summary>
+    /// <param name="subQuery">子查询，需要有Select语句，如：
+    /// <code>
+    /// f.From&lt;Order&gt;()
+    ///     .Where(x => x.Id > 1)
+    ///     .Select(x => new
+    ///     {
+    ///         x.Id,
+    ///         x.OrderNo,
+    ///         x.SellerId,
+    ///         x.BuyerId
+    ///     }
+    /// </code>
+    /// </param>
+    /// <returns>返回查询对象</returns>
     IQuery<T> Union(Func<IFromQuery, IFromQuery<T>> subQuery);
+    /// <summary>
+    /// Union All操作，用法：
+    /// <code>
+    /// repository.From&lt;Order&gt;()
+    ///     .Where(x =&gt; x.Id == 1)
+    ///     .Select(x =&gt; new
+    ///     {
+    ///         x.Id,
+    ///         x.OrderNo,
+    ///         x.SellerId,
+    ///         x.BuyerId
+    ///     })
+    ///     .UnionAll(f =&gt; f
+    ///         .From&lt;Order&gt;()
+    ///         .Where(x =&gt; x.Id &gt; 1)
+    ///         .Select(x =&gt; new
+    ///         {
+    ///             x.Id,
+    ///             x.OrderNo,
+    ///             x.SellerId,
+    ///             x.BuyerId
+    ///         }))
+    ///     .ToListAsync();
+    /// </code>
+    /// 生成的SQL:
+    /// <code>
+    /// SELECT `Id`,`OrderNo`,`SellerId`,`BuyerId` FROM `sys_order` WHERE `Id`=1 UNION ALL
+    /// SELECT `Id`,`OrderNo`,`SellerId`,`BuyerId` FROM `sys_order` WHERE `Id`&gt;1
+    /// </code>
+    /// </summary>
+    /// <param name="subQuery">子查询，需要有Select语句，如：
+    ///  f.From&lt;Order&gt;()
+    ///     .Where(x =&gt; x.Id &gt; 1)
+    ///     .Select(x =&gt; new
+    ///     {
+    ///         x.Id,
+    ///         x.OrderNo,
+    ///         x.SellerId,
+    ///         x.BuyerId
+    ///     }
+    /// </param>
+    /// <returns>返回查询对象</returns>
     IQuery<T> UnionAll(Func<IFromQuery, IFromQuery<T>> subQuery);
     #endregion
 
     #region WithCte
+    /// <summary>
+    /// CTE With子句，在Select之前，With子句要连续使用，用法：
+    /// <code>
+    /// repository
+    ///     .FromWith((f =&gt; ...), "MenuList")
+    ///     .NextWith(f => f.From&lt;Page&gt;()
+    ///         .InnerJoin&lt;Menu&gt;((a, b) =&gt; a.Id == b.PageId)
+    ///         .Where((a, b) =&gt; a.Id == 1)
+    ///         .Select((x, y) =&gt; new { y.Id, x.Url })), "MenuPageList")
+    ///     .InnerJoin((a, b) =&gt; a.Id == b.Id)
+    ///     .Select((a, b) =&gt; new { a.Id, a.Name, a.ParentId, b.Url })
+    ///     .ToList();
+    /// </code>
+    /// 生成的SQL:
+    /// <code>
+    /// WITH MenuList(Id,Name,ParentId) AS 
+    /// (
+    ///     SELECT `Id`,`Name`,`ParentId` FROM `sys_menu` WHERE `Id`=1
+    /// ),
+    /// MenuPageList(Id,Url) AS
+    /// (
+    ///     SELECT b.`Id`, a.`Url` FROM `sys_page` a INNER JOIN `sys_menu` b ON a.`Id`=b.`PageId` WHERE a.`Id`=1
+    /// )
+    /// SELECT a.`Id`,a.`Name`,a.`ParentId`,b.`Url` FROM MenuList a INNER JOIN MenuPageList b ON a.`Id`=b.`Id`
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TTarget">当前CTE临时返回的实体类型</typeparam>
+    /// <param name="cteSubQuery">CTE子查询，如：
+    /// <code>
+    /// f.From&lt;Page&gt;()
+    ///     .InnerJoin&lt;Menu&gt;((a, b) =&gt; a.Id == b.PageId)
+    ///     .Where((a, b) =&gt; a.Id == 1)
+    ///     .Select((x, y) =&gt; new { y.Id, x.Url })
+    /// </code>
+    /// </param>
+    /// <param name="cteTableName">CTE表名</param>
+    /// <param name="tableAsStart">CTE子句中使用的表别名开始字母，默认从字母a开始</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TTarget> NextWith<TTarget>(Func<IFromQuery, IFromQuery<TTarget>> cteSubQuery, string cteTableName = "cte", char tableAsStart = 'a');
+    /// <summary>
+    /// 递归CTE With子句，在Select之前，With子句要连续使用，用法：
+    /// <code>
+    /// repository
+    ///     .FromWithRecursive((f, cte) =&gt; f.From&lt;Menu&gt;()
+    ///             .Where(x =&gt; x.Id == 1)
+    ///             .Select(x =&gt; new { x.Id, x.Name, x.ParentId })
+    ///         .UnionAllRecursive((x, y) =&gt; x.From&lt;Menu&gt;()
+    ///             .InnerJoinRecursive(y, cte, (a, b) =&gt; a.ParentId == b.Id)
+    ///             .Select((a, b) =&gt; new { a.Id, a.Name, a.ParentId })), "MenuList")
+    ///     .NextWithRecursive((f, cte) =&gt; f.From&lt;Page, Menu&gt;()
+    ///             .Where((a, b) =&gt; a.Id == b.PageId)
+    ///             .Select((x, y) =&gt; new { y.Id, y.ParentId, x.Url })
+    ///         .UnionAll(x =&gt; x.From&lt;Menu&gt;()
+    ///             .LeftJoin&lt;Page&gt;((a, b) =&gt; a.PageId == b.Id)
+    ///             .Where((a, b) =&gt; a.Id &gt; 1)
+    ///             .Select((x, y) =&gt; new { x.Id, x.ParentId, y.Url })), "MenuPageList")
+    ///     .InnerJoin((a, b) =&gt; a.Id == b.Id)
+    ///     .Select((a, b) =&gt; new { a.Id, a.Name, a.ParentId, b.Url })
+    ///     .ToList();
+    /// 生成的SQL:
+    /// <code>
+    /// WITH RECURSIVE MenuList(Id,Name,ParentId) AS 
+    /// (
+    ///     SELECT `Id`,`Name`,`ParentId` FROM `sys_menu` WHERE `Id`=1 UNION ALL
+    ///     SELECT a.`Id`, a.`Name`, a.`ParentId` FROM `sys_menu` a INNER JOIN MenuList b ON a.`ParentId`=b.`Id`
+    /// ),
+    /// MenuPageList(Id,ParentId,Url) AS
+    /// (
+    ///     SELECT a.`Id`,a.`ParentId`,b.`Url` FROM `sys_menu` a,`sys_page` b WHERE a.`PageId`=b.Id UNION ALL
+    ///     SELECT a.`Id`,a.`ParentId`,b.`Url` FROM `sys_menu` a INNER JOIN MenuList b ON a.`Id`=b.`ParentId`
+    /// ),
+    /// SELECT a.`Id`,a.`Name`,a.`ParentId`,b.`Url` FROM MenuList a INNER JOIN MenuPageList b ON a.`Id`=b.`Id`
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TTarget">当前CTE With子句临时返回的实体类型</typeparam>
+    /// <param name="cteSubQuery">CTE子查询，如：
+    /// <code>
+    /// f.From&lt;Page&gt;()
+    ///     .InnerJoin&lt;Menu&gt;((a, b) =&gt; a.Id == b.PageId)
+    ///     .Where((a, b) =&gt; a.Id == 1)
+    ///     .Select((x, y) =&gt; new { y.Id, x.Url })
+    /// </code>
+    /// </param>
+    /// <param name="cteTableName">CTE表名</param>
+    /// <param name="tableAsStart">CTE子句中使用的表别名开始字母，默认从字母a开始</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TTarget> NextWithRecursive<TTarget>(Func<IFromQuery, string, IFromQuery<TTarget>> cteSubQuery, string cteTableName = "cte", char tableAsStart = 'a');
     #endregion
 
     #region WithTable
+    /// <summary>
+    /// SQL子查询临时表，用法：
+    /// <code>
+    /// repository
+    ///     .From&lt;Menu&gt;()
+    ///     .WithTable(f => f.From&lt;Page, Menu&gt;('c')
+    ///         .Where((a, b) => a.Id == b.PageId)
+    ///         .Select((x, y) => new { y.Id, y.ParentId, x.Url }))
+    ///     .Where((a, b) => a.Id == b.Id)
+    ///     .Select((a, b) => new { a.Id, a.Name, a.ParentId, b.Url })
+    ///     .ToList();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`ParentId`,b.`Url` FROM `sys_menu` a,(SELECT d.`Id`,d.`ParentId`,c.`Url` FROM `sys_page` c,`sys_menu` d WHERE c.`Id`=d.`PageId`) b WHERE a.`Id`=b.`Id`
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">当前临时表子句返回的实体类型</typeparam>
+    /// <param name="subQuery"></param>
+    /// <returns></returns>
     IQuery<T, TOther> WithTable<TOther>(Func<IFromQuery, IFromQuery<TOther>> subQuery);
     #endregion
 
     #region Join
+    /// <summary>
+    /// 添加TOther表INNER JOIN关联，用法:
+    /// <code>
+    /// repository.From&lt;User&gt;()
+    ///     .InnerJoin&lt;Orderr&gt;((x, y) =&gt; x.Id == y.BuyerId)
+    ///     .Where((a, b) =r&gt; b.ProductCount &gt; 1)
+    ///     .Select((x, y) =r&gt; new
+    ///     {
+    ///         User = x,
+    ///         Order = y
+    ///     })
+    ///     .ToList();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`Gender`,a.`Age`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`OrderNo`,b.`ProductCount`,b.`TotalAmount`,b.`BuyerId`,b.`SellerId`,b.`Products`,b.`IsEnabled`,b.`CreatedBy`,b.`CreatedAt`,b.`UpdatedBy`,b.`UpdatedAt` FROM `sys_user` a INNER JOIN `sys_order` b ON a.`Id`=b.`BuyerId` WHERE b.`ProductCount`&gt;1
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">实体类型</typeparam>
+    /// <param name="joinOn">INNER JOIN关联条件</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TOther> InnerJoin<TOther>(Expression<Func<T, TOther, bool>> joinOn);
+    /// <summary>
+    /// 添加TOther表LEFT JOIN关联，用法:
+    /// <code>
+    /// repository.From&lt;User&gt;()
+    ///     .LeftJoin&lt;Orderr&gt;((x, y) =&gt; x.Id == y.BuyerId)
+    ///     .Where((a, b) =r&gt; b.ProductCount &gt; 1)
+    ///     .Select((x, y) =r&gt; new
+    ///     {
+    ///         User = x,
+    ///         Order = y
+    ///     })
+    ///     .ToList();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`Gender`,a.`Age`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`OrderNo`,b.`ProductCount`,b.`TotalAmount`,b.`BuyerId`,b.`SellerId`,b.`Products`,b.`IsEnabled`,b.`CreatedBy`,b.`CreatedAt`,b.`UpdatedBy`,b.`UpdatedAt` FROM `sys_user` a LEFT JOIN `sys_order` b ON a.`Id`=b.`BuyerId` WHERE b.`ProductCount`&gt;1
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">实体类型</typeparam>
+    /// <param name="joinOn">LEFT JOIN关联条件</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TOther> LeftJoin<TOther>(Expression<Func<T, TOther, bool>> joinOn);
+    /// <summary>
+    /// 添加TOther表RIGHT JOIN关联，用法:
+    /// <code>
+    /// repository.From&lt;User&gt;()
+    ///     .RightJoin&lt;Orderr&gt;((x, y) =&gt; x.Id == y.BuyerId)
+    ///     .Where((a, b) =r&gt; b.ProductCount &gt; 1)
+    ///     .Select((x, y) =r&gt; new
+    ///     {
+    ///         User = x,
+    ///         Order = y
+    ///     })
+    ///     .ToList();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`Gender`,a.`Age`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`OrderNo`,b.`ProductCount`,b.`TotalAmount`,b.`BuyerId`,b.`SellerId`,b.`Products`,b.`IsEnabled`,b.`CreatedBy`,b.`CreatedAt`,b.`UpdatedBy`,b.`UpdatedAt` FROM `sys_user` a RIGHT JOIN `sys_order` b ON a.`Id`=b.`BuyerId` WHERE b.`ProductCount`&gt;1
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">实体类型</typeparam>
+    /// <param name="joinOn">RIGHT JOIN关联条件</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TOther> RightJoin<TOther>(Expression<Func<T, TOther, bool>> joinOn);
+    /// <summary>
+    /// 添加子查询作为临时表INNER JOIN关联，用法:
+    /// <code>
+    /// await repository.From&lt;User&gt;()
+    ///     .InnerJoin&lt;Order&gt;((x, y) =&gt; x.Id == y.BuyerId)
+    ///     .InnerJoin(f =&gt; f.From&lt;OrderDetail&gt;()
+    ///         .GroupBy(x =&gt; x.OrderId)
+    ///         .Select((x, y) =&gt; new
+    ///         {
+    ///             y.OrderId,
+    ///             ProductCount = x.CountDistinct(y.ProductId)
+    ///         }), (a, b, c) =&gt; b.Id == c.OrderId)
+    ///     .Where((a, b, c) =&gt; c.ProductCount &gt; 2)
+    ///     .Select((a, b, c) =&gt; new
+    ///     {
+    ///         User = a,
+    ///         Order = b,
+    ///         c.ProductCount
+    ///     })
+    ///     .ToListAsync();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`Gender`,a.`Age`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`OrderNo`,b.`ProductCount`,b.`TotalAmount`,b.`BuyerId`,b.`SellerId`,b.`Products`,b.`IsEnabled`,b.`CreatedBy`,b.`CreatedAt`,b.`UpdatedBy`,b.`UpdatedAt`,c.`ProductCount` FROM `sys_user` a INNER JOIN `sys_order` b ON a.`Id`=b.`BuyerId` INNER JOIN (SELECT a.`OrderId`,COUNT(DISTINCT a.`ProductId`) AS ProductCount FROM `sys_order_detail` a GROUP BY a.`OrderId`) c ON b.`Id`=c.`OrderId` WHERE c.`ProductCount`&gt;2
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">实体类型，子查询中通常会有SELECT操作，返回的<paramref name="TOther"/>类型是一个匿名的</typeparam>
+    /// <param name="joinOn">INNER JOIN关联条件</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TOther> InnerJoin<TOther>(Func<IFromQuery, IFromQuery<TOther>> subQuery, Expression<Func<T, TOther, bool>> joinOn);
+    /// <summary>
+    /// 添加子查询作为临时表LEFT JOIN关联，用法:
+    /// <code>
+    /// await repository.From&lt;User&gt;()
+    ///     .InnerJoin&lt;Order&gt;((x, y) =&gt; x.Id == y.BuyerId)
+    ///     .LeftJoin(f =&gt; f.From&lt;OrderDetail&gt;()
+    ///         .GroupBy(x =&gt; x.OrderId)
+    ///         .Select((x, y) =&gt; new
+    ///         {
+    ///             y.OrderId,
+    ///             ProductCount = x.CountDistinct(y.ProductId)
+    ///         }), (a, b, c) =&gt; b.Id == c.OrderId)
+    ///     .Where((a, b, c) =&gt; c.ProductCount &gt; 2)
+    ///     .Select((a, b, c) =&gt; new
+    ///     {
+    ///         User = a,
+    ///         Order = b,
+    ///         c.ProductCount
+    ///     })
+    ///     .ToListAsync();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`Gender`,a.`Age`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`OrderNo`,b.`ProductCount`,b.`TotalAmount`,b.`BuyerId`,b.`SellerId`,b.`Products`,b.`IsEnabled`,b.`CreatedBy`,b.`CreatedAt`,b.`UpdatedBy`,b.`UpdatedAt`,c.`ProductCount` FROM `sys_user` a INNER JOIN `sys_order` b ON a.`Id`=b.`BuyerId` LEFT JOIN (SELECT a.`OrderId`,COUNT(DISTINCT a.`ProductId`) AS ProductCount FROM `sys_order_detail` a GROUP BY a.`OrderId`) c ON b.`Id`=c.`OrderId` WHERE c.`ProductCount`&gt;2
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">实体类型，子查询中通常会有SELECT操作，返回的<paramref name="TOther"/>类型是一个匿名的</typeparam>
+    /// <param name="joinOn">LEFT JOIN关联条件</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TOther> LeftJoin<TOther>(Func<IFromQuery, IFromQuery<TOther>> subQuery, Expression<Func<T, TOther, bool>> joinOn);
+    /// <summary>
+    /// 添加子查询作为临时表RIGHT JOIN关联，用法:
+    /// <code>
+    /// await repository.From&lt;User&gt;()
+    ///     .InnerJoin&lt;Order&gt;((x, y) =&gt; x.Id == y.BuyerId)
+    ///     .RightJoin(f =&gt; f.From&lt;OrderDetail&gt;()
+    ///         .GroupBy(x =&gt; x.OrderId)
+    ///         .Select((x, y) =&gt; new
+    ///         {
+    ///             y.OrderId,
+    ///             ProductCount = x.CountDistinct(y.ProductId)
+    ///         }), (a, b, c) =&gt; b.Id == c.OrderId)
+    ///     .Where((a, b, c) =&gt; c.ProductCount &gt; 2)
+    ///     .Select((a, b, c) =&gt; new
+    ///     {
+    ///         User = a,
+    ///         Order = b,
+    ///         c.ProductCount
+    ///     })
+    ///     .ToListAsync();
+    /// </code>
+    /// 生成的SQL：
+    /// <code>
+    /// SELECT a.`Id`,a.`Name`,a.`Gender`,a.`Age`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`OrderNo`,b.`ProductCount`,b.`TotalAmount`,b.`BuyerId`,b.`SellerId`,b.`Products`,b.`IsEnabled`,b.`CreatedBy`,b.`CreatedAt`,b.`UpdatedBy`,b.`UpdatedAt`,c.`ProductCount` FROM `sys_user` a INNER JOIN `sys_order` b ON a.`Id`=b.`BuyerId` RIGHT JOIN (SELECT a.`OrderId`,COUNT(DISTINCT a.`ProductId`) AS ProductCount FROM `sys_order_detail` a GROUP BY a.`OrderId`) c ON b.`Id`=c.`OrderId` WHERE c.`ProductCount`&gt;2
+    /// </code>
+    /// </summary>
+    /// <typeparam name="TOther">实体类型，子查询中通常会有SELECT操作，返回的<paramref name="TOther"/>类型是一个匿名的</typeparam>
+    /// <param name="joinOn">RIGHT JOIN关联条件</param>
+    /// <returns>返回查询对象</returns>
     IQuery<T, TOther> RightJoin<TOther>(Func<IFromQuery, IFromQuery<TOther>> subQuery, Expression<Func<T, TOther, bool>> joinOn);
     #endregion
 
     #region Include
     /// <summary>
-    /// 单表查询，包含1:1关联方式的导航属性，默认使用LeftJoin方式，使用导航属性配置的关联关系。
-    /// 可以通过使用InnerJoin(Expression&lt;Func&lt;T, bool&gt;&gt; joinOn)、RightJoin(Expression&lt;Func&lt;T, bool&gt;&gt; joinOn)方法改变默认关联方式
+    /// 贪婪加载导航属性，默认使用LeftJoin方式，使用导航属性配置的关联关系生成JOIN ON子句。
+    /// 可以通过使用InnerJoin(Expression&lt;Func&lt;T, bool&gt;&gt; joinOn)、RightJoin(Expression&lt;Func&lt;T, bool&gt;&gt; joinOn)方法改变默认关联方式。
+    /// 1:1关联关系，随主表一起查询，1:N关联关系，分两次查询，第二次查询返回结果，再赋值到主实体的属性上。
     /// </summary>
+    /// <example>
+    /// 1:1关联关系导航属性
+    /// <code>
+    /// repository.From&lt;Product&gt;()
+    ///   .Include(f =&gt; f.Brand)
+    ///   .Where(f =&gt; f.ProductNo.Contains("PN-00"))
+    ///   .ToSql(out _);
+    /// </code>
+    /// 生成的SQL:
+    /// <code>
+    /// SELECT a.`Id`,a.`ProductNo`,a.`Name`,a.`BrandId`,a.`CategoryId`,a.`Price`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`BrandNo`,b.`Name` FROM `sys_product` a LEFT JOIN `sys_brand` b ON a.`BrandId`=b.`Id` WHERE a.`ProductNo` LIKE '%PN-00%'
+    /// </code>
+    /// </example>
+    /// <example>
+    /// 1:1关联关系导航属性
+    /// <code>
+    /// repository.From&lt;Product&gt;()
+    ///   .Include(f =&gt; f.Brand)
+    ///   .Where(f =&gt; f.ProductNo.Contains("PN-00"))
+    ///   .ToSql(out _);
+    /// </code>
+    /// 生成的SQL:
+    /// <code>
+    /// SELECT a.`Id`,a.`ProductNo`,a.`Name`,a.`BrandId`,a.`CategoryId`,a.`Price`,a.`CompanyId`,a.`IsEnabled`,a.`CreatedBy`,a.`CreatedAt`,a.`UpdatedBy`,a.`UpdatedAt`,b.`Id`,b.`BrandNo`,b.`Name` FROM `sys_product` a LEFT JOIN `sys_brand` b ON a.`BrandId`=b.`Id` WHERE a.`ProductNo` LIKE '%PN-00%'
+    /// </code>
+    /// </example>
     /// <typeparam name="TMember">导航属性泛型类型</typeparam>
     /// <param name="memberSelector">导航属性选择表达式</param>
     /// <returns>返回实体对象，带有导航属性</returns>
@@ -60,6 +431,7 @@ public interface IQuery<T>
 
     #region GroupBy/OrderBy
     IGroupingQuery<T, TGrouping> GroupBy<TGrouping>(Expression<Func<T, TGrouping>> groupingExpr);
+    IQuery<T> OrderBy(string rawSql);
     IQuery<T> OrderBy<TFields>(Expression<Func<T, TFields>> fieldsExpr);
     IQuery<T> OrderByDescending<TFields>(Expression<Func<T, TFields>> fieldsExpr);
     #endregion
@@ -67,6 +439,7 @@ public interface IQuery<T>
     IQuery<T> Distinct();
     IQuery<T> Skip(int offset);
     IQuery<T> Take(int limit);
+    IQuery<T> Page(int pageIndex, int pageSize);
     IQuery<T> ToChunk(int size);
 
     IQuery<T> Select();
@@ -99,10 +472,17 @@ public interface IQuery<T>
     Task<T> FirstAsync(CancellationToken cancellationToken = default);
     TTarget First<TTarget>(Expression<Func<T, TTarget>> toTargetExpr);
     Task<TTarget> FirstAsync<TTarget>(Expression<Func<T, TTarget>> toTargetExpr, CancellationToken cancellationToken = default);
+
     List<T> ToList();
     Task<List<T>> ToListAsync(CancellationToken cancellationToken = default);
-    IPagedList<T> ToPageList(int pageIndex, int pageSize);
-    Task<IPagedList<T>> ToPageListAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default);
+    List<TTarget> ToList<TTarget>(Expression<Func<T, TTarget>> toTargetExpr);
+    Task<List<TTarget>> ToListAsync<TTarget>(Expression<Func<T, TTarget>> toTargetExpr, CancellationToken cancellationToken = default(CancellationToken));
+
+    IPagedList<T> ToPageList();
+    Task<IPagedList<T>> ToPageListAsync(CancellationToken cancellationToken = default);
+    IPagedList<TTarget> ToPageList<TTarget>(Expression<Func<T, TTarget>> toTargetExpr);
+    Task<IPagedList<TTarget>> ToPageListAsync<TTarget>(Expression<Func<T, TTarget>> toTargetExpr, CancellationToken cancellationToken = default(CancellationToken));
+
     Dictionary<TKey, TValue> ToDictionary<TKey, TValue>(Func<T, TKey> keySelector, Func<T, TValue> valueSelector) where TKey : notnull;
     Task<Dictionary<TKey, TValue>> ToDictionaryAsync<TKey, TValue>(Func<T, TKey> keySelector, Func<T, TValue> valueSelector, CancellationToken cancellationToken = default) where TKey : notnull;
 

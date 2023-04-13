@@ -21,7 +21,7 @@
     /// </summary>
     int TenantId { get; }
     /// <summary>
-    /// 应用ID
+    /// 邮箱地址
     /// </summary>
-    string AppId { get; }
+    string Email { get; }
 }

@@ -31,7 +31,11 @@ public sealed class TheaConnection : IDbConnection
         else throw new Exception("当前数据库驱动不支持异步操作");
     }
     public void ChangeDatabase(string databaseName) => this.BaseConnection.ChangeDatabase(databaseName);
-    public void Close() => this.Dispose();
+    public void Close()
+    {
+        if (this.BaseConnection.State != ConnectionState.Closed)
+            this.BaseConnection.Close();
+    }
     public IDbCommand CreateCommand()
     {
         var command = this.BaseConnection.CreateCommand();
@@ -43,7 +47,11 @@ public sealed class TheaConnection : IDbConnection
         if (this.BaseConnection.State == ConnectionState.Broken)
             this.BaseConnection.Close();
         if (this.BaseConnection.State == ConnectionState.Closed)
+        {
+            //关闭后，连接串被重置，需要重新设置
+            this.BaseConnection.ConnectionString = this.ConnectionString;
             this.BaseConnection.Open();
+        }
     }
     public async Task OpenAsync(CancellationToken cancellationToken)
     {
@@ -52,11 +60,20 @@ public sealed class TheaConnection : IDbConnection
             if (this.BaseConnection.State == ConnectionState.Broken)
                 await connection.CloseAsync();
             if (this.BaseConnection.State == ConnectionState.Closed)
+            {
+                //关闭后，连接串被重置，需要重新设置
+                connection.ConnectionString = this.ConnectionString;
                 await connection.OpenAsync(cancellationToken);
+            }
         }
         else throw new Exception("当前数据库驱动不支持异步操作");
     }
-    public async Task CloseAsync() => await this.DisposeAsync();
+    public async Task CloseAsync()
+    {
+        if (this.BaseConnection is DbConnection connection && connection.State != ConnectionState.Closed)
+            await connection.CloseAsync();
+        else throw new Exception("当前数据库驱动不支持异步操作");
+    }
     public void Dispose() => this.BaseConnection.Dispose();
     public async Task DisposeAsync()
     {

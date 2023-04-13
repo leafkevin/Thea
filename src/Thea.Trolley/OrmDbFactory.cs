@@ -13,6 +13,7 @@ class OrmDbFactory : IOrmDbFactory
     private readonly ConcurrentDictionary<string, TheaDatabaseProvider> databaseProviders = new();
     private readonly ConcurrentDictionary<Type, IEntityMapProvider> entityMapProviders = new();
     private readonly ITypeHandlerProvider typeHandlerProvider = new TypeHandlerProvider();
+    private OrmDbFactoryOptions options;
 
     public ITypeHandlerProvider TypeHandlerProvider => this.typeHandlerProvider;
     public ICollection<TheaDatabaseProvider> DatabaseProviders => this.databaseProviders.Values;
@@ -110,4 +111,5 @@ class OrmDbFactory : IOrmDbFactory
         };
         return new Repository(connection, ormProvider, entityMapProvider);
     }
+    internal void With(OrmDbFactoryOptions options) => this.options = options;
 }

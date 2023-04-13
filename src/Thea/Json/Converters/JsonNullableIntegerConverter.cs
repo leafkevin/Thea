@@ -8,21 +8,23 @@ public class JsonNullableIntegerConverter : JsonConverter<int?>
 {
     public override int? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        int value = 0;
+        int result;
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
-                if (reader.TryGetInt32(out value))
-                    return value;
+                if (reader.TryGetInt32(out result))
+                    return result;
                 break;
             case JsonTokenType.String:
-                if (int.TryParse(reader.GetString(), out value))
-                    return value;
+                var fromString = reader.GetString();
+                if (string.IsNullOrWhiteSpace(fromString))
+                    return null;
+                if (int.TryParse(fromString, out result))
+                    return result;
                 break;
-            case JsonTokenType.Null:
-                return null;
+            case JsonTokenType.Null: return null;
         }
-        return value;
+        return null;
     }
     public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
     {

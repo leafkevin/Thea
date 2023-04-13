@@ -122,54 +122,6 @@
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>ModelConfiguration.cs</LastGenOutput>
     </Content>
-    <Content Include="Trolley\FromGroupingQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>FromGroupingQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\FromQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>FromQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\GroupingQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>GroupingQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IFromGroupingQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IFromGroupingQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IFromQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IFromQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IGroupingQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IGroupingQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IIncludableQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IIncludableQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IncludableQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IncludableQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IQuery.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IQuery.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\IUpdate.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>IUpdate.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\Query`.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>Query`.cs</LastGenOutput>
-    </Content>
-    <Content Include="Trolley\Update.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>Update.cs</LastGenOutput>
-    </Content>
   </ItemGroup>
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />

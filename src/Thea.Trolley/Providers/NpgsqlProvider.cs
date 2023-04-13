@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 using Thea.Orm;
@@ -17,6 +18,7 @@ public class NpgSqlProvider : BaseOrmProvider
     private static Func<string, object, object, IDbDataParameter> createNativeParameterDelegate = null;
     private static ConcurrentDictionary<MemberInfo, MemberAccessSqlFormatter> memberAccessSqlFormatterCahe = new();
     private static ConcurrentDictionary<MethodInfo, MethodCallSqlFormatter> methodCallSqlFormatterCahe = new();
+    private static Dictionary<object, Type> defaultMapTypes = new();
     private static Dictionary<Type, object> defaultDbTypes = new();
     private static Dictionary<int, object> nativeDbTypes = new();
     private static Dictionary<Type, string> castTos = new();
@@ -33,59 +35,204 @@ public class NpgSqlProvider : BaseOrmProvider
         createDefaultNativeParameterDelegate = BaseOrmProvider.CreateDefaultParameterDelegate(dbParameterType);
         createNativeParameterDelegate = BaseOrmProvider.CreateParameterDelegate(dbTypeType, dbParameterType, valuePropertyInfo);
 
-
-        defaultDbTypes[typeof(bool)] = Enum.ToObject(dbTypeType, 2);
-        defaultDbTypes[typeof(sbyte)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(byte)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(char)] = Enum.ToObject(dbTypeType, 6);
-        defaultDbTypes[typeof(short)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(int)] = Enum.ToObject(dbTypeType, 9);
-        defaultDbTypes[typeof(uint)] = Enum.ToObject(dbTypeType, 41);//NpgsqlDbType.Oid
-        defaultDbTypes[typeof(long)] = Enum.ToObject(dbTypeType, 1);
-        defaultDbTypes[typeof(ulong)] = Enum.ToObject(dbTypeType, 1);
-        defaultDbTypes[typeof(float)] = Enum.ToObject(dbTypeType, 17);
-        defaultDbTypes[typeof(double)] = Enum.ToObject(dbTypeType, 8);
-        defaultDbTypes[typeof(TimeSpan)] = Enum.ToObject(dbTypeType, 20);
-        defaultDbTypes[typeof(DateTime)] = Enum.ToObject(dbTypeType, 21);
-        defaultDbTypes[typeof(string)] = Enum.ToObject(dbTypeType, 22);
-        defaultDbTypes[typeof(Guid)] = Enum.ToObject(dbTypeType, 27);
-        defaultDbTypes[typeof(decimal)] = Enum.ToObject(dbTypeType, 13);
-        defaultDbTypes[typeof(byte[])] = Enum.ToObject(dbTypeType, 4);
-
-        defaultDbTypes[typeof(bool?)] = Enum.ToObject(dbTypeType, 2);
-        defaultDbTypes[typeof(sbyte?)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(byte?)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(char?)] = Enum.ToObject(dbTypeType, 6);
-        defaultDbTypes[typeof(ushort?)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(short?)] = Enum.ToObject(dbTypeType, 18);
-        defaultDbTypes[typeof(int?)] = Enum.ToObject(dbTypeType, 9);
-        defaultDbTypes[typeof(uint?)] = Enum.ToObject(dbTypeType, 41);
-        defaultDbTypes[typeof(long?)] = Enum.ToObject(dbTypeType, 1);
-        defaultDbTypes[typeof(ulong?)] = Enum.ToObject(dbTypeType, 1);
-        defaultDbTypes[typeof(float?)] = Enum.ToObject(dbTypeType, 17);
-        defaultDbTypes[typeof(double?)] = Enum.ToObject(dbTypeType, 8);
-        defaultDbTypes[typeof(TimeSpan?)] = Enum.ToObject(dbTypeType, 20);
-        defaultDbTypes[typeof(DateTime?)] = Enum.ToObject(dbTypeType, 21);
-        defaultDbTypes[typeof(Guid?)] = Enum.ToObject(dbTypeType, 27);
-        defaultDbTypes[typeof(decimal?)] = Enum.ToObject(dbTypeType, 13);
-
-        nativeDbTypes[2] = Enum.ToObject(dbTypeType, 2);
-        nativeDbTypes[18] = Enum.ToObject(dbTypeType, 18);
-        nativeDbTypes[6] = Enum.ToObject(dbTypeType, 6);
-        nativeDbTypes[9] = Enum.ToObject(dbTypeType, 9);
-        nativeDbTypes[41] = Enum.ToObject(dbTypeType, 41);
-        nativeDbTypes[1] = Enum.ToObject(dbTypeType, 1);
-        nativeDbTypes[17] = Enum.ToObject(dbTypeType, 17);
-        nativeDbTypes[8] = Enum.ToObject(dbTypeType, 8);
-        nativeDbTypes[20] = Enum.ToObject(dbTypeType, 20);
-        nativeDbTypes[21] = Enum.ToObject(dbTypeType, 21);
-        nativeDbTypes[22] = Enum.ToObject(dbTypeType, 22);
-        nativeDbTypes[27] = Enum.ToObject(dbTypeType, 27);
-        nativeDbTypes[13] = Enum.ToObject(dbTypeType, 13);
-        nativeDbTypes[4] = Enum.ToObject(dbTypeType, 4);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Bigint")] = typeof(long);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Boolean")] = typeof(bool);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Bytea")] = typeof(byte[]);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Char")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Date")] = typeof(DateTime);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Double")] = typeof(double);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Integer")] = typeof(int);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Money")] = typeof(decimal);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Numeric")] = typeof(decimal);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Real")] = typeof(float);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Smallint")] = typeof(short);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Text")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Time")] = typeof(TimeSpan);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Timestamp")] = typeof(DateTime);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Varchar")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Bit")] = typeof(byte[]);
+        defaultMapTypes[Enum.Parse(dbTypeType, "TimestampTz")] = typeof(DateTimeOffset);
+        defaultMapTypes[Enum.Parse(dbTypeType, "TimestampTZ")] = typeof(DateTimeOffset);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Uuid")] = typeof(Guid);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Xml")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Interval")] = typeof(TimeSpan);
+        defaultMapTypes[Enum.Parse(dbTypeType, "TimeTz")] = typeof(TimeSpan);
+        defaultMapTypes[Enum.Parse(dbTypeType, "TimeTZ")] = typeof(TimeSpan);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Json")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Jsonb")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "InternalChar")] = typeof(string);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Varbit")] = typeof(byte[]);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Oid")] = typeof(uint);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Xid")] = typeof(uint);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Cid")] = typeof(uint);
+        defaultMapTypes[Enum.Parse(dbTypeType, "Xid8")] = typeof(ulong);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "BigIntMultirange")] = typeof(long);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "DateMultirange")] = typeof(DateTime);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "IntegerMultirange")] = typeof(int);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "NumericMultirange")] = typeof(decimal);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "TimestampMultirange")] = typeof(DateTime);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "TimestampTzMultirange")] = typeof(DateTimeOffset);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "Range")] = typeof("Range");
+        defaultMapTypes[Enum.Parse(dbTypeType, "BigIntRange")] = typeof(long);
+        defaultMapTypes[Enum.Parse(dbTypeType, "DateRange")] = typeof(DateTime);
+        defaultMapTypes[Enum.Parse(dbTypeType, "IntegerRange")] = typeof(int);
+        defaultMapTypes[Enum.Parse(dbTypeType, "NumericRange")] = typeof(decimal);
+        defaultMapTypes[Enum.Parse(dbTypeType, "TimestampRange")] = typeof(DateTime);
+        defaultMapTypes[Enum.Parse(dbTypeType, "TimestampTzRange")] = typeof(DateTimeOffset);
+        //defaultMapTypes[Enum.Parse(dbTypeType, "Array")] = typeof("Array");
 
         //Npgsql支持数据类型，值为各自值|int.MinValue
         //如, int[]类型: int.MinValue | NpgsqlDbType.Integer
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Bigint"))] = typeof(long[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Boolean"))] = typeof(bool[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Char"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Date"))] = typeof(DateTime[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Double"))] = typeof(double[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Integer"))] = typeof(int[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Money"))] = typeof(decimal[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Numeric"))] = typeof(decimal[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Real"))] = typeof(float[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Smallint"))] = typeof(short[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Text"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Time"))] = typeof(TimeSpan[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Timestamp"))] = typeof(DateTime[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Varchar"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "TimestampTz"))] = typeof(DateTimeOffset[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "TimestampTZ"))] = typeof(DateTimeOffset[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Uuid"))] = typeof(Guid[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Xml"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Interval"))] = typeof(TimeSpan[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "TimeTz"))] = typeof(TimeSpan[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "TimeTZ"))] = typeof(TimeSpan[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Json"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Jsonb"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "InternalChar"))] = typeof(string[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Oid"))] = typeof(uint[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Xid"))] = typeof(uint[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Cid"))] = typeof(uint[]);
+        defaultMapTypes[Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Array") | (int)Enum.Parse(dbTypeType, "Xid8"))] = typeof(ulong[]);
+
+        defaultDbTypes[typeof(long)] = Enum.Parse(dbTypeType, "Bigint");
+        defaultDbTypes[typeof(bool)] = Enum.Parse(dbTypeType, "Boolean");
+        defaultDbTypes[typeof(double)] = Enum.Parse(dbTypeType, "Double");
+        defaultDbTypes[typeof(int)] = Enum.Parse(dbTypeType, "Integer");
+        defaultDbTypes[typeof(decimal)] = Enum.Parse(dbTypeType, "Numeric");
+        defaultDbTypes[typeof(float)] = Enum.Parse(dbTypeType, "Real");
+        defaultDbTypes[typeof(short)] = Enum.Parse(dbTypeType, "Smallint");
+        defaultDbTypes[typeof(TimeSpan)] = Enum.Parse(dbTypeType, "Time");
+        defaultDbTypes[typeof(string)] = Enum.Parse(dbTypeType, "Varchar");
+        defaultDbTypes[typeof(DateTimeOffset)] = Enum.Parse(dbTypeType, "TimestampTz");
+        defaultDbTypes[typeof(Guid)] = Enum.Parse(dbTypeType, "Uuid");
+        defaultDbTypes[typeof(uint)] = Enum.Parse(dbTypeType, "Oid");
+        defaultDbTypes[typeof(ulong)] = Enum.Parse(dbTypeType, "Xid8");
+        defaultDbTypes[typeof(byte[])] = Enum.Parse(dbTypeType, "Bytea");
+
+        defaultDbTypes[typeof(long?)] = Enum.Parse(dbTypeType, "Bigint");
+        defaultDbTypes[typeof(bool?)] = Enum.Parse(dbTypeType, "Boolean");
+        defaultDbTypes[typeof(double?)] = Enum.Parse(dbTypeType, "Double");
+        defaultDbTypes[typeof(int?)] = Enum.Parse(dbTypeType, "Integer");
+        defaultDbTypes[typeof(decimal?)] = Enum.Parse(dbTypeType, "Numeric");
+        defaultDbTypes[typeof(float?)] = Enum.Parse(dbTypeType, "Real");
+        defaultDbTypes[typeof(short?)] = Enum.Parse(dbTypeType, "Smallint");
+        defaultDbTypes[typeof(TimeSpan?)] = Enum.Parse(dbTypeType, "Time");
+        defaultDbTypes[typeof(DateTimeOffset?)] = Enum.Parse(dbTypeType, "TimestampTz");
+        defaultDbTypes[typeof(Guid?)] = Enum.Parse(dbTypeType, "Uuid");
+        defaultDbTypes[typeof(uint?)] = Enum.Parse(dbTypeType, "Oid");
+        defaultDbTypes[typeof(ulong?)] = Enum.Parse(dbTypeType, "Xid8");
+
+        //Npgsql支持数据类型，值为各自值|int.MinValue
+        //如, int[]类型: int.MinValue | NpgsqlDbType.Integer
+        defaultDbTypes[typeof(long[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Bigint") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(bool[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Boolean") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(double[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Double") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(int[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Integer") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(decimal[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Numeric") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(float[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Real") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(short[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Smallint") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(TimeSpan[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Time") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(string[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Varchar") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(DateTimeOffset[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "TimestampTz") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(Guid[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Uuid") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(uint[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Oid") | (int)Enum.Parse(dbTypeType, "Array"));
+        defaultDbTypes[typeof(ulong[])] = Enum.ToObject(dbTypeType, (int)Enum.Parse(dbTypeType, "Xid8") | (int)Enum.Parse(dbTypeType, "Array"));
+
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Bigint")] = Enum.Parse(dbTypeType, "Bigint");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Boolean")] = Enum.Parse(dbTypeType, "Boolean");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Box")] = Enum.Parse(dbTypeType, "Box");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Bytea")] = Enum.Parse(dbTypeType, "Bytea");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Circle")] = Enum.Parse(dbTypeType, "Circle");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Char")] = Enum.Parse(dbTypeType, "Char");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Date")] = Enum.Parse(dbTypeType, "Date");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Double")] = Enum.Parse(dbTypeType, "Double");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Integer")] = Enum.Parse(dbTypeType, "Integer");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Line")] = Enum.Parse(dbTypeType, "Line");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "LSeg")] = Enum.Parse(dbTypeType, "LSeg");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Money")] = Enum.Parse(dbTypeType, "Money");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Numeric")] = Enum.Parse(dbTypeType, "Numeric");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Path")] = Enum.Parse(dbTypeType, "Path");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Point")] = Enum.Parse(dbTypeType, "Point");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Polygon")] = Enum.Parse(dbTypeType, "Polygon");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Real")] = Enum.Parse(dbTypeType, "Real");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Smallint")] = Enum.Parse(dbTypeType, "Smallint");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Text")] = Enum.Parse(dbTypeType, "Text");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Time")] = Enum.Parse(dbTypeType, "Time");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Timestamp")] = Enum.Parse(dbTypeType, "Timestamp");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Varchar")] = Enum.Parse(dbTypeType, "Varchar");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Refcursor")] = Enum.Parse(dbTypeType, "Refcursor");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Inet")] = Enum.Parse(dbTypeType, "Inet");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Bit")] = Enum.Parse(dbTypeType, "Bit");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimestampTz")] = Enum.Parse(dbTypeType, "TimestampTz");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimestampTZ")] = Enum.Parse(dbTypeType, "TimestampTZ");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Uuid")] = Enum.Parse(dbTypeType, "Uuid");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Xml")] = Enum.Parse(dbTypeType, "Xml");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Oidvector")] = Enum.Parse(dbTypeType, "Oidvector");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Interval")] = Enum.Parse(dbTypeType, "Interval");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimeTz")] = Enum.Parse(dbTypeType, "TimeTz");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimeTZ")] = Enum.Parse(dbTypeType, "TimeTZ");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Name")] = Enum.Parse(dbTypeType, "Name");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Abstime")] = Enum.Parse(dbTypeType, "Abstime");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "MacAddr")] = Enum.Parse(dbTypeType, "MacAddr");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Json")] = Enum.Parse(dbTypeType, "Json");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Jsonb")] = Enum.Parse(dbTypeType, "Jsonb");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Hstore")] = Enum.Parse(dbTypeType, "Hstore");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "InternalChar")] = Enum.Parse(dbTypeType, "InternalChar");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Varbit")] = Enum.Parse(dbTypeType, "Varbit");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Unknown")] = Enum.Parse(dbTypeType, "Unknown");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Oid")] = Enum.Parse(dbTypeType, "Oid");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Xid")] = Enum.Parse(dbTypeType, "Xid");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Cid")] = Enum.Parse(dbTypeType, "Cid");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Cidr")] = Enum.Parse(dbTypeType, "Cidr");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TsVector")] = Enum.Parse(dbTypeType, "TsVector");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TsQuery")] = Enum.Parse(dbTypeType, "TsQuery");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Regtype")] = Enum.Parse(dbTypeType, "Regtype");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Geometry")] = Enum.Parse(dbTypeType, "Geometry");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Citext")] = Enum.Parse(dbTypeType, "Citext");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Int2Vector")] = Enum.Parse(dbTypeType, "Int2Vector");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Tid")] = Enum.Parse(dbTypeType, "Tid");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "MacAddr8")] = Enum.Parse(dbTypeType, "MacAddr8");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Geography")] = Enum.Parse(dbTypeType, "Geography");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Regconfig")] = Enum.Parse(dbTypeType, "Regconfig");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "JsonPath")] = Enum.Parse(dbTypeType, "JsonPath");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "PgLsn")] = Enum.Parse(dbTypeType, "PgLsn");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "LTree")] = Enum.Parse(dbTypeType, "LTree");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "LQuery")] = Enum.Parse(dbTypeType, "LQuery");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "LTxtQuery")] = Enum.Parse(dbTypeType, "LTxtQuery");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Xid8")] = Enum.Parse(dbTypeType, "Xid8");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Multirange")] = Enum.Parse(dbTypeType, "Multirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "BigIntMultirange")] = Enum.Parse(dbTypeType, "BigIntMultirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "DateMultirange")] = Enum.Parse(dbTypeType, "DateMultirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "IntegerMultirange")] = Enum.Parse(dbTypeType, "IntegerMultirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "NumericMultirange")] = Enum.Parse(dbTypeType, "NumericMultirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimestampMultirange")] = Enum.Parse(dbTypeType, "TimestampMultirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimestampTzMultirange")] = Enum.Parse(dbTypeType, "TimestampTzMultirange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Range")] = Enum.Parse(dbTypeType, "Range");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "BigIntRange")] = Enum.Parse(dbTypeType, "BigIntRange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "DateRange")] = Enum.Parse(dbTypeType, "DateRange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "IntegerRange")] = Enum.Parse(dbTypeType, "IntegerRange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "NumericRange")] = Enum.Parse(dbTypeType, "NumericRange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimestampRange")] = Enum.Parse(dbTypeType, "TimestampRange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "TimestampTzRange")] = Enum.Parse(dbTypeType, "TimestampTzRange");
+        nativeDbTypes[(int)Enum.Parse(dbTypeType, "Array")] = Enum.Parse(dbTypeType, "Array");
 
         castTos[typeof(string)] = "VARCHAR";
         castTos[typeof(sbyte)] = "SMALLINT";
@@ -118,43 +265,43 @@ public class NpgSqlProvider : BaseOrmProvider
     }
     public NpgSqlProvider()
     {
-        memberAccessSqlFormatterCahe.TryAdd(typeof(string).GetMember(nameof(string.Empty))[0], target => "''");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(string).GetProperty(nameof(string.Length)), target => $"LENGTH({this.GetQuotedValue(target)})");
+        memberAccessSqlFormatterCahe.TryAdd(typeof(string).GetMember(nameof(string.Empty))[0], target => new SqlSegment { Value = "''", IsConstantValue = true });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(string).GetProperty(nameof(string.Length)), target => target.Change($"LENGTH({this.GetQuotedValue(target)})", false, true));
 
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.Now))[0], target => "NOW()");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.UtcNow))[0], target => "NOW() at time zone 'utc'");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.Today))[0], target => "CURRENT_DATE");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.MinValue))[0], target => "'0001-01-01 00:00:00'");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.MaxValue))[0], target => "'9999-12-31 23:59:59'");
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.Now))[0], target => new SqlSegment { Value = "NOW()", IsExpression = true });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.UtcNow))[0], target => new SqlSegment { Value = "NOW() AT TIME ZONE 'UTC'", IsExpression = true });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.Today))[0], target => new SqlSegment { Value = "CURRENT_DATE", IsExpression = true });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.MinValue))[0], target => new SqlSegment { Value = $"'{DateTime.MinValue:yyyy-MM-dd HH:mm:ss}'" });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetMember(nameof(DateTime.MaxValue))[0], target => new SqlSegment { Value = $"'{DateTime.MinValue:yyyy-MM-dd HH:mm:ss}'" });
 
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Date)), target => $"({this.GetQuotedValue(target)})::DATE");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.TimeOfDay)), target => $"(EXTRACT(EPOCH FROM({this.GetQuotedValue(target)})::TIME)*1000000)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.DayOfWeek)), target => $"EXTRACT(DOW FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Day)), target => $"EXTRACT(DAY FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.DayOfYear)), target => $"EXTRACT(DOY FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Month)), target => $"EXTRACT(MONTH FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Year)), target => $"EXTRACT(YEAR FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Hour)), target => $"EXTRACT(HOUR FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Minute)), target => $"EXTRACT(MINUTE FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Second)), target => $"EXTRACT(SECOND FROM({this.GetQuotedValue(target)})::TIMESTAMP)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Millisecond)), target => $"(EXTRACT(MILLISECONDS FROM({this.GetQuotedValue(target)})::TIMESTAMP)-EXTRACT(SECOND FROM({this.GetQuotedValue(target)})::TIMESTAMP)*1000)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Ticks)), target => $"(EXTRACT(EPOCH FROM({this.GetQuotedValue(target)})::TIMESTAMP)*10000000+621355968000000000)");
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Date)), target => target.Change($"({this.GetQuotedValue(target)})::DATE", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.TimeOfDay)), target => target.Change($"(EXTRACT(EPOCH FROM({this.GetQuotedValue(target)})::TIME)*1000000)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.DayOfWeek)), target => target.Change($"EXTRACT(DOW FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Day)), target => target.Change($"EXTRACT(DAY FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.DayOfYear)), target => target.Change($"EXTRACT(DOY FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Month)), target => target.Change($"EXTRACT(MONTH FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Year)), target => target.Change($"EXTRACT(YEAR FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Hour)), target => target.Change($"EXTRACT(HOUR FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Minute)), target => target.Change($"EXTRACT(MINUTE FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Second)), target => target.Change($"EXTRACT(SECOND FROM({this.GetQuotedValue(target)})::TIMESTAMP)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Millisecond)), target => target.Change($"(EXTRACT(MILLISECONDS FROM({this.GetQuotedValue(target)})::TIMESTAMP)-EXTRACT(SECOND FROM({this.GetQuotedValue(target)})::TIMESTAMP)*1000)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(DateTime).GetProperty(nameof(DateTime.Ticks)), target => target.Change($"(EXTRACT(EPOCH FROM({this.GetQuotedValue(target)})::TIMESTAMP)*10000000+621355968000000000)", false, true));
 
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetMember(nameof(TimeSpan.Zero))[0], target => "0");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetMember(nameof(TimeSpan.MinValue))[0], target => "-922337203685477580");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetMember(nameof(TimeSpan.MaxValue))[0], target => "922337203685477580");
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetMember(nameof(TimeSpan.Zero))[0], target => new SqlSegment { Value = "0", IsConstantValue = true });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetMember(nameof(TimeSpan.MinValue))[0], target => new SqlSegment { Value = $"{long.MinValue}", IsConstantValue = true });
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetMember(nameof(TimeSpan.MaxValue))[0], target => new SqlSegment { Value = $"{long.MaxValue}", IsConstantValue = true });
 
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Days)), target => $"floor(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60 * 24})");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Hours)), target => $"floor(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60}%24)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Milliseconds)), target => $"(floor(({this.GetQuotedValue(target)})/1000)::int8%1000)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Minutes)), target => $"(floor(({this.GetQuotedValue(target)})/{(long)1000000 * 60})::int8%60)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Seconds)), target => $"(floor(({this.GetQuotedValue(target)})/1000000)::int8%60)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Ticks)), target => $"(({this.GetQuotedValue(target)})*10)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalDays)), target => $"(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60 * 24})");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalHours)), target => $"(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60})");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalMilliseconds)), target => $"(({this.GetQuotedValue(target)})/1000)");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalMinutes)), target => $"(({this.GetQuotedValue(target)})/{(long)1000000 * 60})");
-        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalSeconds)), target => $"(({this.GetQuotedValue(target)})/1000000)");
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Days)), target => target.Change($"FLOOR(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60 * 24})", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Hours)), target => target.Change($"FLOOR(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60}%24)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Milliseconds)), target => target.Change($"(FLOOR(({this.GetQuotedValue(target)})/1000)::INT8%1000)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Minutes)), target => target.Change($"(FLOOR(({this.GetQuotedValue(target)})/{(long)1000000 * 60})::INT8%60)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Seconds)), target => target.Change($"(FLOOR(({this.GetQuotedValue(target)})/1000000)::INT8%60)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.Ticks)), target => target.Change($"(({this.GetQuotedValue(target)})*10)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalDays)), target => target.Change($"(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60 * 24})", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalHours)), target => target.Change($"(({this.GetQuotedValue(target)})/{(long)1000000 * 60 * 60})", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalMilliseconds)), target => target.Change($"(({this.GetQuotedValue(target)})/1000)", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalMinutes)), target => target.Change($"(({this.GetQuotedValue(target)})/{(long)1000000 * 60})", false, true));
+        memberAccessSqlFormatterCahe.TryAdd(typeof(TimeSpan).GetProperty(nameof(TimeSpan.TotalSeconds)), target => target.Change($"(({this.GetQuotedValue(target)})/1000000)", false, true));
     }
     public override IDbConnection CreateConnection(string connectionString)
         => createNativeConnectonDelegate.Invoke(connectionString);
@@ -202,11 +349,11 @@ public class NpgSqlProvider : BaseOrmProvider
         }
         throw new Exception($"数值{nativeDbType}没有对应的NpgsqlTypes.NpgsqlDbType映射类型");
     }
-    public override bool IsStringDbType(int nativeDbType)
+    public override Type MapDefaultType(object nativeDbType)
     {
-        if (nativeDbType == 6 || nativeDbType == 19 || nativeDbType == 22 || nativeDbType == 32 || nativeDbType == 51 || nativeDbType == 38)
-            return true;
-        return false;
+        if (defaultMapTypes.TryGetValue(nativeDbType, out var result))
+            return result;
+        return typeof(object);
     }
     public override string CastTo(Type type)
     {
@@ -214,14 +361,15 @@ public class NpgSqlProvider : BaseOrmProvider
             return dbType;
         return type.ToString().ToLower();
     }
-    public override bool TryGetMemberAccessSqlFormatter(SqlSegment originalSegment, MemberInfo memberInfo, out MemberAccessSqlFormatter formatter)
-       => memberAccessSqlFormatterCahe.TryGetValue(memberInfo, out formatter);
-    public override bool TryGetMethodCallSqlFormatter(SqlSegment originalSegment, MethodInfo methodInfo, out MethodCallSqlFormatter formatter)
+    public override bool TryGetMemberAccessSqlFormatter(MemberExpression memberExpr, ISqlVisitor sqlVisitor, out MemberAccessSqlFormatter formatter)
+       => memberAccessSqlFormatterCahe.TryGetValue(memberExpr.Member, out formatter);
+    public override bool TryGetMethodCallSqlFormatter(MethodCallExpression methodCallExpr, ISqlVisitor sqlVisitor, out MethodCallSqlFormatter formatter)
     {
+        var methodInfo = methodCallExpr.Method;
+        var parameterInfos = methodInfo.GetParameters();
         if (!methodCallSqlFormatterCahe.TryGetValue(methodInfo, out formatter))
         {
             bool result = false;
-            var parameterInfos = methodInfo.GetParameters();
             switch (methodInfo.Name)
             {
                 case "Contains":
@@ -327,9 +475,9 @@ public class NpgSqlProvider : BaseOrmProvider
                             if (args[0] is SqlSegment rightSegment && rightSegment.IsParameter)
                             {
                                 var concatMethodInfo = typeof(string).GetMethod("Concat", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(string), typeof(string), typeof(string) });
-                                if (this.TryGetMethodCallSqlFormatter(originalSegment, concatMethodInfo, out var concatFormatter))
-                                    //自己调用字符串连接，参数直接是字符串
-                                    rightValue = concatFormatter.Invoke(null, deferExprs, "'%'", rightSegment.Value.ToString(), "'%'");
+                                //if (this.TryGetMethodCallSqlFormatter(originalSegment, concatMethodInfo, out var concatFormatter))
+                                //    //自己调用字符串连接，参数直接是字符串
+                                //    rightValue = concatFormatter.Invoke(null, deferExprs, "'%'", rightSegment.Value.ToString(), "'%'");
                             }
                             else rightValue = $"'%{args[0]}%'";
 
@@ -361,32 +509,32 @@ public class NpgSqlProvider : BaseOrmProvider
                     methodCallSqlFormatterCahe.TryAdd(methodInfo, formatter = (target, deferExprs, args) =>
                     {
                         var builder = new StringBuilder();
-                        foreach (var arg in args)
-                        {
-                            if (arg is IEnumerable enumerable && arg is not string)
-                            {
-                                foreach (var element in enumerable)
-                                {
-                                    if (builder.Length > 0)
-                                        builder.Append(" || ");
+                        //foreach (var arg in args)
+                        //{
+                        //    if (arg is IEnumerable enumerable && arg is not string)
+                        //    {
+                        //        foreach (var element in enumerable)
+                        //        {
+                        //            if (builder.Length > 0)
+                        //                builder.Append(" || ");
 
-                                    //连接符是||，不是字符串类型，无法连接，需要转换
-                                    if (element is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
-                                    {
-                                        if (sqlSegment.Expression.Type != typeof(string))
-                                            builder.Append($"{sqlSegment.Value}::text");
-                                        else builder.Append(sqlSegment.Value.ToString());
-                                    }
-                                    else builder.Append(this.GetQuotedValue(typeof(string), element));
-                                }
-                            }
-                            else
-                            {
-                                if (builder.Length > 0)
-                                    builder.Append(" || ");
-                                builder.Append(this.GetQuotedValue(arg));
-                            }
-                        }
+                        //            //连接符是||，不是字符串类型，无法连接，需要转换
+                        //            if (element is SqlSegment sqlSegment && !sqlSegment.IsConstantValue)
+                        //            {
+                        //                if (sqlSegment.Expression.Type != typeof(string))
+                        //                    builder.Append($"{sqlSegment.Value}::text");
+                        //                else builder.Append(sqlSegment.Value.ToString());
+                        //            }
+                        //            else builder.Append(this.GetQuotedValue(typeof(string), element));
+                        //        }
+                        //    }
+                        //    else
+                        //    {
+                        //        if (builder.Length > 0)
+                        //            builder.Append(" || ");
+                        //        builder.Append(this.GetQuotedValue(arg));
+                        //    }
+                        //}
                         return builder.ToString();
                     });
                     result = true;
@@ -456,9 +604,9 @@ public class NpgSqlProvider : BaseOrmProvider
                             if (formatSpan.Length > 0)
                                 concatParameters.Add(formatSpan.ToString());
 
-                            var methodInfo = typeof(string).GetMethod(nameof(string.Concat), new Type[] { typeof(string).MakeArrayType() });
-                            this.TryGetMethodCallSqlFormatter(originalSegment, methodInfo, out var concatFormater);
-                            result = concatFormater.Invoke(null, null, concatParameters);
+                            //var methodInfo = typeof(string).GetMethod(nameof(string.Concat), new Type[] { typeof(string).MakeArrayType() });
+                            //this.TryGetMethodCallSqlFormatter(originalSegment, methodInfo, out var concatFormater);
+                            //result = concatFormater.Invoke(null, null, concatParameters);
                         }
                         return result;
                     });
@@ -803,3 +951,4 @@ public class NpgSqlProvider : BaseOrmProvider
         return true;
     }
 }
+

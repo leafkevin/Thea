@@ -5,6 +5,7 @@
 		<LangVersion>10.0</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Remove="Providers\NpgsqlProvider.cs" />
 		<Compile Remove="Providers\OracleProvider.cs" />
 		<Compile Remove="Providers\SqLiteProvider.cs" />
 	</ItemGroup>

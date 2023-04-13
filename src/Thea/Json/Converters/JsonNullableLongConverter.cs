@@ -8,21 +8,23 @@ public class JsonNullableLongConverter : JsonConverter<long?>
 {
     public override long? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        long value = 0;
+        long result;
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
-                if (reader.TryGetInt64(out value))
-                    return value;
+                if (reader.TryGetInt64(out result))
+                    return result;
                 break;
             case JsonTokenType.String:
-                if (long.TryParse(reader.GetString(), out value))
-                    return value;
+                var fromString = reader.GetString();
+                if (string.IsNullOrWhiteSpace(fromString))
+                    return null;
+                if (long.TryParse(fromString, out result))
+                    return result;
                 break;
-            case JsonTokenType.Null:
-                return null;
+            case JsonTokenType.Null: return null;
         }
-        return value;
+        return null;
     }
     public override void Write(Utf8JsonWriter writer, long? value, JsonSerializerOptions options)
     {

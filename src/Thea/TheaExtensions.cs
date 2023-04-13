@@ -35,12 +35,6 @@ public static class TheaExtensions
     public static string ToJson(this object obj)
     {
         if (obj == null) return null;
-        if (obj is string json)
-        {
-            if (string.IsNullOrEmpty(json))
-                return null;
-            return json;
-        }
         return TheaJsonSerializer.Serialize(obj);
     }
     public static T JsonProperty<T>(this object jsonObj, string propertyName)

@@ -3,10 +3,8 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using Thea.Orm;
 
 namespace Thea.Trolley;
@@ -24,22 +22,7 @@ class RepositoryHelper
         Expression valueExpr = parameterValueExpr;
         MethodInfo methodInfo = null;
 
-        //int? age = 25;
-        //age.Value;
-        if (valueExpr.Type.IsNullableType(out var underlyingType))
-            valueExpr = Expression.Property(valueExpr, "Value");
-
-        //Gender? gender = Gender.Male;
-        //(int)gender.Value;
-        if (underlyingType.IsEnumType(out var enumUnderlyingType))
-        {
-            if (nativeDbType != null && ormProvider.IsStringDbType((int)nativeDbType))
-            {
-                methodInfo = typeof(Enum).GetMethod(nameof(Enum.GetName), new Type[] { typeof(Type), typeof(object) });
-                valueExpr = Expression.Call(methodInfo, Expression.Constant(underlyingType), valueExpr);
-            }
-            else valueExpr = Expression.Convert(valueExpr, enumUnderlyingType);
-        }
+        valueExpr = ormProvider.ToFieldValue(valueExpr, nativeDbType);
         valueExpr = Expression.Convert(valueExpr, typeof(object));
 
         if (isExpectNullable)
@@ -47,7 +30,7 @@ class RepositoryHelper
             //object localValue;
             //if(gender == null)
             //  localValue = DBNull.Value;
-            //else localValue = (int)gender.Value;
+            //else localValue = (object)gender.Value;
             var isNullExpr = Expression.Equal(parameterValueExpr, Expression.Constant(null));
             var objLocalExpr = DefineLocalParameter("objLocal", typeof(object), localParameters, blockParameters);
             var assignNullExpr = Expression.Assign(objLocalExpr, Expression.Constant(DBNull.Value));
@@ -165,62 +148,6 @@ class RepositoryHelper
         //var parameter = ormProvider.CreateParameter("@Parameter", nativeDbType, whereObj.Name);
         var valueExpr = Expression.PropertyOrField(typedParameterExpr, memberMapper.MemberName);
         AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, valueExpr, false, memberMapper.NativeDbType, ormProvider, null, null, blockBodies);
-    }
-
-    public static List<IDbDataParameter> CreateDbParameters(IOrmProvider ormProvider, string rawSql, object parameters)
-    {
-        if (parameters == null)
-            return null;
-        var result = new List<IDbDataParameter>();
-        if (parameters is Dictionary<string, object> dict)
-        {
-            foreach (var item in dict)
-            {
-                var parameterName = ormProvider.ParameterPrefix + item.Key;
-                if (!Regex.IsMatch(rawSql, parameterName + @"([^\p{L}\p{N}_]+|$)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant))
-                    continue;
-                var dbParameter = ormProvider.CreateParameter(parameterName, dict[item.Key]);
-                result.Add(dbParameter);
-            }
-        }
-        else
-        {
-            var parameterType = parameters.GetType();
-            if (parameterType.IsEntityType())
-            {
-                var memberInfos = parameterType.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-                    .Where(f => f.MemberType == MemberTypes.Property | f.MemberType == MemberTypes.Field).ToList();
-                foreach (var memberInfo in memberInfos)
-                {
-                    var parameterName = ormProvider.ParameterPrefix + memberInfo.Name;
-                    if (!Regex.IsMatch(rawSql, parameterName + @"([^\p{L}\p{N}_]+|$)", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant))
-                        continue;
-                    var memberValue = EvaluateValue(parameterType, parameters, memberInfo.Name);
-                    var dbParameter = ormProvider.CreateParameter(parameterName, memberValue);
-                    result.Add(dbParameter);
-                }
-            }
-        }
-        return result;
-    }
-    public static object EvaluateValue(Type entityType, object objEntity, string memberName)
-    {
-        var typedObjExpr = Expression.Constant(objEntity, entityType);
-        var memberExpr = Expression.PropertyOrField(typedObjExpr, memberName);
-        var lambda = Expression.Lambda(memberExpr);
-        var getter = lambda.Compile();
-        return getter.DynamicInvoke();
-    }
-    public static T EvaluateValue<T>(Type entityType, object objEntity, string memberName)
-    {
-        var typedObjExpr = Expression.Constant(objEntity, entityType);
-        var memberExpr = Expression.PropertyOrField(typedObjExpr, memberName);
-        var lambda = Expression.Lambda<Func<T>>(memberExpr);
-        var getter = lambda.Compile();
-        var objValue = getter();
-        if (objValue == null)
-            return default;
-        return objValue;
     }
     private static ParameterExpression DefineLocalParameter(string namePrefix, Type localVariableType, Dictionary<string, int> localParameters, List<ParameterExpression> blockParameters)
     {

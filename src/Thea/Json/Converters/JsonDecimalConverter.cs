@@ -8,19 +8,19 @@ public class JsonDecimalConverter : JsonConverter<decimal>
 {
     public override decimal Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        decimal value = 0;
+        decimal result = 0;
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
-                if (reader.TryGetDecimal(out value))
-                    return value;
+                if (reader.TryGetDecimal(out result))
+                    return result;
                 break;
             case JsonTokenType.String:
-                if (decimal.TryParse(reader.GetString(), out value))
-                    return value;
+                if (decimal.TryParse(reader.GetString(), out result))
+                    return result;
                 break;
         }
-        return value;
+        return result;
     }
     public override void Write(Utf8JsonWriter writer, decimal value, JsonSerializerOptions options)
         => writer.WriteNumberValue(value);

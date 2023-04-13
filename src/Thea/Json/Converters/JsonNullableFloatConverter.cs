@@ -8,21 +8,23 @@ public class JsonNullableFloatConverter : JsonConverter<float?>
 {
     public override float? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        float value = 0;
+        float result;
         switch (reader.TokenType)
         {
             case JsonTokenType.Number:
-                if (reader.TryGetSingle(out value))
-                    return value;
+                if (reader.TryGetSingle(out result))
+                    return result;
                 break;
             case JsonTokenType.String:
-                if (float.TryParse(reader.GetString(), out value))
-                    return value;
+                var fromString = reader.GetString();
+                if (string.IsNullOrWhiteSpace(fromString))
+                    return null;
+                if (float.TryParse(fromString, out result))
+                    return result;
                 break;
-            case JsonTokenType.Null:
-                return null;
+            case JsonTokenType.Null: return null;
         }
-        return value;
+        return null;
     }
     public override void Write(Utf8JsonWriter writer, float? value, JsonSerializerOptions options)
     {
