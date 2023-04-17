@@ -25,6 +25,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Job", "Thea.Job\Thea.J
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeTemplate", "CodeTemplate\CodeTemplate.csproj", "{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.JwtTokens", "Thea.JwtToken\Thea.JwtTokens.csproj", "{0DED3B7E-9F3E-4E36-8C91-1E57F2A8ED67}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -63,6 +65,10 @@ Global
 		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0DED3B7E-9F3E-4E36-8C91-1E57F2A8ED67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0DED3B7E-9F3E-4E36-8C91-1E57F2A8ED67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0DED3B7E-9F3E-4E36-8C91-1E57F2A8ED67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0DED3B7E-9F3E-4E36-8C91-1E57F2A8ED67}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -5,6 +5,7 @@ using Nest;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -32,8 +33,11 @@ namespace Thea.Logging
                 throw new ArgumentNullException("In appsettings.json file not found 'Logging:PushUrls' node or is null.");
 
             var pool = new StaticConnectionPool(pushUrls.Select(f => new Uri(f)));
-            this.client = new ElasticClient(new ConnectionSettings(pool));
-            var batchCount = configuration.GetValue<int>("Logging:PushBatchCount", 50);
+            var connectionString = new ConnectionSettings(pool)
+                //启用兼容模式EnableApiVersioningHeader，IsValid将正确返回true
+                .DisableDirectStreaming().EnableApiVersioningHeader();
+            this.client = new ElasticClient(connectionString);
+            var batchCount = configuration.GetValue("Logging:PushBatchCount", 100);
 
             this.task = Task.Factory.StartNew(async () =>
             {
@@ -109,10 +113,13 @@ namespace Thea.Logging
         private async Task SendToAsync(List<LogEntity> logs)
         {
             if (logs.Count <= 0) return;
-            var esIndex = $"logs-{DateTime.Now:yyyyMMdd}";
+            var esIndex = $"thealogs-{DateTime.Now:yyyyMMdd}";
             var result = await this.client.IndexManyAsync(logs, esIndex);
             if (!result.IsValid)
+            {
                 Console.WriteLine(result.DebugInformation);
+                Console.WriteLine(result.ServerError);
+            }
         }
     }
 }

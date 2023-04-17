@@ -30,34 +30,13 @@ class TheaJwtTokenService : IJwtTokenService
         claims = securityToken.Claims.ToList();
         return new JwtSecurityTokenHandler().WriteToken(securityToken);
     }
-    public bool ValidateToken(string token, out List<Claim> claims)
+    public bool ReadToken(string token, out List<Claim> claims)
     {
-        var rsa = RSA.Create();
-        byte[] privateKeys = Convert.FromBase64String(this.options.SecretKey);
-        rsa.ImportPkcs8PrivateKey(privateKeys, out _);
-        var securityKey = new RsaSecurityKey(rsa);
-        var handler = new JwtSecurityTokenHandler();
-        var validationParameters = new TokenValidationParameters()
-        {
-            IssuerSigningKey = securityKey,
-            LogTokenId = false,
-            LogValidationExceptions = false,
-            RequireExpirationTime = false,
-            RequireSignedTokens = false,
-            RequireAudience = false,
-            SaveSigninToken = false,
-            TryAllIssuerSigningKeys = true,
-            ValidateActor = false,
-            ValidateAudience = false,
-            ValidateIssuer = false,
-            ValidateIssuerSigningKey = false,
-            ValidateLifetime = false,
-            ValidateTokenReplay = false
-        };
         try
         {
-            var user = handler.ValidateToken(token, validationParameters, out _);
-            claims = user.Claims.ToList();
+            var handler = new JwtSecurityTokenHandler();
+            var securityToken = handler.ReadJwtToken(token);
+            claims = securityToken.Claims.ToList();
             return true;
         }
         catch

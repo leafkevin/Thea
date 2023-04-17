@@ -28,8 +28,7 @@ public class TheaWebMiddleware
     public async Task Invoke(HttpContext context)
     {
         var originalStream = context.Response.Body;
-        var logEntityInfo = this.CreateLogEntity(context);
-        await this.Initialize(context, logEntityInfo);
+        var logEntityInfo = await this.CreateLogEntity(context);
         var logScope = new TheaLogState { TraceId = logEntityInfo.TraceId, Sequence = logEntityInfo.Sequence, Tag = logEntityInfo.Tag };
         using (this.logger.BeginScope(logScope))
         {
@@ -38,27 +37,21 @@ public class TheaWebMiddleware
             {
                 context.Response.Body = memoryStream;
                 await next(context);
-                memoryStream.Position = 0;
-                var respBody = new StreamReader(memoryStream).ReadToEnd();
-                memoryStream.Position = 0;
+                var respBody = await this.ReadBody(memoryStream);
                 await memoryStream.CopyToAsync(originalStream);
                 this.UpdateLogEntityInfo(context, respBody, logEntityInfo);
-                this.logger.LogEntity(logEntityInfo);
             }
             catch (Exception ex)
             {
                 await this.ProcessException(context, ex, logEntityInfo);
-                memoryStream.Position = 0;
-                var respBody = new StreamReader(memoryStream).ReadToEnd();
-                memoryStream.Position = 0;
+                var respBody = await this.ReadBody(memoryStream);
                 await memoryStream.CopyToAsync(originalStream);
-
-                this.logger.LogEntity(logEntityInfo);
             }
+            this.logger.LogEntity(logEntityInfo);
         }
     }
 
-    private LogEntity CreateLogEntity(HttpContext context)
+    private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
         var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = LogLevel.Information };
         if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
@@ -99,11 +92,8 @@ public class TheaWebMiddleware
         logEntityInfo.Path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
         logEntityInfo.CreatedAt = DateTime.Now;
-        return logEntityInfo;
-    }
 
-    private async Task Initialize(HttpContext context, LogEntity logEntityInfo)
-    {
+
         context.Request.EnableBuffering();
         context.Response.OnStarting(() =>
         {
@@ -114,20 +104,27 @@ public class TheaWebMiddleware
 
             return Task.CompletedTask;
         });
-        if (logEntityInfo.ApiType == ApiType.HttpGet)
+        switch (logEntityInfo.ApiType)
         {
-            if (context.Request.Query != null && context.Request.Query.Count > 0)
-                logEntityInfo.Parameters = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
+            case ApiType.HttpGet:
+            case ApiType.HttpDelete:
+                if (context.Request.Query != null && context.Request.Query.Count > 0)
+                    logEntityInfo.Parameters = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
+                break;
+            case ApiType.HttpPost:
+            case ApiType.HttpPut:
+                logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
+                break;
         }
-        else logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
+
+        return logEntityInfo;
     }
     private async Task<string> ReadBody(Stream stream)
     {
-        var originalPosition = stream.Position;
         stream.Position = 0;
         var reader = new StreamReader(stream);
         var result = await reader.ReadToEndAsync();
-        stream.Position = originalPosition;
+        stream.Position = 0;
         return result;
     }
     private void UpdateLogEntityInfo(HttpContext context, string respBody, LogEntity logEntityInfo)
