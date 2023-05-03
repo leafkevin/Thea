@@ -5,11 +5,11 @@ using System.Linq.Expressions;
 using System.Text;
 using Thea.Orm;
 
-namespace Thea.Trolley;
+namespace Thea.Trolley.SqlServer;
 
-partial class MySqlProvider
+partial class SqlServerProvider
 {
-    public virtual bool TryGetIEnumerableMethodCallSqlFormatter(MethodCallExpression methodCallExpr, out MethodCallSqlFormatter formatter)
+    public override bool TryGetIEnumerableMethodCallSqlFormatter(MethodCallExpression methodCallExpr, out MethodCallSqlFormatter formatter)
     {
         var result = false;
         formatter = null;
@@ -24,7 +24,7 @@ partial class MySqlProvider
                 if (methodInfo.IsStatic && parameterInfos.Length >= 2 && methodInfo.DeclaringType == typeof(Enumerable))
                 {
                     //数组调用
-                    methodCallSqlFormatterCahe.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
+                    methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                     {
                         var builder = new StringBuilder();
                         var arraySegment = visitor.VisitAndDeferred(args[0]);
@@ -58,8 +58,8 @@ partial class MySqlProvider
 
                         string notString = notIndex % 2 > 0 ? "NOT " : "";
                         if (builder.Length > 0)
-                            return elementSegment.Change($"{element} {notString}IN ({builder})", false, true);
-                        else return elementSegment.Change("1<>0", false, true);
+                            return elementSegment.Change($"{element} {notString}IN ({builder})", false, true, false);
+                        else return elementSegment.Change("1<>0", false, true, false);
                     });
                     result = true;
                 }
@@ -69,7 +69,7 @@ partial class MySqlProvider
                 if (!methodInfo.IsStatic && parameterInfos.Length == 1 && methodInfo.DeclaringType.GenericTypeArguments.Length > 0
                      && typeof(IEnumerable<>).MakeGenericType(methodInfo.DeclaringType.GenericTypeArguments[0]).IsAssignableFrom(methodInfo.DeclaringType))
                 {
-                    methodCallSqlFormatterCahe.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
+                    methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                     {
                         var builder = new StringBuilder();
                         var targetSegment = visitor.VisitAndDeferred(target);
@@ -102,8 +102,8 @@ partial class MySqlProvider
 
                         string notString = notIndex % 2 > 0 ? "NOT " : "";
                         if (builder.Length > 0)
-                            return elementSegment.Change($"{element} {notString}IN ({builder})", false, true);
-                        else return elementSegment.Change("1<>0", false, true);
+                            return elementSegment.Change($"{element} {notString}IN ({builder})", false, true, false);
+                        else return elementSegment.Change("1<>0", false, true, false);
                     });
                     return true;
                 }
@@ -112,10 +112,10 @@ partial class MySqlProvider
                 if (!methodInfo.IsStatic && parameterInfos.Length == 1 && methodInfo.DeclaringType == typeof(Enumerable) && methodInfo.DeclaringType.GenericTypeArguments.Length > 0
                      && methodInfo.DeclaringType.GenericTypeArguments[0] == typeof(char))
                 {
-                    methodCallSqlFormatterCahe.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
+                    methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        return target.Change($"REVERSE({this.GetQuotedValue(targetSegment)})", false, true);
+                        return target.Change($"REVERSE({this.GetQuotedValue(targetSegment)})", false, false, true);
                     });
                     result = true;
                 }

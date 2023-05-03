@@ -50,13 +50,13 @@ public class Repository : IRepository
     #region Query
     public IQuery<T> From<T>(char tableAsStart = 'a', string suffixRawSql = null)
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T), suffixRawSql);
         return new Query<T>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T> From<T>(Func<IFromQuery, IFromQuery<T>> subQuery, char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart, "p1w");
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart, "p1w");
         subQuery.Invoke(new FromQuery(visitor));
         var sql = visitor.BuildSql(out var dbDataParameters, out var readerFields);
         var newVisitor = visitor.Clone();
@@ -65,7 +65,7 @@ public class Repository : IRepository
     }
     public IQuery<T> FromWith<T>(Func<IFromQuery, IFromQuery<T>> cteSubQuery, string cteTableName = "cte", char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart, "p1w");
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart, "p1w");
         cteSubQuery.Invoke(new FromQuery(visitor));
         var rawSql = visitor.BuildSql(out var dbDataParameters, out var readerFields);
         var newVisitor = visitor.Clone();
@@ -74,7 +74,7 @@ public class Repository : IRepository
     }
     public IQuery<T> FromWithRecursive<T>(Func<IFromQuery, string, IFromQuery<T>> cteSubQuery, string cteTableName = "cte", char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart, "p1w");
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart, "p1w");
         cteSubQuery.Invoke(new FromQuery(visitor), cteTableName);
         var rawSql = visitor.BuildSql(out var dbDataParameters, out var readerFields);
         var newVisitor = visitor.Clone();
@@ -83,55 +83,55 @@ public class Repository : IRepository
     }
     public IQuery<T1, T2> From<T1, T2>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2));
         return new Query<T1, T2>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3> From<T1, T2, T3>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3));
         return new Query<T1, T2, T3>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4> From<T1, T2, T3, T4>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4));
         return new Query<T1, T2, T3, T4>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4, T5> From<T1, T2, T3, T4, T5>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5));
         return new Query<T1, T2, T3, T4, T5>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4, T5, T6> From<T1, T2, T3, T4, T5, T6>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6));
         return new Query<T1, T2, T3, T4, T5, T6>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4, T5, T6, T7> From<T1, T2, T3, T4, T5, T6, T7>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7));
         return new Query<T1, T2, T3, T4, T5, T6, T7>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4, T5, T6, T7, T8> From<T1, T2, T3, T4, T5, T6, T7, T8>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8));
         return new Query<T1, T2, T3, T4, T5, T6, T7, T8>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9> From<T1, T2, T3, T4, T5, T6, T7, T8, T9>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9));
         return new Query<T1, T2, T3, T4, T5, T6, T7, T8, T9>(this.connection, this.Transaction, visitor);
     }
     public IQuery<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> From<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(char tableAsStart = 'a')
     {
-        var visitor = new QueryVisitor(this.DbKey, this.OrmProvider, this.MapProvider, this.isParameterized, tableAsStart);
+        var visitor = this.OrmProvider.NewQueryVisitor(this.DbKey, this.MapProvider, this.isParameterized, tableAsStart);
         visitor.From(tableAsStart, typeof(T1), typeof(T2), typeof(T3), typeof(T4), typeof(T5), typeof(T6), typeof(T7), typeof(T8), typeof(T9), typeof(T10));
         return new Query<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(this.connection, this.Transaction, visitor);
     }
@@ -1264,15 +1264,15 @@ public class Repository : IRepository
     #endregion
 
     #region Create
-    public ICreate<TEntity> Create<TEntity>() => new Create<TEntity>(this.connection, this.Transaction, this.OrmProvider, this.MapProvider);
+    public ICreate<TEntity> Create<TEntity>() => new Create<TEntity>(this.connection, this.Transaction, this.OrmProvider, this.MapProvider, this.isParameterized);
     #endregion
 
     #region Update
-    public IUpdate<T> Update<T>() => new Update<T>(this.connection, this.Transaction, this.OrmProvider, this.MapProvider);
+    public IUpdate<TEntity> Update<TEntity>() => new Update<TEntity>(this.connection, this.Transaction, this.OrmProvider, this.MapProvider, this.isParameterized);
     #endregion
 
     #region Delete
-    public IDelete<T> Delete<T>() => new Delete<T>(this.connection, this.Transaction, this.OrmProvider, this.MapProvider);
+    public IDelete<TEntity> Delete<TEntity>() => new Delete<TEntity>(this.connection, this.Transaction, this.OrmProvider, this.MapProvider, this.isParameterized);
     #endregion
 
     #region Exists
@@ -1623,6 +1623,13 @@ public class Repository : IRepository
     public IRepository WithParameterized(bool isParameterized = true)
     {
         this.isParameterized = isParameterized;
+        return this;
+    }
+    public IRepository With(OrmDbFactoryOptions options)
+    {
+        if (options == null) return this;
+        this.isParameterized = options.IsParameterized;
+        this.connection.CommandTimeout = options.Timeout;
         return this;
     }
     public void BeginTransaction()

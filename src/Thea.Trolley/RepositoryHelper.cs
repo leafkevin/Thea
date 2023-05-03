@@ -20,11 +20,19 @@ class RepositoryHelper
         //else objLocal=value;
         //var parameter = ormProvider.CreateParameter("@Parameter", objLocal);
         Expression valueExpr = parameterValueExpr;
+        Expression nativeDbTypeExpr = null;
         MethodInfo methodInfo = null;
 
-        valueExpr = ormProvider.ToFieldValue(valueExpr, nativeDbType);
-        valueExpr = Expression.Convert(valueExpr, typeof(object));
+        Expression dbParameterExpr = null;
+        if (nativeDbType != null)
+        {
+            methodInfo = typeof(IOrmProvider).GetMethod(nameof(IOrmProvider.ToFieldValue), new Type[] { typeof(object), typeof(object) });
+            nativeDbTypeExpr = Expression.Convert(Expression.Constant(nativeDbType), typeof(object));
+            valueExpr = Expression.Convert(valueExpr, typeof(object));
+            valueExpr = Expression.Call(ormProviderExpr, methodInfo, valueExpr, nativeDbTypeExpr);
+        }
 
+        //INSERT场景
         if (isExpectNullable)
         {
             //object localValue;
@@ -38,21 +46,20 @@ class RepositoryHelper
             blockBodies.Add(Expression.IfThenElse(isNullExpr, assignNullExpr, assignValueExpr));
             valueExpr = objLocalExpr;
         }
-
-        Expression dbParameterExpr = null;
         if (nativeDbType != null)
         {
             //var dbParameter = ormProvider.CreateParameter("@Name", SqlDbType.VarChar);
-            var dbTypeExpr = Expression.Constant(nativeDbType, typeof(object));
             methodInfo = typeof(IOrmProvider).GetMethod(nameof(IOrmProvider.CreateParameter), new Type[] { typeof(string), typeof(object), typeof(object) });
-            dbParameterExpr = Expression.Call(ormProviderExpr, methodInfo, parameterNameExpr, dbTypeExpr, valueExpr);
+            dbParameterExpr = Expression.Call(ormProviderExpr, methodInfo, parameterNameExpr, nativeDbTypeExpr, valueExpr);
         }
         else
         {
             //var dbParameter = ormProvider.CreateParameter("@Name", "kevin");
             methodInfo = typeof(IOrmProvider).GetMethod(nameof(IOrmProvider.CreateParameter), new Type[] { typeof(string), typeof(object) });
+            valueExpr = Expression.Convert(valueExpr, typeof(object));
             dbParameterExpr = Expression.Call(ormProviderExpr, methodInfo, parameterNameExpr, valueExpr);
         }
+
         dbParameterExpr = Expression.Convert(dbParameterExpr, typeof(object));
 
         //command.Parameters.Add(parameter);
@@ -105,15 +112,16 @@ class RepositoryHelper
             var dbParameterExpr = DefineLocalParameter("dbParameter", typeof(IDbDataParameter), localParameters, blockParameters);
             if (nativeDbType != null)
             {
-                var dbTypeExpr = Expression.Constant(nativeDbType, typeof(object));
+                var nativeDbTypeExpr = Expression.Convert(Expression.Constant(nativeDbType), typeof(object));
                 methodInfo = typeof(IOrmProvider).GetMethod(nameof(IOrmProvider.CreateParameter), new Type[] { typeof(string), typeof(object), typeof(object) });
-                var callExpr = Expression.Call(ormProviderExpr, methodInfo, parameterNameExpr, dbTypeExpr, valueExpr);
-                blockBodies.Add(Expression.Assign(dbParameterExpr, callExpr));
+                var newParameterExpr = Expression.Call(ormProviderExpr, methodInfo, parameterNameExpr, nativeDbTypeExpr, valueExpr);
+                blockBodies.Add(Expression.Assign(dbParameterExpr, newParameterExpr));
             }
             else
             {
                 //var dbParameter = ormProvider.CreateParameter("@Name", "kevin");
                 methodInfo = typeof(IOrmProvider).GetMethod(nameof(IOrmProvider.CreateParameter), new Type[] { typeof(string), typeof(object) });
+                valueExpr = Expression.Convert(valueExpr, typeof(object));
                 var newParameterExpr = Expression.Call(ormProviderExpr, methodInfo, parameterNameExpr, valueExpr);
                 blockBodies.Add(Expression.Assign(dbParameterExpr, newParameterExpr));
             }

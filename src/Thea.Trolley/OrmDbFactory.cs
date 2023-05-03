@@ -109,7 +109,7 @@ class OrmDbFactory : IOrmDbFactory
             ConnectionString = database.ConnectionString,
             BaseConnection = baseConnection
         };
-        return new Repository(connection, ormProvider, entityMapProvider);
+        return new Repository(connection, ormProvider, entityMapProvider).With(this.options);
     }
-    internal void With(OrmDbFactoryOptions options) => this.options = options;
+    public void With(OrmDbFactoryOptions options) => this.options = options;
 }

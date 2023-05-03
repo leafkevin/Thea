@@ -19,13 +19,15 @@ class Delete<TEntity> : IDelete<TEntity>
     private readonly IDbTransaction transaction;
     private readonly IOrmProvider ormProvider;
     private readonly IEntityMapProvider mapProvider;
+    private readonly bool isParameterized;
 
-    public Delete(TheaConnection connection, IDbTransaction transaction, IOrmProvider ormProvider, IEntityMapProvider mapProvider)
+    public Delete(TheaConnection connection, IDbTransaction transaction, IOrmProvider ormProvider, IEntityMapProvider mapProvider, bool isParameterized = false)
     {
         this.connection = connection;
         this.transaction = transaction;
         this.ormProvider = ormProvider;
         this.mapProvider = mapProvider;
+        this.isParameterized = isParameterized;
     }
 
     public IDeleted<TEntity> Where(object keys)
@@ -40,7 +42,7 @@ class Delete<TEntity> : IDelete<TEntity>
         if (predicate == null)
             throw new ArgumentNullException(nameof(predicate));
 
-        var visitor = new DeleteVisitor(this.connection.DbKey, this.ormProvider, this.mapProvider, typeof(TEntity));
+        var visitor = this.ormProvider.NewDeleteVisitor(this.connection.DbKey, this.mapProvider, typeof(TEntity), this.isParameterized);
         visitor.Where(predicate);
         return new Deleting<TEntity>(this.connection, this.transaction, visitor);
     }
@@ -202,20 +204,59 @@ class Deleted<TEntity> : IDeleted<TEntity>
     {
         dbParameters = null;
         bool isDictionary = false;
+        bool isMulti = false;
         var entityType = typeof(TEntity);
+        var parameterType = this.parameters.GetType();
+        IEnumerable entities = null;
         if (this.parameters is Dictionary<string, object> dict)
             isDictionary = true;
-        var parameterType = parameters.GetType();
-        Func<IDbCommand, IOrmProvider, object, string> commandInitializer = null;
-        if (isDictionary)
-            commandInitializer = this.BuildCommandInitializer(entityType);
-        else commandInitializer = this.BuildCommandInitializer(entityType, parameterType);
-        using var command = this.connection.CreateCommand();
-        var sql = commandInitializer?.Invoke(command, this.ormProvider, this.parameters);
-        if (command.Parameters != null && command.Parameters.Count > 0)
-            dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
-        command.Cancel();
-        command.Dispose();
+        else if (this.parameters is IEnumerable && parameterType != typeof(string))
+        {
+            isMulti = true;
+            entities = this.parameters as IEnumerable;
+            foreach (var entity in entities)
+            {
+                if (entity is Dictionary<string, object>)
+                    isDictionary = true;
+                else parameterType = entity.GetType();
+                break;
+            }
+        }
+        else parameterType = this.parameters.GetType();
+
+        string sql = null;
+        if (isMulti)
+        {
+            Action<IDbCommand, IOrmProvider, StringBuilder, int, object> commandInitializer = null;
+            if (isDictionary)
+                commandInitializer = this.BuildBatchCommandInitializer(entityType);
+            else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
+
+            int index = 0;
+            var sqlBuilder = new StringBuilder();
+            using var command = this.connection.CreateCommand();
+            foreach (var entity in entities)
+            {
+                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
+                index++;
+            }
+            sql = sqlBuilder.ToString();
+            if (command.Parameters != null && command.Parameters.Count > 0)
+                dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
+            command.Dispose();
+        }
+        else
+        {
+            using var command = this.connection.CreateCommand();
+            Func<IDbCommand, IOrmProvider, object, string> commandInitializer = null;
+            if (isDictionary)
+                commandInitializer = this.BuildCommandInitializer(entityType);
+            else commandInitializer = this.BuildCommandInitializer(entityType, parameterType);
+            sql = commandInitializer.Invoke(command, this.ormProvider, this.parameters);
+            if (command.Parameters != null && command.Parameters.Count > 0)
+                dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
+            command.Dispose();
+        }
         return sql;
     }
     private Action<IDbCommand, IOrmProvider, StringBuilder, int, object> BuildBatchCommandInitializer(Type entityType, Type parameterType)
@@ -422,9 +463,9 @@ class Deleting<TEntity> : IDeleting<TEntity>
 {
     private readonly TheaConnection connection;
     private readonly IDbTransaction transaction;
-    private readonly DeleteVisitor visitor;
+    private readonly IDeleteVisitor visitor;
 
-    public Deleting(TheaConnection connection, IDbTransaction transaction, DeleteVisitor visitor)
+    public Deleting(TheaConnection connection, IDbTransaction transaction, IDeleteVisitor visitor)
     {
         this.connection = connection;
         this.transaction = transaction;

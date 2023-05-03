@@ -35,9 +35,6 @@ public class MemberMap
     public string ForeignKey { get; set; }
     public ITypeHandler TypeHandler { get; set; }
 
-    internal int? nativeDbType;
-    internal Type typeHandlerType;
-
     public MemberMap(EntityMap parent, string fieldPrefix, MemberInfo memberInfo)
     {
         this.Parent = parent;
@@ -74,8 +71,6 @@ public class MemberMap
                 result.MemberType = propertyInfo.PropertyType;
                 break;
         }
-        result.nativeDbType = this.nativeDbType;
-        result.typeHandlerType = this.typeHandlerType;
         result.NativeDbType = this.NativeDbType;
         result.TypeHandler = this.TypeHandler;
         return result;

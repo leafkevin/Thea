@@ -10,32 +10,32 @@ using Thea.Orm;
 
 namespace Thea.Trolley;
 
-class SqlVisitor : ISqlVisitor
+public class SqlVisitor : ISqlVisitor
 {
     protected internal readonly string dbKey;
-    protected internal readonly IOrmProvider ormProvider;
-    protected internal char tableAsStart = 'a';
     protected readonly IEntityMapProvider mapProvider;
 
     protected string parameterPrefix = "p";
     protected bool isParameterized;
-    protected bool isTarget;
     protected List<TableSegment> tables;
     protected Dictionary<string, TableSegment> tableAlias;
     protected List<IDbDataParameter> dbParameters;
     protected List<ReaderField> readerFields;
-    protected bool isNeedAlias = false;
     protected bool isSelect = false;
     protected bool isWhere = false;
     protected bool isFromQuery = false;
 
+    public virtual char TableAsStart { get; set; }
+    public virtual bool IsNeedAlias { get; set; }
+    public virtual IOrmProvider OrmProvider { get; private set; }
+
     public SqlVisitor(string dbKey, IOrmProvider ormProvider, IEntityMapProvider mapProvider, bool isParameterized = false, char tableAsStart = 'a', string parameterPrefix = "p")
     {
         this.dbKey = dbKey;
-        this.ormProvider = ormProvider;
+        this.OrmProvider = ormProvider;
         this.mapProvider = mapProvider;
         this.isParameterized = isParameterized;
-        this.tableAsStart = tableAsStart;
+        this.TableAsStart = tableAsStart;
         this.parameterPrefix = parameterPrefix;
     }
     public virtual SqlSegment VisitAndDeferred(SqlSegment sqlSegment)
@@ -70,9 +70,7 @@ class SqlVisitor : ISqlVisitor
         else strOperator = deferredSegment == SqlSegment.Null ? "IS" : "=";
         sqlSegment.IsExpression = true;
 
-        //在SELECT语句中，两边加个()，生成的SQL更优雅，在外层会添加
-        if (this.isSelect) sqlSegment.IsNeedParentheses = true;
-        return sqlSegment.Change($"{sqlSegment} {strOperator} {this.GetQuotedValue(deferredSegment)}", false, true);
+        return sqlSegment.Change($"{sqlSegment} {strOperator} {this.GetQuotedValue(deferredSegment)}", false, true, false);
     }
     public virtual SqlSegment Visit(SqlSegment sqlSegment)
     {
@@ -84,8 +82,6 @@ class SqlVisitor : ISqlVisitor
         {
             case ExpressionType.Lambda:
                 var lambdaExpr = sqlSegment.Expression as LambdaExpression;
-                if (this.IsFromQuery(lambdaExpr))
-                    result = sqlSegment.ChangeValue(this.VisitFromQuery(lambdaExpr, out _));
                 result = this.Visit(sqlSegment.Next(lambdaExpr.Body));
                 break;
             case ExpressionType.Negate:
@@ -173,7 +169,6 @@ class SqlVisitor : ISqlVisitor
                     sqlSegment.Push(new DeferredExpr { OperationType = OperationType.Not });
                     return this.Visit(sqlSegment.Next(unaryExpr.Operand));
                 }
-                //TODO:暂时好像没有这种场景待测试
                 return sqlSegment.ChangeValue($"~{this.Visit(sqlSegment)}");
             case ExpressionType.Convert:
                 if (unaryExpr.Method != null)
@@ -183,12 +178,16 @@ class SqlVisitor : ISqlVisitor
                     return this.Evaluate(sqlSegment);
                 }
                 //string.Concat,string.Format,string.Join等方法，参数都是object，
-                //最终变成string，字段访问、表达式需要强制转换,如：a.IntField + 5, b.Field等，常量不需要强转
+                //最终变成string，字段访问、参数、表达式、方法调用需要强制转换,如：a.IntField + 5, b.Field等，常量不需要强转
                 sqlSegment = this.Visit(sqlSegment.Next(unaryExpr.Operand));
                 if (sqlSegment.TargetType != null && sqlSegment.Type != sqlSegment.TargetType && !sqlSegment.IsConstantValue)
                 {
-                    sqlSegment.Type = sqlSegment.TargetType;
-                    return sqlSegment.Change(this.ormProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment)), false, true);
+                    sqlSegment.TableSegment.Mapper ??= this.mapProvider.GetEntityMap(sqlSegment.TableSegment.EntityType);
+                    var memberMapper = sqlSegment.TableSegment.Mapper.GetMemberMap(sqlSegment.FromMember.Name);
+                    if (this.OrmProvider.MapDefaultType(memberMapper.NativeDbType) != sqlSegment.TargetType)
+                        sqlSegment.Value = this.OrmProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment));
+                    if (sqlSegment.Type != sqlSegment.TargetType)
+                        sqlSegment.Type = sqlSegment.TargetType;
                 }
                 return sqlSegment;
         }
@@ -283,16 +282,13 @@ class SqlVisitor : ISqlVisitor
                         return leftSegment;
                     }
                 }
-                //if (binaryExpr.NodeType == ExpressionType.ArrayIndex)
-                //    throw new NotSupportedException("不支持的数组访问，只支持常量访问");
 
                 leftSegment.Merge(rightSegment);
-                if (leftSegment.Type != rightSegment.Type)
-                    leftSegment.Type = rightSegment.Type;
-                var operators = this.ormProvider.GetBinaryOperator(binaryExpr.NodeType);
+                var operators = this.OrmProvider.GetBinaryOperator(binaryExpr.NodeType);
                 if (binaryExpr.NodeType == ExpressionType.Coalesce)
-                    return leftSegment.Change($"{operators}({this.GetQuotedValue(leftSegment)},{this.GetQuotedValue(rightSegment)})", false, true);
-                return leftSegment.Change($"{this.GetQuotedValue(leftSegment)}{operators}{this.GetQuotedValue(rightSegment)}", false, true);
+                    return leftSegment.Change($"{operators}({this.GetQuotedValue(leftSegment)},{this.GetQuotedValue(rightSegment)})", false, false, true);
+
+                return leftSegment.Change($"{this.GetQuotedValue(leftSegment)}{operators}{this.GetQuotedValue(rightSegment)}", false, true, false);
         }
         return sqlSegment;
     }
@@ -306,32 +302,13 @@ class SqlVisitor : ISqlVisitor
         if (constantExpr.Value == null)
             return SqlSegment.Null;
 
-        var objValue = constantExpr.Value;
+        sqlSegment.Value = constantExpr.Value;
+        sqlSegment.IsConstantValue = true;
         //.NET 枚举类型有时候会解析错误，解析成对应的数值类型，如：a.Gender ?? Gender.Male == Gender.Male
         //如果枚举类型对应的数据库类型是字符串，就会有问题，需要把数字变为枚举，再把枚举的名字入库。
-        var currentType = constantExpr.Value.GetType();
-        if (sqlSegment.ExpectType != null)
-        {
-            if (sqlSegment.ExpectType != currentType)
-            {
-                if (sqlSegment.ExpectType.IsEnum)
-                    objValue = Enum.ToObject(sqlSegment.ExpectType, objValue);
-                else objValue = Convert.ChangeType(objValue, sqlSegment.ExpectType);
-                sqlSegment.Type = sqlSegment.ExpectType;
-            }
-            if (sqlSegment.TargetType != null)
-            {
-                if (sqlSegment.TargetType == typeof(string))
-                    objValue = objValue.ToString();
-                else objValue = Convert.ChangeType(objValue, sqlSegment.TargetType);
-                sqlSegment.Type = sqlSegment.TargetType;
-            }
-        }
-
-        if (sqlSegment.IsParameterized || this.isParameterized)
-            return this.ToParameter(sqlSegment.ChangeValue(objValue));
-
-        return sqlSegment.Change(objValue);
+        if (sqlSegment.IsParameterized)
+            return this.ToParameter(this.ConvertTo(sqlSegment));
+        return this.ConvertTo(sqlSegment);
     }
     public virtual SqlSegment VisitMethodCall(SqlSegment sqlSegment)
     {
@@ -340,24 +317,19 @@ class SqlVisitor : ISqlVisitor
             || typeof(IAggregateSelect).IsAssignableFrom(methodCallExpr.Method.DeclaringType))
             return this.VisitSqlMethodCall(sqlSegment);
 
-        if (!this.ormProvider.TryGetMethodCallSqlFormatter(methodCallExpr, out var formatter))
-            throw new NotSupportedException($"不支持的方法访问，或是{this.ormProvider.GetType().FullName}未实现此方法{methodCallExpr.Method.Name}");
+        if (!this.OrmProvider.TryGetMethodCallSqlFormatter(methodCallExpr, out var formatter))
+            throw new NotSupportedException($"不支持的方法访问，或是{this.OrmProvider.GetType().FullName}未实现此方法{methodCallExpr.Method.Name}");
 
-        int newStartIndex = 1;
         SqlSegment target = null;
         if (methodCallExpr.Object != null)
-        {
-            target = sqlSegment.Next(methodCallExpr.Object);
-            newStartIndex = 0;
-        }
+            target = new SqlSegment { Expression = methodCallExpr.Object };
 
         SqlSegment[] arguments = null;
         if (methodCallExpr.Arguments != null && methodCallExpr.Arguments.Count > 0)
         {
             var argumentSegments = new List<SqlSegment>();
             //如果target为null，第一个参数，直接使用现有对象sqlSegment
-            if (newStartIndex > 0) argumentSegments.Add(sqlSegment.Next(methodCallExpr.Arguments[0]));
-            for (int i = newStartIndex; i < methodCallExpr.Arguments.Count; i++)
+            for (int i = 0; i < methodCallExpr.Arguments.Count; i++)
             {
                 argumentSegments.Add(new SqlSegment { Expression = methodCallExpr.Arguments[i] });
             }
@@ -415,11 +387,14 @@ class SqlVisitor : ISqlVisitor
     {
         var conditionalExpr = sqlSegment.Expression as ConditionalExpression;
         sqlSegment = this.VisitAndDeferred(sqlSegment.Next(conditionalExpr.Test));
+        if (conditionalExpr.Test.NodeType == ExpressionType.MemberAccess && sqlSegment.HasField && !sqlSegment.IsExpression)
+            sqlSegment.Value = $"{sqlSegment}={this.OrmProvider.GetQuotedValue(true)}";
+
         var ifTrueSegment = this.Visit(new SqlSegment { Expression = conditionalExpr.IfTrue });
         var ifFalseSegment = this.Visit(new SqlSegment { Expression = conditionalExpr.IfFalse });
         sqlSegment.Merge(ifTrueSegment);
         sqlSegment.Merge(ifFalseSegment);
-        return sqlSegment.Change($"(CASE WHEN {sqlSegment} THEN {this.GetQuotedValue(ifTrueSegment)} ELSE {this.GetQuotedValue(ifFalseSegment)} END)", false, true);
+        return sqlSegment.Change($"(CASE WHEN {sqlSegment} THEN {this.GetQuotedValue(ifTrueSegment)} ELSE {this.GetQuotedValue(ifFalseSegment)} END)", false, false, true);
     }
     public virtual SqlSegment VisitListInit(SqlSegment sqlSegment)
     {
@@ -521,9 +496,6 @@ class SqlVisitor : ISqlVisitor
         if (objValue == null)
             return SqlSegment.Null;
 
-        if (sqlSegment.IsParameterized || this.isParameterized)
-            return this.ToParameter(sqlSegment.ChangeValue(objValue));
-
         return sqlSegment.Change(objValue);
     }
     public virtual T Evaluate<T>(Expression expr)
@@ -542,20 +514,21 @@ class SqlVisitor : ISqlVisitor
         switch (methodCallExpr.Method.Name)
         {
             case "FlattenTo"://通常在最外层的SELECT中转为其他类型
-                if (methodCallExpr.Arguments != null && methodCallExpr.Arguments.Count >= 1)
+                var targetType = methodCallExpr.Method.ReturnType;
+                if (methodCallExpr.Arguments != null && methodCallExpr.Arguments.Count > 0)
                 {
-                    Expression flattenExpr = null;
-                    var targetType = methodCallExpr.Method.ReturnType;
-                    var sourceType = methodCallExpr.Arguments[0].Type;
-                    if (methodCallExpr.Arguments.Count > 1)
-                    {
-                        lambdaExpr = this.EnsureLambda(methodCallExpr.Arguments[1]);
-                        flattenExpr = lambdaExpr;
-                        if (lambdaExpr.Body.GetParameters(out visitedParameters))
-                            flattenExpr = Expression.Lambda(lambdaExpr.Body, visitedParameters);
-                    }
-                    var readerFields = this.FlattenFieldsTo(targetType, flattenExpr);
-                    sqlSegment.ChangeValue(readerFields);
+                    lambdaExpr = this.EnsureLambda(methodCallExpr.Arguments[0]);
+                    if (lambdaExpr.Body.GetParameters(out visitedParameters))
+                        lambdaExpr = Expression.Lambda(lambdaExpr.Body, visitedParameters);
+                }
+                var readerFields = this.FlattenFieldsTo(targetType, lambdaExpr);
+                sqlSegment.ChangeValue(readerFields);
+                break;
+            case "IsNull":
+                if (methodCallExpr.Arguments != null && methodCallExpr.Arguments.Count > 0)
+                {
+                    sqlSegment.Push(new DeferredExpr { OperationType = OperationType.Equal, Value = SqlSegment.Null });
+                    sqlSegment = this.VisitAndDeferred(sqlSegment.Next(methodCallExpr.Arguments[0]));
                 }
                 break;
             case "ToParameter":
@@ -570,9 +543,9 @@ class SqlVisitor : ISqlVisitor
                 {
                     sqlSegment = this.Visit(sqlSegment.Next(methodCallExpr.Arguments[1]));
                     if (sqlSegment == SqlSegment.Null)
-                        return sqlSegment.Change("1=0", false, true);
+                        return sqlSegment.Change("1=0", false, true, false);
                     var sqlSegments = sqlSegment.Value as List<SqlSegment>;
-                    sqlSegments.ForEach(f => f.Value = this.ormProvider.GetQuotedValue(f));
+                    sqlSegments.ForEach(f => f.Value = this.OrmProvider.GetQuotedValue(f));
                     sqlSegment.ChangeValue(string.Join(',', sqlSegments));
                 }
                 else
@@ -580,14 +553,14 @@ class SqlVisitor : ISqlVisitor
                     lambdaExpr = methodCallExpr.Arguments[1] as LambdaExpression;
                     var sql = this.VisitFromQuery(lambdaExpr, out var isNeedAlias);
                     sqlSegment.Change(sql, false);
-                    if (isNeedAlias) this.isNeedAlias = true;
+                    if (isNeedAlias) this.IsNeedAlias = true;
                 }
                 var fieldSegment = this.Visit(new SqlSegment { Expression = methodCallExpr.Arguments[0] });
-                sqlSegment.Change($"{fieldSegment} IN ({sqlSegment})", false, true);
+                sqlSegment.Change($"{fieldSegment} IN ({sqlSegment})", false, true, false);
                 break;
             case "Exists":
                 lambdaExpr = this.EnsureLambda(methodCallExpr.Arguments[0]);
-                this.isNeedAlias = true;
+                this.IsNeedAlias = true;
                 string existsSql = null;
                 var subTableTypes = methodCallExpr.Method.GetGenericArguments();
                 List<IDbDataParameter> parameters = null;
@@ -609,7 +582,7 @@ class SqlVisitor : ISqlVisitor
                         this.tables.Add(tableSegment);
                         this.tableAlias.Add(aliasName, tableSegment);
                         if (index > 0) builder.Append(',');
-                        builder.Append(this.ormProvider.GetTableName(subTableMapper.TableName));
+                        builder.Append(this.OrmProvider.GetTableName(subTableMapper.TableName));
                         builder.Append($" {tableSegment.AliasName}");
                         index++;
                     }
@@ -622,7 +595,7 @@ class SqlVisitor : ISqlVisitor
                 else existsSql = this.VisitFromQuery(lambdaExpr, out _);
                 if (parameters != null && parameters.Count > 0)
                     this.dbParameters.AddRange(parameters);
-                sqlSegment.Change($"EXISTS({existsSql})", false, true);
+                sqlSegment.Change($"EXISTS({existsSql})", false, false, true);
                 break;
             case "Count":
             case "LongCount":
@@ -632,9 +605,9 @@ class SqlVisitor : ISqlVisitor
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
 
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"COUNT({sqlSegment})", false, true);
+                    sqlSegment.Change($"COUNT({sqlSegment})", false, false, true);
                 }
-                else sqlSegment.Change("COUNT(1)", false, true);
+                else sqlSegment.Change("COUNT(1)", false, false, true);
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
                 break;
@@ -646,7 +619,7 @@ class SqlVisitor : ISqlVisitor
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
 
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"COUNT(DISTINCT {sqlSegment})", false, true);
+                    sqlSegment.Change($"COUNT(DISTINCT {sqlSegment})", false, false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -657,7 +630,7 @@ class SqlVisitor : ISqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"SUM({sqlSegment})", false, true);
+                    sqlSegment.Change($"SUM({sqlSegment})", false, false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -668,7 +641,7 @@ class SqlVisitor : ISqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"AVG({sqlSegment})", false, true);
+                    sqlSegment.Change($"AVG({sqlSegment})", false, false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -679,7 +652,7 @@ class SqlVisitor : ISqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"MAX({sqlSegment})", false, true);
+                    sqlSegment.Change($"MAX({sqlSegment})", false, false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -690,7 +663,7 @@ class SqlVisitor : ISqlVisitor
                     if (methodCallExpr.Arguments[0].NodeType != ExpressionType.MemberAccess)
                         throw new NotSupportedException("不支持的表达式，只支持MemberAccess类型表达式");
                     sqlSegment = this.VisitMemberAccess(sqlSegment.Next(methodCallExpr.Arguments[0]));
-                    sqlSegment.Change($"MIN({sqlSegment})", false, true);
+                    sqlSegment.Change($"MIN({sqlSegment})", false, false, true);
                 }
                 if (this.isSelect || this.isWhere)
                     this.tables.FindAll(f => f.IsMaster).ForEach(f => f.IsUsed = true);
@@ -711,21 +684,8 @@ class SqlVisitor : ISqlVisitor
             var parameters = Expression.NewArrayInit(typeof(object), concatSegments.Select(f => f.Expression));
             var methodCallExpr = Expression.Call(methodInfo, parameters);
             sqlSegment.Expression = methodCallExpr;
-            this.ormProvider.TryGetMethodCallSqlFormatter(methodCallExpr, out var formater);
-            //if (this.isSelect)
-            //{
-            //    //SqlServer,Postgresql,Oracle都是使用连接字符串拼接的，
-            //    //在SELECT语句中，加()会优雅一点，在最外层添加()
-            //    switch (this.ormProvider.DatabaseType)
-            //    {
-            //        case DatabaseType.SqlServer:
-            //        case DatabaseType.Postgresql:
-            //        case DatabaseType.Oracle:
-            //            sqlSegment.IsNeedParentheses = true;
-            //            break;
-            //    }
-            //}
-            //返回的SQL表达式中直接拼接好
+            this.OrmProvider.TryGetMethodCallSqlFormatter(methodCallExpr, out var formater);
+            //返回的SQL表达式中直接拼接好          
             result = formater.Invoke(this, null, null, concatSegments);
             return true;
         }
@@ -954,83 +914,6 @@ class SqlVisitor : ISqlVisitor
         }
         return completedExprs.ToArray();
     }
-    public virtual bool IsDateTimeOperator(SqlSegment sqlSegment, out SqlSegment result)
-    {
-        var binaryExpr = sqlSegment.Expression as BinaryExpression;
-        if (binaryExpr.Left.Type == typeof(DateTime) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Add)
-        {
-            var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Add), new Type[] { binaryExpr.Right.Type });
-            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
-            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
-            return true;
-        }
-        if (binaryExpr.Left.Type == typeof(DateTime) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Subtract)
-        {
-            var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Subtract), new Type[] { binaryExpr.Right.Type });
-            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
-            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
-            return true;
-        }
-        result = null;
-        return false;
-    }
-    public virtual bool IsTimeSpanOperator(SqlSegment sqlSegment, out SqlSegment result)
-    {
-        var binaryExpr = sqlSegment.Expression as BinaryExpression;
-        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Add)
-        {
-            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Add), new Type[] { binaryExpr.Right.Type });
-            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
-            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
-            return true;
-        }
-        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Subtract)
-        {
-            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Subtract), new Type[] { binaryExpr.Right.Type });
-            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
-            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
-            return true;
-        }
-        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Multiply)
-        {
-            var rightExpr = binaryExpr.Right;
-            if (binaryExpr.Right.Type != typeof(double))
-                rightExpr = Expression.Convert(rightExpr, typeof(double));
-            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Multiply), new Type[] { typeof(double) });
-            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, rightExpr);
-            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
-            return true;
-        }
-        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Divide)
-        {
-            Type divideType = null;
-            if (binaryExpr.Right.Type == typeof(TimeSpan))
-                divideType = typeof(TimeSpan);
-            else divideType = typeof(double);
-            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Divide), new Type[] { divideType });
-            var rightExpr = binaryExpr.Right;
-            if (divideType == typeof(double) && binaryExpr.Right.Type != typeof(double))
-                rightExpr = Expression.Convert(rightExpr, typeof(double));
-            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, rightExpr);
-            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
-            return true;
-        }
-        result = null;
-        return false;
-    }
-    public virtual string GetQuotedValue(SqlSegment sqlSegment)
-        => this.ormProvider.GetQuotedValue(sqlSegment);
-    public virtual TableSegment FindTableSegment(string parameterName, string path)
-    {
-        var index = path.IndexOf(".");
-        if (index > 0)
-        {
-            var rootTableSegment = this.tableAlias[parameterName];
-            path = path.Replace(parameterName + ".", rootTableSegment.AliasName + ".");
-            return this.tables.Find(f => f.Path == path);
-        }
-        else return this.tableAlias[parameterName];
-    }
     public virtual List<ReaderField> AddTableRecursiveReaderFields(int readerIndex, TableSegment fromSegment)
     {
         var readerFields = new List<ReaderField>();
@@ -1050,7 +933,7 @@ class SqlVisitor : ISqlVisitor
     public virtual SqlSegment ToParameter(SqlSegment sqlSegment)
     {
         if (sqlSegment == SqlSegment.Null)
-            return SqlSegment.Null;
+            sqlSegment.Value = DBNull.Value;
 
         sqlSegment.IsParameter = true;
         this.dbParameters ??= new();
@@ -1058,44 +941,32 @@ class SqlVisitor : ISqlVisitor
         //数组，直接返回@p0,@p1,@p2,@p3或是@Name0,@Name1,@Name2,@Name3
         if (sqlSegment.Value is IEnumerable objValues && objValues is not string)
         {
-            var paramPrefix = this.ormProvider.ParameterPrefix + this.parameterPrefix;
+            string parameterPrefix = null;
+            if (string.IsNullOrEmpty(sqlSegment.ParameterName))
+                parameterPrefix = this.OrmProvider.ParameterPrefix + this.parameterPrefix;
+            else parameterPrefix = this.OrmProvider.ParameterPrefix + sqlSegment.ParameterName;
+
             int index = 0;
             var builder = new StringBuilder();
             foreach (var objValue in objValues)
             {
                 if (index > 0) builder.Append(',');
-                var parameterName = paramPrefix + this.dbParameters.Count.ToString();
+                var parameterName = parameterPrefix + this.dbParameters.Count.ToString();
                 builder.Append(parameterName);
-                this.dbParameters.Add(this.ormProvider.CreateParameter(parameterName, objValue));
+                this.dbParameters.Add(this.OrmProvider.CreateParameter(parameterName, objValue));
                 index++;
             }
-            return sqlSegment.Change(builder.ToString(), false);
+            return sqlSegment.Change(builder.ToString(), false, false, false);
         }
         else
         {
-            var parameterName = this.ormProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
-            this.dbParameters.Add(this.ormProvider.CreateParameter(parameterName, sqlSegment.Value));
-            return sqlSegment.Change(parameterName, false);
+            string parameterName = null;
+            if (string.IsNullOrEmpty(sqlSegment.ParameterName))
+                parameterName = this.OrmProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
+            else parameterName = this.OrmProvider.ParameterPrefix + sqlSegment.ParameterName;
+            this.dbParameters.Add(this.OrmProvider.CreateParameter(parameterName, sqlSegment.Value));
+            return sqlSegment.Change(parameterName, false, false, false);
         }
-    }
-    public virtual bool IsFromQuery(LambdaExpression lambdaExpr)
-    {
-        if (!lambdaExpr.Type.IsGenericType)
-            return false;
-        var genericArguments = lambdaExpr.Type.GetGenericArguments();
-        if (genericArguments == null || genericArguments.Length < 2)
-            return false;
-        if (genericArguments[0] != typeof(IFromQuery))
-            return false;
-        var queryType = genericArguments.Last();
-        if (!queryType.IsGenericType) return false;
-        var queryGenericArguments = queryType.GetGenericArguments();
-        if (queryGenericArguments == null || queryGenericArguments.Length < 1)
-            return false;
-
-        if (!typeof(IFromQuery<>).MakeGenericType(queryGenericArguments[0]).IsAssignableFrom(queryType))
-            return false;
-        return true;
     }
     public virtual string VisitFromQuery(LambdaExpression lambdaExpr, out bool isNeedAlias)
     {
@@ -1112,8 +983,8 @@ class SqlVisitor : ISqlVisitor
                 currentExpr = callExpr.Object;
             }
         }
-        var queryVisitor = new QueryVisitor(this.dbKey, this.ormProvider, this.mapProvider, this.isParameterized, tableAsStart, parameterPrefix);
-        queryVisitor.isNeedAlias = this.isNeedAlias;
+        var queryVisitor = this.OrmProvider.NewQueryVisitor(this.dbKey, this.mapProvider, this.isParameterized, TableAsStart, parameterPrefix);
+        queryVisitor.IsNeedAlias = this.IsNeedAlias;
         while (callStack.TryPop(out var callExpr))
         {
             var genericArguments = callExpr.Method.GetGenericArguments();
@@ -1134,7 +1005,7 @@ class SqlVisitor : ISqlVisitor
                         "RightJoin" => "RIGHT JOIN",
                         _ => "INNER JOIN"
                     };
-                    queryVisitor.isNeedAlias = true;
+                    queryVisitor.IsNeedAlias = true;
                     lambdaArgsExpr = this.EnsureLambda(callExpr.Arguments[0]);
                     if (lambdaArgsExpr.Body.GetParameters(out var visitedParameters))
                     {
@@ -1152,13 +1023,13 @@ class SqlVisitor : ISqlVisitor
                     queryVisitor.InitTableAlias(lambdaArgsExpr);
                     if (lambdaArgsExpr.Body.GetParameters(out visitedParameters))
                     {
-                        queryVisitor.isNeedAlias = true;
+                        queryVisitor.IsNeedAlias = true;
                         foreach (var tableAlias in this.tableAlias.Keys)
                         {
                             if (visitedParameters.Exists(f => f.Name == tableAlias))
                             {
                                 var tableSegment = this.tableAlias[tableAlias];
-                                queryVisitor.tableAlias.Add(tableAlias, tableSegment);
+                                queryVisitor.AddAliasTable(tableAlias, tableSegment);
                             }
                         }
                         lambdaArgsExpr = Expression.Lambda(lambdaArgsExpr.Body, visitedParameters);
@@ -1215,41 +1086,53 @@ class SqlVisitor : ISqlVisitor
             this.dbParameters ??= new();
             this.dbParameters.AddRange(dbDataParameters);
         }
-        isNeedAlias = queryVisitor.isNeedAlias;
+        isNeedAlias = queryVisitor.IsNeedAlias;
         return result;
+    }
+    public SqlSegment ConvertTo(SqlSegment sqlSegment)
+    {
+        //只处理枚举类型，字符串拼接的转Object不处理
+        if (sqlSegment.TargetType != null && sqlSegment.TargetType != sqlSegment.Type && sqlSegment.ExpectType != null)
+        {
+            var currentType = sqlSegment.Value.GetType();
+            if (sqlSegment.ExpectType != currentType)
+            {
+                if (sqlSegment.ExpectType.IsEnumType(out var enumType, out _))
+                    sqlSegment.Value = Enum.ToObject(enumType, sqlSegment.Value);
+                else sqlSegment.Value = Convert.ChangeType(sqlSegment.Value, sqlSegment.ExpectType);
+                sqlSegment.Type = sqlSegment.ExpectType;
+            }
+            if (sqlSegment.TargetType == typeof(string))
+                sqlSegment.Value = sqlSegment.Value.ToString();
+            else sqlSegment.Value = Convert.ChangeType(sqlSegment.Value, sqlSegment.TargetType);
+            sqlSegment.Type = sqlSegment.TargetType;
+        }
+        return sqlSegment;
     }
     public List<ReaderField> FlattenFieldsTo(Type targetType, Expression toTargetExpr = null)
     {
-        List<ReaderField> initReaderFields = null;
+        List<ReaderField> targetFields = null;
         if (targetType == null)
             throw new ArgumentNullException(nameof(targetType));
 
         //通过表达式设置的字段
         if (toTargetExpr != null)
-        {
-            var lambdaExpr = toTargetExpr as LambdaExpression;
-            initReaderFields = this.ConstructorFieldsTo(lambdaExpr);
-        }
+            targetFields = this.ConstructorFieldsTo(toTargetExpr as LambdaExpression);
 
+        targetFields ??= new List<ReaderField>();
         var targetMembers = targetType.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(f => f.MemberType == MemberTypes.Property | f.MemberType == MemberTypes.Field).ToList();
 
-        int index = 0;
-        var targetFields = new List<ReaderField>();
         foreach (var memberInfo in targetMembers)
         {
-            //相同名称属性只取第一个名称相等的对应字段
-            ReaderField readerField = null;
-            if (initReaderFields != null)
-                readerField = initReaderFields.Find(f => f.FromMember.Name == memberInfo.Name);
-            readerField ??= this.readerFields.Find(f => f.FromMember.Name == memberInfo.Name);
-            //没有赋值的成员，默认值
-            if (readerField == null)
+            var targetField = targetFields.Find(f => f.FromMember.Name == memberInfo.Name);
+            if (targetField != null)
+            {
+                targetField.FromMember = memberInfo;
                 continue;
-            readerField.FromMember = memberInfo;
-            readerField.Index = index;
-            targetFields.Add(readerField);
-            index++;
+            }
+            if (this.FindReaderField(memberInfo, targetFields.Count, out var readerField))
+                targetFields.Add(readerField);
         }
         return targetFields;
     }
@@ -1290,7 +1173,6 @@ class SqlVisitor : ISqlVisitor
                 case ExpressionType.Parameter:
                     sqlSegment = this.VisitParameter(sqlSegment);
                     result = sqlSegment.Value as List<ReaderField>;
-                    if (this.isSelect) this.isTarget = true;
                     break;
                 default:
                     //单个字段，方法调用
@@ -1310,20 +1192,6 @@ class SqlVisitor : ISqlVisitor
             }
         }
         return result;
-    }
-    public void FlattenReaderFields(List<ReaderField> readerFields, List<ReaderField> result)
-    {
-        foreach (var readerField in readerFields)
-        {
-            if (readerField.FieldType == ReaderFieldType.Entity)
-                result.AddRange(readerField.ReaderFields);
-            else if (readerField.FieldType == ReaderFieldType.AnonymousObject)
-            {
-                if (readerField.ReaderFields != null && readerField.ReaderFields.Count > 0)
-                    this.FlattenReaderFields(readerField.ReaderFields, result);
-            }
-            else result.Add(readerField);
-        }
     }
     /// <summary>
     /// 展开当前表tableSegment的所有字段，tableSegment是实体表(主表或Include表)
@@ -1359,28 +1227,6 @@ class SqlVisitor : ISqlVisitor
         }
         return targetFields;
     }
-    public ReaderField FindReaderField(MemberExpression memberExpr, List<ReaderField> readerFields)
-    {
-        var currentExpr = memberExpr;
-        var visitedStack = new Stack<string>();
-        while (true)
-        {
-            if (currentExpr == null || currentExpr.NodeType == ExpressionType.Parameter)
-                break;
-            visitedStack.Push(currentExpr.Member.Name);
-            currentExpr = currentExpr.Expression as MemberExpression;
-        }
-        List<ReaderField> currentFields = readerFields;
-        ReaderField readerField = null;
-        //From语句生成的临时表，没有Include操作，实体类的成员，只能是参数访问
-        while (visitedStack.TryPop(out var memberName))
-        {
-            readerField = currentFields.Find(f => f.FromMember.Name == memberName);
-            if (readerField.ReaderFields != null && readerField.ReaderFields.Count > 0)
-                currentFields = readerField.ReaderFields;
-        }
-        return readerField;
-    }
     /// <summary>
     /// 根据表、字段获取Field表达式,SELECT和WHERE语句都可以使用
     /// 有表且有别名，将生成a.Field，常量访问没有表则就是字段访问Field
@@ -1390,20 +1236,125 @@ class SqlVisitor : ISqlVisitor
     /// <returns></returns>
     public string GetFieldName(TableSegment tableSegment, string fieldName)
     {
-        fieldName = this.ormProvider.GetFieldName(fieldName);
-        if (tableSegment != null && !string.IsNullOrEmpty(tableSegment.AliasName) && (this.isNeedAlias || tableSegment.IsNeedAlais))
+        fieldName = this.OrmProvider.GetFieldName(fieldName);
+        if (tableSegment != null && !string.IsNullOrEmpty(tableSegment.AliasName) && (this.IsNeedAlias || tableSegment.IsNeedAlais))
             fieldName = tableSegment.AliasName + "." + fieldName;
         return fieldName;
     }
-    public string GetFieldAliasName(string fieldName)
+
+    private bool FindReaderField(MemberInfo memberInfo, int index, out ReaderField readerField)
     {
-        switch (this.ormProvider.DatabaseType)
+        foreach (var tableSegment in this.tables)
         {
-            case DatabaseType.MySql:
-            case DatabaseType.Postgresql:
-                return this.ormProvider.GetFieldName(fieldName);
-            default: return fieldName;
+            if (this.FindReaderField(tableSegment, memberInfo, index, out readerField))
+                return true;
         }
+        readerField = null;
+        return false;
+    }
+    private bool FindReaderField(TableSegment tableSegment, MemberInfo memberInfo, int index, out ReaderField readerField)
+    {
+        switch (tableSegment.TableType)
+        {
+            case TableType.FromQuery:
+                if (tableSegment.ReaderFields == null || tableSegment.ReaderFields.Count == 0)
+                {
+                    readerField = null;
+                    return false;
+                }
+                readerField = tableSegment.ReaderFields.Find(f => f.FromMember.Name == memberInfo.Name);
+                if (readerField != null)
+                {
+                    readerField.Index = index;
+                    readerField.FromMember = memberInfo;
+                    readerField.TableSegment = tableSegment;
+                    tableSegment.IsUsed = true;
+                }
+                return readerField != null;
+            default:
+                tableSegment.Mapper ??= this.mapProvider.GetEntityMap(tableSegment.EntityType);
+                if (!tableSegment.Mapper.TryGetMemberMap(memberInfo.Name, out var memberMapper))
+                {
+                    readerField = null;
+                    return false;
+                }
+                readerField = new ReaderField
+                {
+                    Index = index,
+                    FieldType = ReaderFieldType.Field,
+                    FromMember = memberInfo,
+                    TableSegment = tableSegment,
+                    Body = this.GetFieldName(tableSegment, memberMapper.FieldName)
+                };
+                tableSegment.IsUsed = true;
+                return true;
+        }
+    }
+    private string GetQuotedValue(SqlSegment sqlSegment)
+        => this.OrmProvider.GetQuotedValue(sqlSegment);
+    private bool IsDateTimeOperator(SqlSegment sqlSegment, out SqlSegment result)
+    {
+        var binaryExpr = sqlSegment.Expression as BinaryExpression;
+        if (binaryExpr.Left.Type == typeof(DateTime) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Add)
+        {
+            var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Add), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(DateTime) && (binaryExpr.Right.Type == typeof(DateTime) || binaryExpr.Right.Type == typeof(TimeSpan)) && binaryExpr.NodeType == ExpressionType.Subtract)
+        {
+            var methodInfo = typeof(DateTime).GetMethod(nameof(DateTime.Subtract), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        result = null;
+        return false;
+    }
+    private bool IsTimeSpanOperator(SqlSegment sqlSegment, out SqlSegment result)
+    {
+        var binaryExpr = sqlSegment.Expression as BinaryExpression;
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Add)
+        {
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Add), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.Right.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Subtract)
+        {
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Subtract), new Type[] { binaryExpr.Right.Type });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, binaryExpr.Right);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Multiply)
+        {
+            var rightExpr = binaryExpr.Right;
+            if (binaryExpr.Right.Type != typeof(double))
+                rightExpr = Expression.Convert(rightExpr, typeof(double));
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Multiply), new Type[] { typeof(double) });
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, rightExpr);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        if (binaryExpr.Left.Type == typeof(TimeSpan) && binaryExpr.NodeType == ExpressionType.Divide)
+        {
+            Type divideType = null;
+            if (binaryExpr.Right.Type == typeof(TimeSpan))
+                divideType = typeof(TimeSpan);
+            else divideType = typeof(double);
+            var methodInfo = typeof(TimeSpan).GetMethod(nameof(TimeSpan.Divide), new Type[] { divideType });
+            var rightExpr = binaryExpr.Right;
+            if (divideType == typeof(double) && binaryExpr.Right.Type != typeof(double))
+                rightExpr = Expression.Convert(rightExpr, typeof(double));
+            var operatorExpr = Expression.Call(binaryExpr.Left, methodInfo, rightExpr);
+            result = this.VisitMethodCall(sqlSegment.Next(operatorExpr));
+            return true;
+        }
+        result = null;
+        return false;
     }
     private SqlSegment CreateConditionSegment(Expression conditionExpr)
     {
@@ -1415,7 +1366,7 @@ class SqlVisitor : ISqlVisitor
         }
         return sqlSegment;
     }
-    public void Swap<T>(ref T left, ref T right)
+    private void Swap<T>(ref T left, ref T right)
     {
         var temp = right;
         right = left;
@@ -1427,11 +1378,13 @@ class SqlVisitor : ISqlVisitor
         if (includedSegments != null && includedSegments.Count > 0)
         {
             lastReaderField.HasNextInclude = true;
+            int index = lastReaderField.Index;
             foreach (var includedSegment in includedSegments)
             {
+                index++;
                 var readerField = new ReaderField
                 {
-                    Index = readerFields.Count,
+                    Index = index,
                     FieldType = ReaderFieldType.Entity,
                     TableSegment = includedSegment,
                     FromMember = includedSegment.FromMember.Member,
@@ -1445,17 +1398,6 @@ class SqlVisitor : ISqlVisitor
                     this.AddIncludeTables(readerField, readerFields);
             }
         }
-    }
-    private bool IsEnumerableString(Type type)
-    {
-        if (!typeof(IEnumerable).IsAssignableFrom(type))
-            return false;
-        var genericArguments = type.GetGenericArguments();
-        if (genericArguments == null || genericArguments.Length <= 0)
-            return false;
-        if (genericArguments[0] == typeof(string))
-            return true;
-        return false;
     }
     private LambdaExpression EnsureLambda(Expression expr)
     {
@@ -1473,4 +1415,3 @@ class SqlVisitor : ISqlVisitor
         return currentExpr as LambdaExpression;
     }
 }
-

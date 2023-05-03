@@ -84,20 +84,23 @@ public static class TheaHttpExtensions
             return null;
         return context.Request.GetClientIp();
     }
-    public static string GetClientIp(this HttpRequest request)
+    public static string GetClientIp(this HttpRequest request, bool isContainsProxy = false)
     {
         string result = null;
-        if (TryGetHeaderValue(request, "X-Forwarded-For", out result)) return result;
-        else if (TryGetHeaderValue(request, "X-Real-IP", out result)) return result;
-        else if (TryGetHeaderValue(request, "CF-Connecting-IP", out result)) return result;
-        else if (TryGetHeaderValue(request, "HTTP_X_FORWARDED_FOR", out result)) return result;
-        else if (TryGetHeaderValue(request, "REMOTE_ADDR", out result)) return result;
-        else if (TryGetHeaderValue(request, "X-Original-For", out result)) return result;
-        else if (TryGetHeaderValue(request, "Proxy-Client-IP", out result)) return result;
-        else if (TryGetHeaderValue(request, "WL-Proxy-Client-IP", out result)) return result;
-        else if (TryGetHeaderValue(request, "HTTP_CLIENT_IP", out result)) return result;
-        else if (TryGetHeaderValue(request, "HTTP_X_FORWARDED_FOR", out result)) return result;
-        else return request.HttpContext.Connection.RemoteIpAddress.MapToIPv4().ToString();
+        if (isContainsProxy)
+        {
+            if (TryGetHeaderValue(request, "X-Forwarded-For", out result)) return result;
+            else if (TryGetHeaderValue(request, "X-Real-IP", out result)) return result;
+            else if (TryGetHeaderValue(request, "CF-Connecting-IP", out result)) return result;
+            else if (TryGetHeaderValue(request, "HTTP_X_FORWARDED_FOR", out result)) return result;
+            else if (TryGetHeaderValue(request, "REMOTE_ADDR", out result)) return result;
+            else if (TryGetHeaderValue(request, "X-Original-For", out result)) return result;
+            else if (TryGetHeaderValue(request, "Proxy-Client-IP", out result)) return result;
+            else if (TryGetHeaderValue(request, "WL-Proxy-Client-IP", out result)) return result;
+            else if (TryGetHeaderValue(request, "HTTP_CLIENT_IP", out result)) return result;
+            else if (TryGetHeaderValue(request, "HTTP_X_FORWARDED_FOR", out result)) return result;
+        }
+        return request.HttpContext.Connection.RemoteIpAddress.MapToIPv4().ToString();
     }
     private static bool TryGetHeaderValue(HttpRequest request, string key, out string result)
     {
