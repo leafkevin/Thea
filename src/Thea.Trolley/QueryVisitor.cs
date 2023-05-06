@@ -1118,7 +1118,22 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
                 sqlSegment = this.VisitAndDeferred(sqlSegment);
                 //使用GetQuotedValue方法把常量都变成对应的字符串格式
                 //String和DateTime类型变成'...'数据,数字类型变成数字字符串
-                fieldName = this.OrmProvider.GetQuotedValue(sqlSegment);
+                if (sqlSegment.Value is ReaderField methodCallField)
+                {
+                    //函数调用，参数引用多个字段
+                    //repository.From<Activity>()
+                    //.Where(f => f.Id == activityId)
+                    //.Select(f => Sql.FlattenTo<ActivityQueryResponse>(() => new
+                    //{
+                    //    ActivityTypeEnum = this.GetEmnuName(f.ActivityType),
+                    //}))
+                    //.First()               
+                    methodCallField.Index = readerFields.Count;
+                    methodCallField.FromMember = memberInfo;
+                    readerFields.Add(methodCallField);
+                    break;
+                }
+                else fieldName = this.OrmProvider.GetQuotedValue(sqlSegment);
                 if (sqlSegment.IsExpression)
                     fieldName = $"({fieldName})";
                 if (sqlSegment.IsParameter || sqlSegment.IsExpression || sqlSegment.IsMethodCall || sqlSegment.FromMember?.Name != memberInfo.Name)

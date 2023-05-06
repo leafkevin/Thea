@@ -35,13 +35,14 @@ public static class TheaOrmExtensions
             return entityMapProvider;
         return null;
     }
-    public static TenantDatabaseBuilder Add<TOrmProvider>(this TheaDatabaseBuilder builder, string connectionString, bool isDefault) where TOrmProvider : IOrmProvider, new()
+    public static TenantDatabaseBuilder Add<TOrmProvider>(this TheaDatabaseBuilder builder, string connectionString, bool isDefault, params int[] tenantIds) where TOrmProvider : IOrmProvider, new()
     {
         return builder.Add(new TheaDatabase
         {
             ConnectionString = connectionString,
             IsDefault = isDefault,
-            OrmProviderType = typeof(TOrmProvider)
+            OrmProviderType = typeof(TOrmProvider),
+            TenantIds = tenantIds
         });
     }
     public static string GetQuotedValue(this IOrmProvider ormProvider, object value)
