@@ -30,7 +30,7 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
         var builder = new StringBuilder($"DELETE FROM {entityTableName}");
 
         if (!string.IsNullOrEmpty(this.whereSql))
-            builder.Append(this.whereSql);
+            builder.Append(" WHERE " + this.whereSql);
         dbParameters = this.dbParameters;
         return builder.ToString();
     }
@@ -38,7 +38,8 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
     {
         this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
-        this.whereSql = " WHERE " + this.VisitConditionExpr(lambdaExpr.Body);
+        this.lastWhereNodeType = OperationType.None;
+        this.whereSql = this.VisitConditionExpr(lambdaExpr.Body);
         this.isWhere = false;
         return this;
     }
@@ -46,7 +47,20 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
     {
         this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
-        this.whereSql += " AND " + this.VisitConditionExpr(lambdaExpr.Body);
+        if (this.lastWhereNodeType == OperationType.Or)
+        {
+            this.whereSql = $"({this.whereSql})";
+            this.lastWhereNodeType = OperationType.And;
+        }
+        var conditionSql = this.VisitConditionExpr(lambdaExpr.Body);
+        if (this.lastWhereNodeType == OperationType.Or)
+        {
+            conditionSql = $"({conditionSql})";
+            this.lastWhereNodeType = OperationType.And;
+        }
+        if (!string.IsNullOrEmpty(this.whereSql))
+            this.whereSql += " AND " + conditionSql;
+        else this.whereSql = conditionSql;
         this.isWhere = false;
         return this;
     }

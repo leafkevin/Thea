@@ -52,15 +52,25 @@ public class ReaderField
     /// </summary>
     public bool HasNextInclude { get; set; }
     /// <summary>
+    /// 是否是字段，有二元操作或是函数调用时，此值为false
+    /// </summary>
+    public bool IsOnlyField { get; set; }
+    /// <summary>
     /// 实体表(真实表)或是子查询表的所有字段，FieldType为Entity或是AnonymousObject时有值
     /// </summary>
     public List<ReaderField> ReaderFields { get; set; }
+    /// <summary>
+    /// 字段查询后，执行函数调用的目标对象
+    /// </summary>
     public Expression DeferCallTarget { get; set; }
     /// <summary>
     /// 函数委托
     /// 先从数据库中获取字段，再调用函数，赋值指定字段中
     /// </summary>
     public MethodInfo DeferCallMethod { get; set; }
+    /// <summary>
+    /// 字段查询后，执行函数调用的参数
+    /// </summary>
     public List<Expression> DeferCallArgs { get; set; }
 }
 public enum ReaderFieldType : byte
@@ -82,7 +92,7 @@ public enum ReaderFieldType : byte
     /// </summary>
     AnonymousObject = 3,
     /// <summary>
-    /// 先从数据库中取出来，连续的一个或多个字段，再做函数调用返回一个字段
+    /// 先从数据库中查询，连续的一个或多个字段，再执行函数调用返回一个字段
     /// </summary>
-    DeferFields = 4
+    DeferredFields = 4
 }

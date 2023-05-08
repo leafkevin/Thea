@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
@@ -17,6 +18,70 @@ public static class Extensions
     private static readonly ConcurrentDictionary<int, Delegate> queryReaderDeserializerCache = new();
     private static readonly ConcurrentDictionary<int, Delegate> readerValueConverterCache = new();
 
+    public static IOrmProvider GetOrmProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
+    {
+        var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
+        var database = dbProvider.GetDatabase(tenantId);
+        if (dbFactory.TryGetOrmProvider(database.OrmProviderType, out var ormProvider))
+            return ormProvider;
+        return null;
+    }
+    public static IEntityMapProvider GetEntityMapProvider(this IOrmDbFactory dbFactory, string dbKey, int? tenantId = null)
+    {
+        var dbProvider = dbFactory.GetDatabaseProvider(dbKey);
+        var database = dbProvider.GetDatabase(tenantId);
+        if (dbFactory.TryGetEntityMapProvider(database.OrmProviderType, out var entityMapProvider))
+            return entityMapProvider;
+        return null;
+    }
+    public static TenantDatabaseBuilder Add<TOrmProvider>(this TheaDatabaseBuilder builder, string connectionString, bool isDefault, params int[] tenantIds) where TOrmProvider : IOrmProvider, new()
+    {
+        return builder.Add(new TheaDatabase
+        {
+            ConnectionString = connectionString,
+            IsDefault = isDefault,
+            OrmProviderType = typeof(TOrmProvider),
+            TenantIds = tenantIds
+        });
+    }
+    public static OrmDbFactoryBuilder AddTypeHandler<TTypeHandler>(this OrmDbFactoryBuilder builder) where TTypeHandler : class, ITypeHandler, new()
+       => builder.AddTypeHandler(new TTypeHandler());
+    public static OrmDbFactoryBuilder Configure<TOrmProvider>(this OrmDbFactoryBuilder builder, IModelConfiguration configuration)
+    {
+        builder.Configure(typeof(TOrmProvider), configuration);
+        return builder;
+    }
+    public static OrmDbFactoryBuilder Configure<TOrmProvider, TModelConfiguration>(this OrmDbFactoryBuilder builder) where TModelConfiguration : class, IModelConfiguration, new()
+    {
+        builder.Configure(typeof(TOrmProvider), new TModelConfiguration());
+        return builder;
+    }
+    public static string GetQuotedValue(this IOrmProvider ormProvider, object value)
+    {
+        if (value == null) return "NULL";
+        return ormProvider.GetQuotedValue(value.GetType(), value);
+    }
+    public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType)
+    {
+        if (!mapProvider.TryGetEntityMap(entityType, out var mapper))
+        {
+            mapper = EntityMap.CreateDefaultMap(entityType);
+            mapProvider.AddEntityMap(entityType, mapper);
+        }
+        return mapper;
+    }
+    public static EntityMap GetEntityMap(this IEntityMapProvider mapProvider, Type entityType, Type mapToType)
+    {
+        if (!mapProvider.TryGetEntityMap(entityType, out var mapper))
+        {
+            var mapToMapper = mapProvider.GetEntityMap(mapToType);
+            mapper = EntityMap.CreateDefaultMap(entityType, mapToMapper);
+            mapProvider.AddEntityMap(entityType, mapper);
+        }
+        return mapper;
+    }
+    public static T Parse<T>(this ITypeHandler typeHandler, IOrmProvider ormProvider, object value)
+       => (T)typeHandler.Parse(ormProvider, typeof(T), value);
     public static bool IsNullableType(this Type type, out Type underlyingType)
     {
         if (type.IsValueType)
@@ -201,9 +266,16 @@ public static class Extensions
             if (readerField.FieldType == ReaderFieldType.Field)
             {
                 var fieldType = reader.GetFieldType(index);
+                ITypeHandler typeHandler = null;
+                if (readerField.IsOnlyField && readerField.TableSegment != null && readerField.TableSegment.TableType == TableType.Entity)
+                {
+                    var entityMapper = readerField.TableSegment.Mapper;
+                    if (entityMapper.TryGetMemberMap(readerField.FromMember.Name, out var memberMapper))
+                        typeHandler = memberMapper.TypeHandler;
+                }
                 var readerValueExpr = GetReaderValue(ormProviderExpr, readerExpr, Expression.Constant(index),
-                    readerField.FromMember.GetMemberType(), fieldType, null, blockParameters, blockBodies);
-                if (root.IsDefault) root.Bindings.Add(Expression.Bind(readerField.FromMember, readerValueExpr));
+                    readerField.TargetMember.GetMemberType(), fieldType, typeHandler, blockParameters, blockBodies);
+                if (root.IsDefault) root.Bindings.Add(Expression.Bind(readerField.TargetMember, readerValueExpr));
                 else root.Arguments.Add(readerValueExpr);
                 index++;
             }
@@ -219,13 +291,12 @@ public static class Extensions
                 }
                 if (readerIndex == 0 && !IsTarget(readerFields))
                     parent = root;
-                if ((readerIndex == 0 && !IsTarget(readerFields) || readerIndex > 0) && readerField.FieldType != ReaderFieldType.DeferFields)
-                    current = NewBuildInfo(readerField.FromMember.GetMemberType(), readerField.FromMember, parent);
+                if ((readerIndex == 0 && !IsTarget(readerFields) || readerIndex > 0) && readerField.FieldType != ReaderFieldType.DeferredFields)
+                    current = NewBuildInfo(readerField.TargetMember.GetMemberType(), readerField.TargetMember, parent);
 
                 readerBuilders.Add(readerField.Index, current);
                 int endIndex = index + readerField.ReaderFields.Count;
                 var childIndex = 0;
-
                 while (index < endIndex)
                 {
                     var fieldType = reader.GetFieldType(index);
@@ -240,7 +311,7 @@ public static class Extensions
                             readerValueExpr = GetReaderValue(ormProviderExpr, readerExpr, Expression.Constant(index),
                                 fieldMember.GetMemberType(), fieldType, null, blockParameters, blockBodies);
                             break;
-                        case ReaderFieldType.DeferFields:
+                        case ReaderFieldType.DeferredFields:
                             entityMapper = readerField.ReaderFields[childIndex].TableSegment.Mapper;
                             if (!entityMapper.TryGetMemberMap(fieldMember.Name, out memberMapper))
                                 break;
@@ -260,7 +331,7 @@ public static class Extensions
                                 memberMapper.MemberType, fieldType, memberMapper.TypeHandler, blockParameters, blockBodies);
                             break;
                     }
-                    if (readerField.FieldType != ReaderFieldType.DeferFields)
+                    if (readerField.FieldType != ReaderFieldType.DeferredFields)
                     {
                         if (current.IsDefault) current.Bindings.Add(Expression.Bind(fieldMember, readerValueExpr));
                         else current.Arguments.Add(readerValueExpr);
@@ -270,7 +341,7 @@ public static class Extensions
                 }
 
                 //不是第一个实体字段，都要构建当前实体，如果没有后续实体类型子属性，就一直构建到顶层的下一层
-                if (readerField.FieldType == ReaderFieldType.DeferFields)
+                if (readerField.FieldType == ReaderFieldType.DeferredFields)
                 {
                     Expression callExpr = null;
                     if (readerField.DeferCallTarget != null)
@@ -516,7 +587,7 @@ public static class Extensions
         if (readerFields.Count == 1)
             return true;
         if (readerFields.Exists(f => f.FieldType == ReaderFieldType.Field
-            || f.FieldType == ReaderFieldType.DeferFields
+            || f.FieldType == ReaderFieldType.DeferredFields
              //DeferFields类型，有函数调用，TableSegment为空
              || (f.Index > 0 && f.TableSegment != null && f.TableSegment.FromTable == null)))
             return false;

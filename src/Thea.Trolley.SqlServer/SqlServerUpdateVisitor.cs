@@ -12,6 +12,7 @@ public class SqlServerUpdateVisitor : UpdateVisitor, IUpdateVisitor
     public SqlServerUpdateVisitor(string dbKey, IOrmProvider ormProvider, IEntityMapProvider mapProvider, Type entityType, bool isParameterized = false, char tableAsStart = 'a', string parameterPrefix = "p")
       : base(dbKey, ormProvider, mapProvider, entityType, isParameterized, tableAsStart, parameterPrefix)
     {
+        this.tables[0].AliasName = this.OrmProvider.GetTableName(this.tables[0].Mapper.TableName);
     }
     public override string BuildSql(out List<IDbDataParameter> dbParameters)
     {
@@ -37,7 +38,7 @@ public class SqlServerUpdateVisitor : UpdateVisitor, IUpdateVisitor
         }
 
         if (!string.IsNullOrEmpty(this.whereSql))
-            builder.Append(this.whereSql);
+            builder.Append(" WHERE " + this.whereSql);
         dbParameters = this.dbParameters;
         return builder.ToString();
     }

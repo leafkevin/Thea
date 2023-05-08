@@ -52,7 +52,7 @@ public class UpdateVisitor : SqlVisitor, IUpdateVisitor
         builder.Append(this.setSql);
 
         if (!string.IsNullOrEmpty(this.whereSql))
-            builder.Append(this.whereSql);
+            builder.Append(" WHERE " + this.whereSql);
         dbParameters = this.dbParameters;
         return builder.ToString();
     }
@@ -164,7 +164,8 @@ public class UpdateVisitor : SqlVisitor, IUpdateVisitor
         this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
         this.InitTableAlias(lambdaExpr);
-        this.whereSql = " WHERE " + this.VisitConditionExpr(lambdaExpr.Body);
+        this.lastWhereNodeType = OperationType.None;
+        this.whereSql = this.VisitConditionExpr(lambdaExpr.Body);
         this.isWhere = false;
         return this;
     }
@@ -173,7 +174,20 @@ public class UpdateVisitor : SqlVisitor, IUpdateVisitor
         this.isWhere = true;
         var lambdaExpr = whereExpr as LambdaExpression;
         this.InitTableAlias(lambdaExpr);
-        this.whereSql += " AND " + this.VisitConditionExpr(lambdaExpr.Body);
+        if (this.lastWhereNodeType == OperationType.Or)
+        {
+            this.whereSql = $"({this.whereSql})";
+            this.lastWhereNodeType = OperationType.And;
+        }
+        var conditionSql = this.VisitConditionExpr(lambdaExpr.Body);
+        if (this.lastWhereNodeType == OperationType.Or)
+        {
+            conditionSql = $"({conditionSql})";
+            this.lastWhereNodeType = OperationType.And;
+        }
+        if (!string.IsNullOrEmpty(this.whereSql))
+            this.whereSql += " AND " + conditionSql;
+        else this.whereSql = conditionSql;
         this.isWhere = false;
         return this;
     }
@@ -449,10 +463,7 @@ public class UpdateVisitor : SqlVisitor, IUpdateVisitor
             if (memberMapper.TypeHandler != null)
             {
                 if (memberMapper.NativeDbType != null)
-                {
-                    fieldValue = this.OrmProvider.ToFieldValue(fieldValue, memberMapper.NativeDbType);
                     dbParameter = this.OrmProvider.CreateParameter(parameterName, memberMapper.NativeDbType, fieldValue);
-                }
                 else dbParameter = this.OrmProvider.CreateParameter(parameterName, fieldValue);
                 memberMapper.TypeHandler.SetValue(this.OrmProvider, dbParameter, fieldValue);
             }
