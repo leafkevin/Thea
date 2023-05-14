@@ -69,14 +69,10 @@ class TheaJwtTokenService : IJwtTokenService
             claims.Add(new Claim(JwtClaimTypes.Scope, userToken.Scope));
         if (!string.IsNullOrEmpty(userToken.Role))
             claims.Add(new Claim(JwtClaimTypes.Role, userToken.Role));
-        if (!string.IsNullOrEmpty(userToken.Country))
-            claims.Add(new Claim("country", userToken.Country));
-        if (!string.IsNullOrEmpty(userToken.State))
-            claims.Add(new Claim("state", userToken.State));
-        if (!string.IsNullOrEmpty(userToken.City))
-            claims.Add(new Claim("city", userToken.City));
-        if (userToken.Status.HasValue)
-            claims.Add(new Claim("status", userToken.Status.ToString()));
+        if (!string.IsNullOrEmpty(userToken.TenantType))
+            claims.Add(new Claim("tenant_type", userToken.TenantType));
+        if (userToken.TenantId.HasValue)
+            claims.Add(new Claim("tenant", userToken.TenantId.ToString()));
         return claims;
     }
 }

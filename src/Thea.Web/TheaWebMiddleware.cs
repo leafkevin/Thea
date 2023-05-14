@@ -33,39 +33,26 @@ public class TheaWebMiddleware
         using (this.logger.BeginScope(logScope))
         {
             using var memoryStream = new MemoryStream();
+            Exception excepition = null;
             try
             {
                 context.Response.Body = memoryStream;
                 await next(context);
-                var respBody = await this.ReadBody(memoryStream);
-                await memoryStream.CopyToAsync(originalStream);
-                this.UpdateLogEntityInfo(context, respBody, logEntityInfo);
             }
             catch (Exception ex)
             {
-                await this.ProcessException(context, ex, logEntityInfo);
-                var respBody = await this.ReadBody(memoryStream);
-                await memoryStream.CopyToAsync(originalStream);
+                excepition = ex;
             }
+            var response = await this.ReadBody(memoryStream);
+            response = this.ProcessCustomResponse(context, response, excepition, logEntityInfo);
+            context.Response.Body = originalStream;
+            await context.Response.WriteAsync(response);
             this.logger.LogEntity(logEntityInfo);
         }
     }
-
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
         var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = LogLevel.Information };
-        if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
-            logEntityInfo.Authorization = authorization.ToString();
-
-        if (context.User != null)
-        {
-            logEntityInfo.UserId = context.User.FindFirst("sub")?.Value;
-            logEntityInfo.UserName = context.User.FindFirst("name")?.Value;
-            logEntityInfo.AppId = this.configuation["AppId"] ?? context.User.FindFirst("client_id")?.Value;
-            logEntityInfo.TenantType = context.User.FindFirst("tenant_type")?.Value;
-            logEntityInfo.TenantId = context.User.ClaimTo<int>("tenant_id", -1);
-        }
-
         if (context.Request.Headers.TryGetValue("TraceId", out StringValues traceIds))
         {
             var traceId = traceIds.ToString();
@@ -92,7 +79,6 @@ public class TheaWebMiddleware
         logEntityInfo.Path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
         logEntityInfo.CreatedAt = DateTime.Now;
-
 
         context.Request.EnableBuffering();
         context.Response.OnStarting(() =>
@@ -127,25 +113,53 @@ public class TheaWebMiddleware
         stream.Position = 0;
         return result;
     }
-    private void UpdateLogEntityInfo(HttpContext context, string respBody, LogEntity logEntityInfo)
+    private string ProcessCustomResponse(HttpContext context, string originalResponse, Exception excepition, LogEntity logEntityInfo)
     {
-        logEntityInfo.Response = respBody;
+        var response = originalResponse;
         logEntityInfo.StatusCode = context.Response.StatusCode;
-        logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
         logEntityInfo.Body = $"Request finished. Status code: {logEntityInfo.StatusCode}";
-    }
-
-    private async Task ProcessException(HttpContext context, Exception ex, LogEntity logEntityInfo)
-    {
+        switch (context.Response.StatusCode)
+        {
+            case 401:
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json;charset=utf-8";
+                response = TheaResponse.Fail(logEntityInfo.StatusCode, "未授权，请登陆后重试！").ToJson();
+                break;
+            case 403:
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json;charset=utf-8";
+                response = TheaResponse.Fail(logEntityInfo.StatusCode, "没有权限访问该服务！").ToJson();
+                break;
+            case 404:
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json;charset=utf-8";
+                response = TheaResponse.Fail(logEntityInfo.StatusCode, "未找到服务！").ToJson();
+                break;
+            case 500:
+            case 502:
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json;charset=utf-8";
+                response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.ToString()).ToJson();
+                logEntityInfo.Exception = excepition;
+                logEntityInfo.Body = response;
+                break;
+        }
+        if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
+        {
+            logEntityInfo.Authorization = authorization.ToString();
+            if (context.User != null)
+            {
+                var passport = context.User.ToPassport();
+                logEntityInfo.UserId = passport.UserId;
+                logEntityInfo.UserName = passport.UserName;
+                logEntityInfo.AppId = this.configuation["AppId"] ?? context.User.FindFirst("client_id")?.Value;
+                logEntityInfo.TenantType = passport.TenantType;
+                logEntityInfo.TenantId = passport.TenantId;
+            }
+        }
+        logEntityInfo.Response = response;
         logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
-        logEntityInfo.StatusCode = 500;
-        logEntityInfo.Body =
-            $"Request error. Status code:{logEntityInfo.StatusCode}, Error message: {Environment.NewLine}{ex.Message}";
-        logEntityInfo.Exception = ex;
-        context.Response.StatusCode = 200;
-        context.Response.ContentType = "application/json;charset=utf-8";
-        var result = TheaResponse.Fail(-1, "服务器内部错误，Detail:" + ex.ToString());
-        await context.Response.WriteAsync(result.ToJson());
+        return response;
     }
     private static string GetHost()
     {

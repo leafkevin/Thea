@@ -19,9 +19,13 @@
     /// <summary>
     /// 租户ID
     /// </summary>
-    int TenantId { get; }
+    int? TenantId { get; }
     /// <summary>
     /// 邮箱地址
     /// </summary>
     string Email { get; }
+    /// <summary>
+    /// 角色
+    /// </summary>
+    string RoleId { get; }
 }

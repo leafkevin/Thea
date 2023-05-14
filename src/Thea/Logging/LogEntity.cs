@@ -21,7 +21,7 @@ public class LogEntity
     public string UserId { get; set; }
     public string UserName { get; set; }
     public string TenantType { get; set; }
-    public int TenantId { get; set; }
+    public int? TenantId { get; set; }
     public string Authorization { get; set; }
 
     public string Tag { get; set; }

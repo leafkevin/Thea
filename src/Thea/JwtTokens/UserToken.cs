@@ -13,9 +13,7 @@ public class UserToken
     public string Audience { get; set; }
     public string Scope { get; set; }
     public string Role { get; set; }
+    public string TenantType { get; set; }
+    public int? TenantId { get; set; }
     public TimeSpan? LifeTime { get; set; }
-    public string Country { get; set; }
-    public string State { get; set; }
-    public string City { get; set; }
-    public int? Status { get; set; }
 }

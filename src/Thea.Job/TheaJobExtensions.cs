@@ -16,8 +16,7 @@ namespace Thea.Job
                 var options = new JobSchedulerBuilder(jobService);
                 optionsInitializer?.Invoke(options);
                 var dbFactory = f.GetService<IOrmDbFactory>();
-                var mapProvider = dbFactory.GetEntityMapProvider(jobService.DbKey);
-                new ModelConfiguration().OnModelCreating(new ModelBuilder(mapProvider));
+                dbFactory.Configure(options.OrmProviderType, new ModelConfiguration());
                 return jobService;
             });
             return services;
@@ -38,6 +37,7 @@ namespace Thea.Job
     public class JobSchedulerBuilder
     {
         private readonly JobService jobService;
+        public Type OrmProviderType { get; private set; }
         internal JobSchedulerBuilder(JobService jobService)
             => this.jobService = jobService;
         public JobSchedulerBuilder SetNodeId(string nodeId)
@@ -48,9 +48,10 @@ namespace Thea.Job
                 this.jobService.NodeId = nodeId;
             return this;
         }
-        public JobSchedulerBuilder SetDbKey(string dbKey)
+        public JobSchedulerBuilder SetOrmProvider<TOrmProvider>(string dbKey) where TOrmProvider : IOrmProvider
         {
             this.jobService.DbKey = dbKey;
+            this.OrmProviderType = typeof(TOrmProvider);
             return this;
         }
         public void RegisterFrom(Assembly assembly) => this.jobService.RegisterFrom(assembly);
