@@ -144,6 +144,14 @@ public class TheaWebMiddleware
                 logEntityInfo.Body = response;
                 break;
         }
+        if (excepition != null)
+        {
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json;charset=utf-8";
+            response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.ToString()).ToJson();
+            logEntityInfo.Exception = excepition;
+            logEntityInfo.Body = response;
+        }
         if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
         {
             logEntityInfo.Authorization = authorization.ToString();
