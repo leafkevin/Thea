@@ -11,16 +11,7 @@ public class TheaResponse : TheaResponse<object>
 {
     private static readonly TheaResponse _success = new TheaResponse { IsSuccess = true };
     public static TheaResponse Success => _success;
-    public static TheaResponse Succeed(object result = null)
-    {
-        return new TheaResponse
-        {
-            IsSuccess = true,
-            Code = 0,
-            Data = result
-        };
-    }
-    public static TheaResponse Succeed(int code, object result = null)
+    public static TheaResponse Succeed(object result, int code = 0)
     {
         return new TheaResponse
         {
