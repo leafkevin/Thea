@@ -12,7 +12,7 @@ public partial class MySqlProvider : BaseOrmProvider
     private static Dictionary<Type, object> defaultDbTypes = new();
     private static Dictionary<Type, string> castTos = new();
 
-    public override string SelectIdentitySql => " RETURNING {0}";
+    public override string SelectIdentitySql => ";SELECT LAST_INSERT_ID()";
     public override Type NativeDbTypeType => typeof(MySqlDbType);
     static MySqlProvider()
     {
