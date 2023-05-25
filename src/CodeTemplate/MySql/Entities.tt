@@ -13,7 +13,7 @@
 <#@ import namespace="System.Collections.Generic" #>
 <#@ import namespace="System.Data"#>
 <#@ import namespace="System.Data.Linq"#>
-<#@ import namespace="System.Data.Linq.Mapping"#> 
+<#@ import namespace="System.Data.Linq.Mapping"#>
 <#@ import namespace="System.IO"#>
 <#@ import namespace="System.Linq"#>
 <#@ import namespace="System.Reflection"#>
@@ -39,27 +39,26 @@
 #>
 using System;
 
-namespace Thea.Services.Domain.Models
+namespace Thea.Services.Domain.Models;
+
+/// <summary>
+/// <#=tableInfo.Description#>
+/// </summary>
+public class <#=className#>
 {
-    /// <summary>
-    /// <#=tableInfo.Description#>
-    /// </summary>
-	public class <#=className#>
-    {
 <#foreach(ColumnInfo columnInfo in columnList){
 var propertyName = columnInfo.ColumnName;
 var propertyType = dbProvider.MapMemberType(columnInfo);
 if(!String.IsNullOrEmpty(columnInfo.Description))
 {#>
-        /// <summary>
-        /// <#=columnInfo.Description#>
-        /// </summary>
+    /// <summary>
+    /// <#=columnInfo.Description#>
+    /// </summary>
 <#}#>
 <#if(columnInfo.IsPrimaryKey){#>
 <#}#>
-        public <#=propertyType#> <#=propertyName#> { get; set; }
+    public <#=propertyType#> <#=propertyName#> { get; set; }
 <#}#>
-    }
 }
 <#
 manager.EndBlock();
@@ -67,5 +66,5 @@ manager.EndBlock();
 manager.Process(true);
 #>
 <#@ include file="$(ProjectDir)\Manager.ttinclude" once="true"#>
-<#@ include file="$(ProjectDir)\DbEntitries.ttinclude" once="true" #>
-<#@ include file="MySqlProvider.ttinclude" once="true" #>
+<#@ include file="$(ProjectDir)\DbEntitries.ttinclude" once="true"#>
+<#@ include file="MySqlProvider.ttinclude" once="true"#>
