@@ -10,17 +10,47 @@ namespace Thea.Orm;
 public static class OrmExtensions
 {
     public static TEntity QueryFirst<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)
-        => repository.From<TEntity>().Where(predicate).First();
+    {
+        var query = repository.From<TEntity>();
+        if (predicate != null)
+            query.Where(predicate);
+        return query.First();
+    }
     public static async Task<TEntity> QueryFirstAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
-        => await repository.From<TEntity>().Where(predicate).FirstAsync(cancellationToken);
+    {
+        var query = repository.From<TEntity>();
+        if (predicate != null)
+            query.Where(predicate);
+        return await query.FirstAsync(cancellationToken);
+    }
     public static List<TEntity> Query<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null)
-        => repository.From<TEntity>().Where(predicate).ToList();
+    {
+        var query = repository.From<TEntity>();
+        if (predicate != null)
+            query.Where(predicate);
+        return query.ToList();
+    }
     public static async Task<List<TEntity>> QueryAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
-        => await repository.From<TEntity>().Where(predicate).ToListAsync(cancellationToken);
+    {
+        var query = repository.From<TEntity>();
+        if (predicate != null)
+            query.Where(predicate);
+        return await query.ToListAsync(cancellationToken);
+    }
     public static Dictionary<TKey, TValue> QueryDictionary<TEntity, TKey, TValue>(this IRepository repository, Expression<Func<TEntity, bool>> predicate, Func<TEntity, TKey> keySelector, Func<TEntity, TValue> valueSelector) where TKey : notnull
-        => repository.From<TEntity>().Where(predicate).ToDictionary(keySelector, valueSelector);
+    {
+        var query = repository.From<TEntity>();
+        if (predicate != null)
+            query.Where(predicate);
+        return query.ToDictionary(keySelector, valueSelector);
+    }
     public static async Task<Dictionary<TKey, TValue>> QueryDictionaryAsync<TEntity, TKey, TValue>(this IRepository repository, Expression<Func<TEntity, bool>> predicate, Func<TEntity, TKey> keySelector, Func<TEntity, TValue> valueSelector, CancellationToken cancellationToken = default) where TKey : notnull
-        => await repository.From<TEntity>().Where(predicate).ToDictionaryAsync(keySelector, valueSelector, cancellationToken);
+    {
+        var query = repository.From<TEntity>();
+        if (predicate != null)
+            query.Where(predicate);
+        return await query.ToDictionaryAsync(keySelector, valueSelector, cancellationToken);
+    }
 
     public static int Create<TEntity>(this IRepository repository, object parameter)
         => repository.Create<TEntity>().WithBy(parameter).Execute();
@@ -53,10 +83,14 @@ public static class OrmExtensions
         => repository.Update<TEntity>().Set(fieldsExpr).Where(predicate).Execute();
     public static async Task<int> UpdateAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         => await repository.Update<TEntity>().Set(fieldsExpr).Where(predicate).ExecuteAsync(cancellationToken);
-    public static int Update<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, int bulkCount = 500)
-        => repository.Update<TEntity>().WithBy(fieldsExpr, parameters, bulkCount).Execute();
-    public static async Task<int> UpdateAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, int bulkCount = 500, CancellationToken cancellationToken = default)
-        => await repository.Update<TEntity>().WithBy(fieldsExpr, parameters, bulkCount).ExecuteAsync(cancellationToken);
+    public static int Update<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters)
+        => repository.Update<TEntity>().WithBy(fieldsExpr, parameters).Execute();
+    public static async Task<int> UpdateAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, CancellationToken cancellationToken = default)
+        => await repository.Update<TEntity>().WithBy(fieldsExpr, parameters).ExecuteAsync(cancellationToken);
+    public static int UpdateBulk<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, int bulkCount = 500)
+        => repository.Update<TEntity>().WithBulkBy(fieldsExpr, parameters, bulkCount).Execute();
+    public static async Task<int> UpdateBulkAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, int bulkCount = 500, CancellationToken cancellationToken = default)
+        => await repository.Update<TEntity>().WithBulkBy(fieldsExpr, parameters, bulkCount).ExecuteAsync(cancellationToken);
 
     public static int Delete<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate)
         => repository.Delete<TEntity>().Where(predicate).Execute();
