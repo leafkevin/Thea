@@ -27,9 +27,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeTemplate", "CodeTemplat
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.JwtTokens", "Thea.JwtToken\Thea.JwtTokens.csproj", "{0DED3B7E-9F3E-4E36-8C91-1E57F2A8ED67}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thea.Trolley.MySqlConnector", "Thea.Trolley.MySqlConnector\Thea.Trolley.MySqlConnector.csproj", "{32AF15AE-0D5A-49A1-A3F9-980712F74A97}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Trolley.MySqlConnector", "Thea.Trolley.MySqlConnector\Thea.Trolley.MySqlConnector.csproj", "{32AF15AE-0D5A-49A1-A3F9-980712F74A97}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thea.Trolley.SqlServer", "Thea.Trolley.SqlServer\Thea.Trolley.SqlServer.csproj", "{3270AAE9-979D-436D-91CB-BEE28A5F7FA5}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Trolley.SqlServer", "Thea.Trolley.SqlServer\Thea.Trolley.SqlServer.csproj", "{3270AAE9-979D-436D-91CB-BEE28A5F7FA5}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Logging.Template", "Thea.Logging.Template\Thea.Logging.Template.csproj", "{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -81,6 +83,10 @@ Global
 		{3270AAE9-979D-436D-91CB-BEE28A5F7FA5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3270AAE9-979D-436D-91CB-BEE28A5F7FA5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3270AAE9-979D-436D-91CB-BEE28A5F7FA5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

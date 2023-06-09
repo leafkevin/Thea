@@ -7,6 +7,8 @@ namespace Thea.Logging;
 public delegate Task LoggerHandlerDelegate(LoggerHandlerContext conext);
 public class LoggerHandlerContext
 {
+    public static readonly LoggerHandlerContext Instance = new LoggerHandlerContext();
+    private LoggerHandlerContext() { }
     public LoggerHandlerContext(LogEntity logEntity) => this.LogEntity = logEntity;
     public LogEntity LogEntity { get; private set; }
     public Dictionary<string, object> ContextData { get; set; }

@@ -5,7 +5,6 @@ using Nest;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -50,16 +49,22 @@ namespace Thea.Logging
                             logEntities.Add(logEntityInfo);
 
                         if (logEntities.Count >= batchCount
-                            || (logEntities.Count > 0 && DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10)))
+                            || DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
                         {
                             await this.SendToAsync(logEntities);
-                            foreach (var logEntity in logEntities)
+                            if (this.next != null)
                             {
-                                var context = new LoggerHandlerContext(logEntityInfo);
-                                if (this.next != null)
-                                    await this.next.Invoke(context);
-                            }
-                            logEntities.Clear();
+                                if (logEntities.Count > 0)
+                                {
+                                    foreach (var logEntity in logEntities)
+                                    {
+                                        var context = new LoggerHandlerContext(logEntityInfo);
+                                        await this.next.Invoke(context);
+                                    }
+                                    logEntities.Clear();
+                                }
+								else await this.next.Invoke(LoggerHandlerContext.Instance);
+                            }                            
                         }
                         if (this.messageQueue.Count <= 0)
                             Thread.Sleep(100);

@@ -72,7 +72,7 @@ public class EntityMap
         if (this.memberMaps.TryAdd(memberName, mapper))
             this.memberMappers.Add(mapper);
     }
-    public void Build(IOrmProvider ormProvider, ITypeHandlerProvider typeHandlerProvider)
+    public void Build(IOrmProvider ormProvider)
     {
         if (string.IsNullOrEmpty(this.TableName))
             this.TableName = this.EntityType.Name;

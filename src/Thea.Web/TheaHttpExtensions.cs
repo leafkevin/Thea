@@ -54,16 +54,6 @@ public static class TheaHttpExtensions
         fs.Flush();
         stream.Close();
     }
-    public static string GetToken(this HttpContext context)
-    {
-        if (context == null)
-            return null;
-        var request = context.Request;
-        if (request.Headers.TryGetValue("Authorization", out var token))
-            return token.ToString().Replace("Bearer ", string.Empty);
-
-        return null;
-    }
     public static string GetTraceId(this IHttpContextAccessor contextAccessor)
     {
         if (contextAccessor == null)

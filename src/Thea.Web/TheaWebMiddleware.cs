@@ -74,9 +74,7 @@ public class TheaWebMiddleware
         logEntityInfo.Host = GetHost();
         logEntityInfo.ApiType = this.GetApiType(context.Request.Method);
         logEntityInfo.ClientIp = context.GetClientIp();
-        var path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
-        var apiUrl = $"{context.Request.Scheme}://*{path}{context.Request.QueryString.Value}";
-        logEntityInfo.Path = $"{context.Request.PathBase.Value}{context.Request.Path.Value}";
+        var apiUrl = $"{context.Request.Scheme}://*{context.Request.PathBase.Value}{context.Request.Path.Value}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
         logEntityInfo.CreatedAt = DateTime.Now;
 
@@ -99,7 +97,9 @@ public class TheaWebMiddleware
                 break;
             case ApiType.HttpPost:
             case ApiType.HttpPut:
-                logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
+                if (context.Request.Query != null && context.Request.Query.Count > 0)
+                    logEntityInfo.Parameters = "QueryString: {HttpUtility.UrlDecode(context.Request.QueryString.ToString())} \nBody: ";
+                logEntityInfo.Parameters += await this.ReadBody(context.Request.Body);
                 break;
         }
 
@@ -117,6 +117,8 @@ public class TheaWebMiddleware
     {
         var response = originalResponse;
         logEntityInfo.StatusCode = context.Response.StatusCode;
+        if (excepition != null && logEntityInfo.StatusCode == 200)
+            logEntityInfo.StatusCode = 500;
         logEntityInfo.Body = $"Request finished. Status code: {logEntityInfo.StatusCode}";
         switch (context.Response.StatusCode)
         {
@@ -141,16 +143,16 @@ public class TheaWebMiddleware
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.ToString()).ToJson();
                 logEntityInfo.Exception = excepition;
-                logEntityInfo.Body = response;
+                logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
                 break;
         }
         if (excepition != null)
         {
             context.Response.StatusCode = 200;
             context.Response.ContentType = "application/json;charset=utf-8";
-            response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.ToString()).ToJson();
+            response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.Message.ToString()).ToJson();
             logEntityInfo.Exception = excepition;
-            logEntityInfo.Body = response;
+            logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
         }
         if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
         {

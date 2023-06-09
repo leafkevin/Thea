@@ -15,7 +15,7 @@ public static class TheaLoggingExtensions
     }
     public static IApplicationBuilder UseTheaLogHandler(this IApplicationBuilder app, Action<ILoggerProcessor> builderInitializer = null)
     {
-        var loggerProcessor = app.ApplicationServices.GetService<TheaLoggerProcessor>();
+        var loggerProcessor = app.ApplicationServices.GetService<ILoggerProcessor>();
         builderInitializer?.Invoke(loggerProcessor);
         loggerProcessor.Build();
         return app;
