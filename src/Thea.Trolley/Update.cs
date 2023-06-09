@@ -86,14 +86,14 @@ class Update<TEntity> : IUpdate<TEntity>
 
         return new UpdateSet<TEntity>(this.connection, this.transaction, this.ormProvider, this.mapProvider, false, parameters, fieldsExpr);
     }
-    public IUpdateSet<TEntity> WithBulkBy<TFields>(TFields parameters, int bulkCount = 500)
+    public IUpdateSet<TEntity> WithBulkBy<TFields>(IEnumerable<TFields> parameters, int bulkCount = 500)
     {
         if (parameters == null)
             throw new ArgumentNullException(nameof(parameters));
 
         return new UpdateSet<TEntity>(this.connection, this.transaction, this.ormProvider, this.mapProvider, true, parameters, null, bulkCount);
     }
-    public IUpdateSet<TEntity> WithBulkBy<TFields>(Expression<Func<TEntity, TFields>> fieldsExpr, object parameters, int bulkCount = 500)
+    public IUpdateSet<TEntity> WithBulkBy<TFields>(Expression<Func<TEntity, TFields>> fieldsExpr, IEnumerable parameters, int bulkCount = 500)
     {
         if (parameters == null)
             throw new ArgumentNullException(nameof(parameters));
@@ -250,9 +250,9 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
     private bool isBulk = false;
     private Expression fieldsExpr = null;
     private object parameters = null;
-    private int? bulkCount = null;
+    private int bulkCount;
 
-    public UpdateSet(TheaConnection connection, IDbTransaction transaction, IOrmProvider ormProvider, IEntityMapProvider mapProvider, bool isBulk, object parameters, Expression fieldsExpr = null, int? bulkCount = null)
+    public UpdateSet(TheaConnection connection, IDbTransaction transaction, IOrmProvider ormProvider, IEntityMapProvider mapProvider, bool isBulk, object parameters, Expression fieldsExpr = null, int bulkCount = 500)
     {
         this.connection = connection;
         this.transaction = transaction;
@@ -292,25 +292,40 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
         if (this.isBulk)
         {
-            this.bulkCount ??= 500;
             int result = 0, index = 0;
+            IUpdateVisitor visitor = null;
             Action<IDbCommand, IOrmProvider, StringBuilder, int, object> commandInitializer = null;
-            if (isDictionary)
-                commandInitializer = this.BuildBatchCommandInitializer(entityType);
-            else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
-
+            if (this.fieldsExpr != null)
+                visitor = this.ormProvider.NewUpdateVisitor(this.connection.DbKey, this.mapProvider, typeof(TEntity), true);
+            else
+            {
+                if (isDictionary)
+                    commandInitializer = this.BuildBatchCommandInitializer(entityType);
+                else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
+            }
             var sqlBuilder = new StringBuilder();
+            List<IDbDataParameter> fixedDbParameters = null;
             foreach (var entity in entities)
             {
                 if (index > 0) sqlBuilder.Append(';');
-                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
+                if (this.fieldsExpr != null)
+                {
+                    var dbParameters = visitor.WithBulkBy(fieldsExpr, sqlBuilder, entity, index, out fixedDbParameters);
+                    if (dbParameters != null && dbParameters.Count > 0)
+                        dbParameters.ForEach(f => command.Parameters.Add(f));
+                }
+                else commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
 
                 if (index >= this.bulkCount)
                 {
+                    if (fixedDbParameters.Count > 0)
+                        fixedDbParameters.ForEach(f => command.Parameters.Add(f));
+
                     command.CommandText = sqlBuilder.ToString();
                     command.CommandType = CommandType.Text;
                     this.connection.Open();
                     result += command.ExecuteNonQuery();
+                    command.Parameters.Clear();
                     sqlBuilder.Clear();
                     index = 0;
                     continue;
@@ -319,6 +334,9 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             }
             if (index > 0)
             {
+                if (fixedDbParameters.Count > 0)
+                    fixedDbParameters.ForEach(f => command.Parameters.Add(f));
+
                 command.CommandText = sqlBuilder.ToString();
                 command.CommandType = CommandType.Text;
                 this.connection.Open();
@@ -381,28 +399,43 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
 
         if (this.isBulk)
         {
-            this.bulkCount ??= 500;
             int result = 0, index = 0;
+            IUpdateVisitor visitor = null;
             Action<IDbCommand, IOrmProvider, StringBuilder, int, object> commandInitializer = null;
-            if (isDictionary)
-                commandInitializer = this.BuildBatchCommandInitializer(entityType);
-            else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
-
+            if (this.fieldsExpr != null)
+                visitor = this.ormProvider.NewUpdateVisitor(this.connection.DbKey, this.mapProvider, typeof(TEntity), true);
+            else
+            {
+                if (isDictionary)
+                    commandInitializer = this.BuildBatchCommandInitializer(entityType);
+                else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
+            }
             if (cmd is not DbCommand command)
                 throw new NotSupportedException("当前数据库驱动不支持异步SQL查询");
 
             var sqlBuilder = new StringBuilder();
+            List<IDbDataParameter> fixedDbParameters = null;
             foreach (var entity in entities)
             {
                 if (index > 0) sqlBuilder.Append(';');
-                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
+                if (this.fieldsExpr != null)
+                {
+                    var dbParameters = visitor.WithBulkBy(fieldsExpr, sqlBuilder, entity, index, out fixedDbParameters);
+                    if (dbParameters != null && dbParameters.Count > 0)
+                        dbParameters.ForEach(f => command.Parameters.Add(f));
+                }
+                else commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
 
                 if (index >= this.bulkCount)
                 {
+                    if (fixedDbParameters.Count > 0)
+                        fixedDbParameters.ForEach(f => command.Parameters.Add(f));
+
                     command.CommandText = sqlBuilder.ToString();
                     command.CommandType = CommandType.Text;
                     await this.connection.OpenAsync(cancellationToken);
                     result += await command.ExecuteNonQueryAsync(cancellationToken);
+                    command.Parameters.Clear();
                     sqlBuilder.Clear();
                     index = 0;
                     continue;
@@ -432,7 +465,6 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             }
             else
             {
-
                 if (isDictionary)
                     commandInitializer = this.BuildCommandInitializer(entityType);
                 else commandInitializer = this.BuildCommandInitializer(entityType, parameterType);
@@ -474,31 +506,54 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             else parameterType = this.parameters.GetType();
         }
         using var command = this.connection.CreateCommand();
-
         if (this.isBulk)
         {
-            this.bulkCount ??= 500;
             int index = 0;
+            string sql = null;
+            IUpdateVisitor visitor = null;
             Action<IDbCommand, IOrmProvider, StringBuilder, int, object> commandInitializer = null;
-            if (isDictionary)
-                commandInitializer = this.BuildBatchCommandInitializer(entityType);
-            else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
-
+            if (this.fieldsExpr != null)
+                visitor = this.ormProvider.NewUpdateVisitor(this.connection.DbKey, this.mapProvider, typeof(TEntity), true);
+            else
+            {
+                if (isDictionary)
+                    commandInitializer = this.BuildBatchCommandInitializer(entityType);
+                else commandInitializer = this.BuildBatchCommandInitializer(entityType, parameterType);
+            }
             var sqlBuilder = new StringBuilder();
+            if (this.fieldsExpr != null) dbParameters = new();
+            List<IDbDataParameter> fixedDbParameters = null;
             foreach (var entity in entities)
             {
                 if (index > 0) sqlBuilder.Append(';');
-                commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
+                if (this.fieldsExpr != null)
+                {
+                    var dbDataParameters = visitor.WithBulkBy(fieldsExpr, sqlBuilder, entity, index, out fixedDbParameters);
+                    if (dbDataParameters != null && dbDataParameters.Count > 0)
+                        dbParameters.AddRange(dbDataParameters);
+                }
+                else commandInitializer.Invoke(command, this.ormProvider, sqlBuilder, index, entity);
 
                 if (index >= this.bulkCount)
+                {
+                    sql = sqlBuilder.ToString();
+                    if (fixedDbParameters != null && fixedDbParameters.Count > 0)
+                        dbParameters.AddRange(fixedDbParameters);
+                    if (command.Parameters != null && command.Parameters.Count > 0)
+                        dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
+                    index = 0;
                     break;
+                }
                 index++;
             }
-            string sql = null;
             if (index > 0)
+            {
                 sql = sqlBuilder.ToString();
-            if (command.Parameters != null && command.Parameters.Count > 0)
-                dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
+                if (fixedDbParameters != null && fixedDbParameters.Count > 0)
+                    dbParameters.AddRange(fixedDbParameters);
+                if (command.Parameters != null && command.Parameters.Count > 0)
+                    dbParameters = command.Parameters.Cast<IDbDataParameter>().ToList();
+            }
             command.Dispose();
             return sql;
         }
@@ -513,7 +568,6 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
             }
             else
             {
-
                 if (isDictionary)
                     commandInitializer = this.BuildCommandInitializer(entityType);
                 else commandInitializer = this.BuildCommandInitializer(entityType, parameterType);

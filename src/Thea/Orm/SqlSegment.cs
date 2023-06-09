@@ -34,6 +34,10 @@ public class SqlSegment
     /// </summary>
     public bool IsConstantValue { get; set; }
     /// <summary>
+    /// 是否是变量
+    /// </summary>
+    public bool IsVariable { get; set; }
+    /// <summary>
     /// 是否是表达式，二元表达式、字符串拼接等
     /// </summary>
     public bool IsExpression { get; set; }
@@ -75,6 +79,10 @@ public class SqlSegment
     public TableSegment TableSegment { get; set; }
     public ReaderFieldType MemberType { get; set; }
     public MemberInfo FromMember { get; set; }
+    /// <summary>
+    /// 当前是成员访问时，才有值，和FromMember是同一个栏位，是Mapper
+    /// </summary>
+    public MemberMap MemberMapper { get; set; }
     public object Value { get; set; }
     public Expression Expression { get; set; }
     public Expression OriginalExpression { get; set; }
@@ -120,12 +128,15 @@ public class SqlSegment
     }
     public SqlSegment Clone(Expression nextExpr)
     {
-        return new SqlSegment
+        var newSqlSegment = new SqlSegment
         {
             Expression = nextExpr,
             ExpectType = this.ExpectType,
             TargetType = this.TargetType
         };
+        if (this.HasField && !this.IsExpression && !this.IsMethodCall)
+            newSqlSegment.MemberMapper = this.MemberMapper;
+        return newSqlSegment;
     }
     public void Push(DeferredExpr deferredExpr)
     {

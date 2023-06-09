@@ -71,9 +71,9 @@ public static class OrmExtensions
     public static async Task<int> CreateAsync<TEntity>(this IRepository repository, string rawSql, object parameter, CancellationToken cancellationToken = default)
         => await repository.Create<TEntity>().RawSql(rawSql, parameter).ExecuteAsync(cancellationToken);
     public static int Create<TEntity>(this IRepository repository, IEnumerable entities, int bulkCount = 500)
-        => repository.Create<TEntity>().WithByBulk(entities, bulkCount).Execute();
+        => repository.Create<TEntity>().WithBulkBy(entities, bulkCount).Execute();
     public static async Task<int> CreateAsync<TEntity>(this IRepository repository, IEnumerable entities, int bulkCount = 500, CancellationToken cancellationToken = default)
-        => await repository.Create<TEntity>().WithByBulk(entities, bulkCount).ExecuteAsync(cancellationToken);
+        => await repository.Create<TEntity>().WithBulkBy(entities, bulkCount).ExecuteAsync(cancellationToken);
 
     public static int Update<TEntity>(this IRepository repository, object entity)
         => repository.Update<TEntity>().WithBy(entity).Execute();
@@ -87,9 +87,9 @@ public static class OrmExtensions
         => repository.Update<TEntity>().WithBy(fieldsExpr, parameters).Execute();
     public static async Task<int> UpdateAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, CancellationToken cancellationToken = default)
         => await repository.Update<TEntity>().WithBy(fieldsExpr, parameters).ExecuteAsync(cancellationToken);
-    public static int UpdateBulk<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, int bulkCount = 500)
+    public static int Update <TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, IEnumerable parameters, int bulkCount = 500)
         => repository.Update<TEntity>().WithBulkBy(fieldsExpr, parameters, bulkCount).Execute();
-    public static async Task<int> UpdateBulkAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, object parameters, int bulkCount = 500, CancellationToken cancellationToken = default)
+    public static async Task<int> UpdateAsync<TEntity>(this IRepository repository, Expression<Func<TEntity, object>> fieldsExpr, IEnumerable parameters, int bulkCount = 500, CancellationToken cancellationToken = default)
         => await repository.Update<TEntity>().WithBulkBy(fieldsExpr, parameters, bulkCount).ExecuteAsync(cancellationToken);
 
     public static int Delete<TEntity>(this IRepository repository, Expression<Func<TEntity, bool>> predicate)

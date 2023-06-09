@@ -23,9 +23,9 @@ public class TheaLogger : ILogger
     {
         if (name == null) throw new ArgumentNullException(nameof(name));
         this.appId = configuration["AppId"];
-        this.logLevel = configuration.GetValue<LogLevel>("Logging:LogLevel:Default", LogLevel.Information);
-        this.systemLogLevel = configuration.GetValue<LogLevel>("Logging:LogLevel:System", LogLevel.Error);
-        this.microsoftLogLevel = configuration.GetValue<LogLevel>("Logging:LogLevel:Microsoft", LogLevel.Error);
+        this.logLevel = configuration.GetValue("Logging:LogLevel:Default", LogLevel.Information);
+        this.systemLogLevel = configuration.GetValue("Logging:LogLevel:System", LogLevel.Error);
+        this.microsoftLogLevel = configuration.GetValue("Logging:LogLevel:Microsoft", LogLevel.Error);
         if (appId == null) throw new ArgumentNullException(nameof(appId));
         this.name = name;
         this.processor = processor;

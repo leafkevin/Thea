@@ -155,13 +155,14 @@ public class SqlVisitor : ISqlVisitor
                 }
                 //string.Concat,string.Format,string.Join等方法，参数都是object，
                 //最终变成string，字段访问、参数、表达式、方法调用需要强制转换,如：a.IntField + 5, b.Field等，常量不需要强转
+                //整形，日期，布尔，...等等常量或变量当作object类型处理的，
                 sqlSegment = this.Visit(sqlSegment.Next(unaryExpr.Operand));
                 if (sqlSegment.TargetType != null && sqlSegment.Type != sqlSegment.TargetType && !sqlSegment.IsConstantValue)
                 {
                     sqlSegment.TableSegment.Mapper ??= this.mapProvider.GetEntityMap(sqlSegment.TableSegment.EntityType);
                     var memberMapper = sqlSegment.TableSegment.Mapper.GetMemberMap(sqlSegment.FromMember.Name);
                     if (this.OrmProvider.MapDefaultType(memberMapper.NativeDbType) != sqlSegment.TargetType)
-                        sqlSegment.Value = this.OrmProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment));
+                        sqlSegment.Value = this.OrmProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment, sqlSegment.IsVariable));
                     if (sqlSegment.Type != sqlSegment.TargetType)
                         sqlSegment.Type = sqlSegment.TargetType;
                 }
@@ -410,8 +411,8 @@ public class SqlVisitor : ISqlVisitor
     {
         var conditionalExpr = sqlSegment.Expression as ConditionalExpression;
         sqlSegment = this.Visit(sqlSegment.Next(conditionalExpr.Test));
-        var ifTrueSegment = this.Visit(sqlSegment.Clone(conditionalExpr.IfTrue));
-        var ifFalseSegment = this.Visit(sqlSegment.Clone(conditionalExpr.IfFalse));
+        var ifTrueSegment = this.Visit(new SqlSegment { Expression = conditionalExpr.IfTrue });
+        var ifFalseSegment = this.Visit(new SqlSegment { Expression = conditionalExpr.IfFalse });
         sqlSegment.Merge(ifTrueSegment);
         sqlSegment.Merge(ifFalseSegment);
         return this.VisitDeferredBoolConditional(sqlSegment, conditionalExpr.IfTrue.Type == typeof(bool), this.GetQuotedValue(ifTrueSegment), this.GetQuotedValue(ifFalseSegment));
@@ -569,9 +570,15 @@ public class SqlVisitor : ISqlVisitor
                     var rightSegment = this.VisitAndDeferred(fieldSegment.Clone(methodCallExpr.Arguments[1]));
                     if (rightSegment == SqlSegment.Null)
                         return sqlSegment.Change("1=0", false, true, false);
-                    var sqlSegments = rightSegment.Value as List<SqlSegment>;
-                    sqlSegments.ForEach(f => f.Value = this.OrmProvider.GetQuotedValue(f));
-                    sqlSegment.ChangeValue(string.Join(',', sqlSegments));
+                    var enumerable = rightSegment.Value as IEnumerable;
+
+                    var builder = new StringBuilder();
+                    foreach (var item in enumerable)
+                    {
+                        if (builder.Length > 0) builder.Append(',');
+                        builder.Append(this.OrmProvider.GetQuotedValue(item));
+                    }
+                    sqlSegment.ChangeValue(builder.ToString());
                 }
                 else
                 {
@@ -1125,6 +1132,66 @@ public class SqlVisitor : ISqlVisitor
         isNeedAlias = queryVisitor.IsNeedAlias;
         return result;
     }
+    public virtual string GetQuotedValue(object fieldValue, bool? isVariable = null, int? index = null)
+    {
+        if (fieldValue is DBNull)
+            return "NULL";
+        if (fieldValue is SqlSegment sqlSegment)
+        {
+            if (sqlSegment == SqlSegment.Null)
+                return "NULL";
+            //默认只要是变量就设置为参数
+            if (isVariable.HasValue && isVariable.Value || sqlSegment.IsVariable)
+            {
+                string parameterName = null;
+                if (string.IsNullOrEmpty(sqlSegment.ParameterName))
+                    parameterName = this.OrmProvider.ParameterPrefix + sqlSegment.ParameterName;
+                this.dbParameters ??= new();
+                if (this.dbParameters.Exists(f => f.ParameterName == parameterName))
+                    parameterName = this.OrmProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
+                if (index.HasValue)
+                    parameterName += index.ToString();
+
+                var memberMapper = sqlSegment.MemberMapper;
+                IDbDataParameter dbParameter = null;
+                if (memberMapper.TypeHandler != null)
+                {
+                    if (memberMapper.NativeDbType != null)
+                        dbParameter = this.OrmProvider.CreateParameter(parameterName, memberMapper.NativeDbType, sqlSegment.Value);
+                    else dbParameter = this.OrmProvider.CreateParameter(parameterName, sqlSegment.Value);
+                    memberMapper.TypeHandler.SetValue(this.OrmProvider, dbParameter, sqlSegment.Value);
+                }
+                else
+                {
+                    if (memberMapper.NativeDbType != null)
+                    {
+                        sqlSegment.Value = this.OrmProvider.ToFieldValue(sqlSegment.Value, memberMapper.NativeDbType);
+                        dbParameter = this.OrmProvider.CreateParameter(parameterName, memberMapper.NativeDbType, sqlSegment.Value);
+                    }
+                    else dbParameter = this.OrmProvider.CreateParameter(parameterName, fieldValue);
+                }
+                this.dbParameters.Add(dbParameter);
+                return parameterName;
+            }
+            else if (sqlSegment.IsConstantValue)
+                return this.OrmProvider.GetQuotedValue(sqlSegment);
+            else return sqlSegment.ToString();
+        }
+        else
+        {
+            if (isVariable.HasValue && isVariable.Value)
+            {
+                fieldValue = this.OrmProvider.GetQuotedValue(fieldValue);
+                var parameterName = this.OrmProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
+                var dbParameter = this.OrmProvider.CreateParameter(parameterName, fieldValue);
+                if (index.HasValue)
+                    parameterName += index.ToString();
+                this.dbParameters.Add(dbParameter);
+                return parameterName;
+            }
+            return this.OrmProvider.GetQuotedValue(fieldValue);
+        }
+    }
     public SqlSegment VisitDeferredBoolConditional(SqlSegment sqlSegment, bool isExpectBooleanType, string ifTrueValue, string ifFalseValue)
     {
         //处理HasValue !逻辑取反操作，这种情况下是一元操作
@@ -1328,7 +1395,6 @@ public class SqlVisitor : ISqlVisitor
             fieldName = tableSegment.AliasName + "." + fieldName;
         return fieldName;
     }
-
     private bool FindReaderField(MemberInfo memberInfo, int index, out ReaderField readerField)
     {
         foreach (var tableSegment in this.tables)
@@ -1377,8 +1443,6 @@ public class SqlVisitor : ISqlVisitor
                 return true;
         }
     }
-    private string GetQuotedValue(SqlSegment sqlSegment)
-        => this.OrmProvider.GetQuotedValue(sqlSegment);
     private bool IsDateTimeOperator(SqlSegment sqlSegment, out SqlSegment result)
     {
         var binaryExpr = sqlSegment.Expression as BinaryExpression;

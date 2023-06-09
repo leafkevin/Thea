@@ -10,7 +10,6 @@ public class LogEntity
     public int Sequence { get; set; } = 1;
     public LogLevel LogLevel { get; set; }
     public ApiType ApiType { get; set; }
-    public string Path { get; set; }
     public string ApiUrl { get; set; }
     public string ClientIp { get; set; }
     public string Host { get; set; }

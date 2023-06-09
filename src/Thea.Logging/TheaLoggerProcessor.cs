@@ -50,17 +50,19 @@ namespace Thea.Logging
                             logEntities.Add(logEntityInfo);
 
                         if (logEntities.Count >= batchCount
-                            || DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
-                            await this.SendToAsync(logEntities);
-
-                        foreach (var logEntity in logEntities)
+                            || (logEntities.Count > 0 && DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10)))
                         {
-                            var context = new LoggerHandlerContext(logEntityInfo);
-                            if (this.next != null && !await this.next.Invoke(context))
-                                continue;
-                        }
-                        if (logEntities.Count > 0)
+                            await this.SendToAsync(logEntities);
+                            foreach (var logEntity in logEntities)
+                            {
+                                var context = new LoggerHandlerContext(logEntityInfo);
+                                if (this.next != null)
+                                    await this.next.Invoke(context);
+                            }
                             logEntities.Clear();
+                        }
+                        if (this.messageQueue.Count <= 0)
+                            Thread.Sleep(100);
                     }
                     catch (Exception ex)
                     {

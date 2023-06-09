@@ -135,6 +135,7 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
                 sqlSegment.IsConstantValue = false;
                 sqlSegment.TableSegment = tableSegment;
                 sqlSegment.FromMember = memberMapper.Member;
+                sqlSegment.MemberMapper = memberMapper;
                 sqlSegment.Value = fieldName;
                 return sqlSegment;
             }
@@ -155,10 +156,10 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
         sqlSegment = this.Evaluate(sqlSegment);
         this.ConvertTo(sqlSegment);
 
-        //只有变量做参数化
-        if (sqlSegment.IsParameterized || this.isParameterized)
-            return this.ToParameter(sqlSegment);
-
+        //只有变量做参数化, TODO:去掉
+        //if (sqlSegment.IsParameterized || this.isParameterized)
+        //    return this.ToParameter(sqlSegment);
+		sqlSegment.IsConstantValue
         return sqlSegment;
     }
     public override SqlSegment VisitNew(SqlSegment sqlSegment)
