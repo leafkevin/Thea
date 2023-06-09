@@ -26,10 +26,9 @@ public class TheaLogAlarmMiddleware
     }
     public async Task Invoke(LoggerHandlerContext context)
     {
-        var logEntityInfo = context.LogEntity;
-        if (logEntityInfo == null) return;
-        try
+        if (context.LogEntity != null)
         {
+            var logEntityInfo = context.LogEntity;
             if (logEntityInfo.LogLevel >= LogLevel.Warning)
             {
                 var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.UserId, logEntityInfo.ApiUrl, logEntityInfo.Body);
@@ -41,27 +40,34 @@ public class TheaLogAlarmMiddleware
                         FiredTimes = 1
                     });
                     this.Build(logEntityInfo, alarmInfo);
-                    string senceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
-                    await this.alarmService.PostAsync(senceKey, alarmInfo.Header, alarmInfo.Content);
+                    alarmInfo.SenceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
+                    await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
                 }
                 else
                 {
-                    if (DateTime.Now - alarmInfo.CreatedAt >= TimeSpan.FromMinutes(10))
+                    if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
                     {
-                        string senceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
-                        await this.alarmService.PostAsync(senceKey, alarmInfo.Header, alarmInfo.Content);
+                        await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
                         alarmInfo.CreatedAt = DateTime.Now;
                         alarmInfo.FiredTimes = 1;
                     }
                     this.Build(logEntityInfo, alarmInfo);
                 }
             }
-            await this.next(context);
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine(ex);
+            foreach (var alarmInfo in this.alarmInfos.Values)
+            {
+                if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
+                {
+                    await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
+                    alarmInfo.CreatedAt = DateTime.Now;
+                    alarmInfo.FiredTimes = 1;
+                }
+            }
         }
+        await this.next(context);
     }
     private void Build(LogEntity logEntityInfo, AlarmInfo alarmInfo)
     {
@@ -92,6 +98,7 @@ public class TheaLogAlarmMiddleware
     }
     class AlarmInfo
     {
+        public string SenceKey { get; set; }
         public DateTime CreatedAt { get; set; }
         public int FiredTimes { get; set; }
         public string Header { get; set; }
