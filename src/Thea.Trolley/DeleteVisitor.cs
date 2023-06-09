@@ -156,10 +156,13 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
         sqlSegment = this.Evaluate(sqlSegment);
         this.ConvertTo(sqlSegment);
 
-        //只有变量做参数化, TODO:去掉
+        //只有变量做参数化
         //if (sqlSegment.IsParameterized || this.isParameterized)
         //    return this.ToParameter(sqlSegment);
+        sqlSegment.IsConstantValue = false;
         sqlSegment.IsVariable = true;
+        sqlSegment.IsExpression = false;
+        sqlSegment.IsMethodCall = false;
         return sqlSegment;
     }
     public override SqlSegment VisitNew(SqlSegment sqlSegment)
