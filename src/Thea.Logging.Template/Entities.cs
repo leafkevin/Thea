@@ -2,7 +2,7 @@
 
 namespace Thea.Logging.Template;
 
-class OperationLog
+class TemplateLog
 {
     public string Id { get; set; }
     public int TenantId { get; set; }

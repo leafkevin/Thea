@@ -19,18 +19,18 @@ class ModelConfiguration : IModelConfiguration
             f.Member(t => t.Template).Field(nameof(LogTemplate.Template)).NativeDbType(253);
             f.Member(t => t.ReviseTime).Field(nameof(LogTemplate.ReviseTime)).NativeDbType(12);
         });
-        builder.Entity<OperationLog>(f =>
+        builder.Entity<TemplateLog>(f =>
         {
-            f.ToTable("sys_operation_log").Key(t => t.Id);
-            f.Member(t => t.Id).Field(nameof(OperationLog.Id)).NativeDbType(253);
-            f.Member(t => t.TenantId).Field(nameof(OperationLog.TenantId)).NativeDbType(3);
-            f.Member(t => t.Category).Field(nameof(OperationLog.Category)).NativeDbType(253);
-            f.Member(t => t.UserId).Field(nameof(OperationLog.UserId)).NativeDbType(253);
-            f.Member(t => t.ApiUrl).Field(nameof(OperationLog.ApiUrl)).NativeDbType(253);
-            f.Member(t => t.Tag).Field(nameof(OperationLog.Tag)).NativeDbType(253);
-            f.Member(t => t.Body).Field(nameof(OperationLog.Body)).NativeDbType(253);
-            f.Member(t => t.ClientIp).Field(nameof(OperationLog.ClientIp)).NativeDbType(253);
-            f.Member(t => t.CreatedAt).Field(nameof(OperationLog.CreatedAt)).NativeDbType(12);
+            f.ToTable("sys_template_log").Key(t => t.Id);
+            f.Member(t => t.Id).Field(nameof(TemplateLog.Id)).NativeDbType(253);
+            f.Member(t => t.TenantId).Field(nameof(TemplateLog.TenantId)).NativeDbType(3);
+            f.Member(t => t.Category).Field(nameof(TemplateLog.Category)).NativeDbType(253);
+            f.Member(t => t.UserId).Field(nameof(TemplateLog.UserId)).NativeDbType(253);
+            f.Member(t => t.ApiUrl).Field(nameof(TemplateLog.ApiUrl)).NativeDbType(253);
+            f.Member(t => t.Tag).Field(nameof(TemplateLog.Tag)).NativeDbType(253);
+            f.Member(t => t.Body).Field(nameof(TemplateLog.Body)).NativeDbType(253);
+            f.Member(t => t.ClientIp).Field(nameof(TemplateLog.ClientIp)).NativeDbType(253);
+            f.Member(t => t.CreatedAt).Field(nameof(TemplateLog.CreatedAt)).NativeDbType(12);
         });
     }
 }

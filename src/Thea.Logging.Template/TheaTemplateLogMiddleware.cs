@@ -16,7 +16,7 @@ public class TheaTemplateLogMiddleware
     private readonly LoggerHandlerDelegate next;
     private DateTime lastTime = DateTime.MinValue;
     private readonly Dictionary<string, LogTemplate> logTemplates = new();
-    private readonly List<OperationLog> logs = new();
+    private readonly List<TemplateLog> logs = new();
 
     public TheaTemplateLogMiddleware(LoggerHandlerDelegate next, IOrmDbFactory dbFactory, IJwtTokenService tokenService, ILogger<TheaTemplateLogMiddleware> logger)
     {
@@ -69,7 +69,7 @@ public class TheaTemplateLogMiddleware
 
                         var body = logTemplate.Template.Replace("{USERID}", userId)
                             .Replace("{USERNAME}", userName);
-                        this.logs.Add(new OperationLog
+                        this.logs.Add(new TemplateLog
                         {
                             Id = logEntityInfo.Id,
                             UserId = userId,
@@ -89,7 +89,7 @@ public class TheaTemplateLogMiddleware
                 if (this.logs.Count > 0)
                 {
                     using var repository = this.dbFactory.Create();
-                    await repository.CreateAsync<OperationLog>(this.logs);
+                    await repository.CreateAsync<TemplateLog>(this.logs);
                     this.logs.Clear();
                 }
                 if (DateTime.Now.Subtract(this.lastTime) > TimeSpan.FromMinutes(5))

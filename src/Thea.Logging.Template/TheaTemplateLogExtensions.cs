@@ -1,9 +1,8 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
-using Thea.Logging.Template;
 using Thea.Orm;
 
-namespace Thea.Logging.Alarm;
+namespace Thea.Logging.Template;
 
 public static class TheaTemplateLogExtensions
 {
