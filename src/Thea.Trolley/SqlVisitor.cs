@@ -162,7 +162,7 @@ public class SqlVisitor : ISqlVisitor
                     sqlSegment.TableSegment.Mapper ??= this.mapProvider.GetEntityMap(sqlSegment.TableSegment.EntityType);
                     var memberMapper = sqlSegment.TableSegment.Mapper.GetMemberMap(sqlSegment.FromMember.Name);
                     if (this.OrmProvider.MapDefaultType(memberMapper.NativeDbType) != sqlSegment.TargetType)
-                        sqlSegment.Value = this.OrmProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment, sqlSegment.IsVariable));
+                        sqlSegment.Value = this.OrmProvider.CastTo(sqlSegment.TargetType, this.GetQuotedValue(sqlSegment));
                     if (sqlSegment.Type != sqlSegment.TargetType)
                         sqlSegment.Type = sqlSegment.TargetType;
                 }

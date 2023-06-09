@@ -629,6 +629,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, propMapper.NativeDbType, propMapper, this.ormProvider, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
+            if (columnIndex == 0)
+                throw new Exception("没有设置任何可以更新的字段");
             columnIndex = 0;
             blockBodies.Add(Expression.Call(builderExpr, methodInfo2, Expression.Constant(" WHERE ")));
             foreach (var keyMapper in entityMapper.KeyMembers)
@@ -696,6 +698,8 @@ class UpdateSet<TEntity> : IUpdateSet<TEntity>
                 RepositoryHelper.AddParameter(commandExpr, ormProviderExpr, parameterNameExpr, typedParameterExpr, false, propMapper.NativeDbType, propMapper, this.ormProvider, localParameters, blockParameters, blockBodies);
                 columnIndex++;
             }
+            if (columnIndex == 0)
+                throw new Exception("没有设置任何可以更新的字段");
             columnIndex = 0;
             sqlBuilder.Append(" WHERE ");
             foreach (var keyMapper in entityMapper.KeyMembers)

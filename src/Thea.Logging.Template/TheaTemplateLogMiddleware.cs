@@ -16,6 +16,7 @@ public class TheaTemplateLogMiddleware
     private readonly LoggerHandlerDelegate next;
     private DateTime lastTime = DateTime.MinValue;
     private readonly Dictionary<string, LogTemplate> logTemplates = new();
+    private readonly List<OperationLog> logs = new();
 
     public TheaTemplateLogMiddleware(LoggerHandlerDelegate next, IOrmDbFactory dbFactory, IJwtTokenService tokenService, ILogger<TheaTemplateLogMiddleware> logger)
     {
@@ -25,72 +26,77 @@ public class TheaTemplateLogMiddleware
     }
     public async Task Invoke(LoggerHandlerContext context)
     {
-        if (context.LogEntity == null) return;
         try
         {
-            if (DateTime.Now.Subtract(this.lastTime) > TimeSpan.FromMinutes(5))
+            if (context.LogEntity != null)
             {
-                await this.Initialize();
-                this.lastTime = DateTime.Now;
-            }
-            var logEntityInfo = context.LogEntity;
-            var logs = new List<OperationLog>();
-            foreach (var logTemplate in logTemplates.Values)
-            {
-                if (!string.IsNullOrEmpty(logEntityInfo.ApiUrl)
-                    && logEntityInfo.ApiUrl.ToLower().Contains(logTemplate.ApiUrl.ToLower())
-                    && (logTemplate.TenantId == 0 || logTemplate.TenantId == logEntityInfo.TenantId))
+                var logEntityInfo = context.LogEntity;
+                foreach (var logTemplate in logTemplates.Values)
                 {
-                    string tagValue = null;
-                    var tenantId = logEntityInfo.TenantId;
-                    string userId = logEntityInfo.UserId;
-                    string userName = logEntityInfo.UserName;
-                    switch (logTemplate.TagFrom)
+                    if (!string.IsNullOrEmpty(logEntityInfo.ApiUrl)
+                        && logEntityInfo.ApiUrl.ToLower().Contains(logTemplate.ApiUrl.ToLower())
+                        && (logTemplate.TenantId == 0 || logTemplate.TenantId == logEntityInfo.TenantId))
                     {
-                        case "AuthToken":
-                            if (!string.IsNullOrEmpty(logTemplate.TagRegex))
-                            {
-                                tagValue = Regex.Replace(logEntityInfo.Response, logTemplate.TagRegex, "${data}");
-                                if (this.tokenService.ReadToken(tagValue, out var claims))
+                        string tagValue = null;
+                        var tenantId = logEntityInfo.TenantId;
+                        string userId = logEntityInfo.UserId;
+                        string userName = logEntityInfo.UserName;
+                        switch (logTemplate.TagFrom)
+                        {
+                            case "AuthToken":
+                                if (!string.IsNullOrEmpty(logTemplate.TagRegex))
                                 {
-                                    userId = claims.Find(f => f.Type == "sub")?.Value;
-                                    userName = claims.Find(f => f.Type == "name")?.Value;
-                                    if (int.TryParse(claims.Find(f => f.Type == "tenant")?.Value, out var iTenantId))
-                                        tenantId = iTenantId;
+                                    tagValue = Regex.Replace(logEntityInfo.Response, logTemplate.TagRegex, "${data}");
+                                    if (this.tokenService.ReadToken(tagValue, out var claims))
+                                    {
+                                        userId = claims.Find(f => f.Type == "sub")?.Value;
+                                        userName = claims.Find(f => f.Type == "name")?.Value;
+                                        if (int.TryParse(claims.Find(f => f.Type == "tenant")?.Value, out var iTenantId))
+                                            tenantId = iTenantId;
+                                    }
                                 }
-                            }
-                            tagValue = userId;
-                            break;
-                        case "Request":
-                            tagValue = Regex.Replace(logEntityInfo.Parameters, logTemplate.TagRegex, "${data}");
-                            break;
-                        case "Response":
-                            tagValue = Regex.Replace(logEntityInfo.Response, logTemplate.TagRegex, "${data}");
-                            break;
-                    }
-                    if (string.IsNullOrEmpty(tagValue))
-                        continue;
+                                tagValue = userId;
+                                break;
+                            case "Request":
+                                tagValue = Regex.Replace(logEntityInfo.Parameters, logTemplate.TagRegex, "${data}");
+                                break;
+                            case "Response":
+                                tagValue = Regex.Replace(logEntityInfo.Response, logTemplate.TagRegex, "${data}");
+                                break;
+                        }
+                        if (string.IsNullOrEmpty(tagValue))
+                            continue;
 
-                    var body = logTemplate.Template.Replace("{USERID}", userId)
-                        .Replace("{USERNAME}", userName);
-                    logs.Add(new OperationLog
-                    {
-                        Id = logEntityInfo.Id,
-                        UserId = userId,
-                        ApiUrl = logEntityInfo.ApiUrl,
-                        Category = logTemplate.Category,
-                        TenantId = tenantId.Value,
-                        Tag = tagValue,
-                        Body = body,
-                        ClientIp = logEntityInfo.ClientIp,
-                        CreatedAt = logEntityInfo.CreatedAt
-                    });
+                        var body = logTemplate.Template.Replace("{USERID}", userId)
+                            .Replace("{USERNAME}", userName);
+                        this.logs.Add(new OperationLog
+                        {
+                            Id = logEntityInfo.Id,
+                            UserId = userId,
+                            ApiUrl = logEntityInfo.ApiUrl,
+                            Category = logTemplate.Category,
+                            TenantId = tenantId.Value,
+                            Tag = tagValue,
+                            Body = body,
+                            ClientIp = logEntityInfo.ClientIp,
+                            CreatedAt = logEntityInfo.CreatedAt
+                        });
+                    }
                 }
             }
-            if (logs.Count > 0)
+            else
             {
-                using var repository = this.dbFactory.Create();
-                await repository.CreateAsync<OperationLog>(logs);
+                if (this.logs.Count > 0)
+                {
+                    using var repository = this.dbFactory.Create();
+                    await repository.CreateAsync<OperationLog>(this.logs);
+                    this.logs.Clear();
+                }
+                if (DateTime.Now.Subtract(this.lastTime) > TimeSpan.FromMinutes(5))
+                {
+                    await this.Initialize();
+                    this.lastTime = DateTime.Now;
+                }
             }
             await this.next(context);
         }
