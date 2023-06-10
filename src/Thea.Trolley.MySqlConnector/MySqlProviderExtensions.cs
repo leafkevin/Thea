@@ -1,7 +1,7 @@
 ﻿using MySqlConnector;
 using Thea.Orm;
 
-namespace Thea.Trolley.SqlServer;
+namespace Thea.Trolley.MySqlConnector;
 
 public static class MySqlProviderExtensions
 {

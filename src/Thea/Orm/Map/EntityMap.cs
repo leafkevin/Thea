@@ -74,6 +74,7 @@ public class EntityMap
     }
     public void Build(IOrmProvider ormProvider)
     {
+        if (this.isBuild) return;
         if (string.IsNullOrEmpty(this.TableName))
             this.TableName = this.EntityType.Name;
 
@@ -125,6 +126,7 @@ public class EntityMap
                 }
             }
         }
+        this.isBuild = true;
     }
     public static EntityMap CreateDefaultMap(Type entityType)
     {
