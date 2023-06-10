@@ -35,7 +35,7 @@ partial class SqlServerProvider
                     methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                     {
                         args[0] = visitor.VisitAndDeferred(args[0]);
-                        if (args[0].IsConstantValue)
+                        if (args[0].IsConstant)
                             return args[0].Change(this.GetQuotedValue(methodCallExpr.Type, args[0]));
 
                         target.Merge(args[0]);

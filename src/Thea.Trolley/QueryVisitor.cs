@@ -656,7 +656,7 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
                 return new SqlSegment
                 {
                     HasField = true,
-                    IsConstantValue = false,
+                    IsConstant = false,
                     TableSegment = tableSegment,
                     MemberType = ReaderFieldType.AnonymousObject,
                     FromMember = memberExpr.Member,
@@ -720,7 +720,7 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
                         return new SqlSegment
                         {
                             HasField = true,
-                            IsConstantValue = false,
+                            IsConstant = false,
                             TableSegment = tableSegment,
                             MemberType = readerField.FieldType,
                             FromMember = readerField.FromMember,
@@ -786,7 +786,7 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
                                     fromSegment.IsUsed = true;
 
                                 sqlSegment.HasField = true;
-                                sqlSegment.IsConstantValue = false;
+                                sqlSegment.IsConstant = false;
                                 sqlSegment.TableSegment = fromSegment;
                                 sqlSegment.MemberType = ReaderFieldType.Field;
                                 sqlSegment.FromMember = memberMapper.Member;
@@ -807,7 +807,7 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
                             readerField.TableSegment.IsUsed = true;
 
                         sqlSegment.HasField = true;
-                        sqlSegment.IsConstantValue = false;
+                        sqlSegment.IsConstant = false;
                         sqlSegment.TableSegment = readerField.TableSegment;
                         sqlSegment.MemberType = ReaderFieldType.Field;
                         sqlSegment.FromMember = readerField.FromMember;
@@ -859,7 +859,7 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
                         tableSegment.IsUsed = true;
 
                     sqlSegment.HasField = true;
-                    sqlSegment.IsConstantValue = false;
+                    sqlSegment.IsConstant = false;
                     sqlSegment.TableSegment = tableSegment;
                     sqlSegment.MemberType = ReaderFieldType.Field;
                     sqlSegment.FromMember = memberInfo;
@@ -880,16 +880,12 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
         //private Order order; Where(f=>f.OrderId==this.Order.Id); this.Order.Id
         //var orderId=10; Select(f=>new {OrderId=orderId,...}
         //Select(f=>new {OrderId=this.Order.Id, ...}
-        sqlSegment = this.Evaluate(sqlSegment);
+        sqlSegment.Change(this.Evaluate(sqlSegment), false, false, false);
 
-        //变量为数组或是IEnumerable时，变为参数，方法Sql.In，Contains无法继续解析，需要去掉参数化，在最后SQL执行前，变为参数
-        //if (sqlSegment.IsParameterized || this.isParameterized)
-        //    return this.ToParameter(this.ConvertTo(sqlSegment));
-        sqlSegment.IsConstantValue = false;
+        //当变量为数组或是IEnumerable时，此处变为参数，方法Sql.In，Contains无法继续解析
+        //这里不做参数化，后面统一走参数化处理，在二元操作表达式解析时做参数化处理
         sqlSegment.IsVariable = true;
-        sqlSegment.IsExpression = false;
-        sqlSegment.IsMethodCall = false;
-        return this.ConvertTo(sqlSegment);
+        return sqlSegment;
     }
     public virtual TableSegment InitTableAlias(LambdaExpression lambdaExpr)
     {

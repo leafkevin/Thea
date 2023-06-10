@@ -52,7 +52,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Date);
 
                         return targetSegment.Change($"CONVERT(CHAR(10),{this.GetQuotedValue(targetSegment)},120)", false, false, true);
@@ -63,7 +63,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Day);
 
                         return targetSegment.Change($"DATEPART(DAY,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -74,7 +74,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).DayOfWeek);
 
                         return targetSegment.Change($"(DATEPART(WEEKDAY,{this.GetQuotedValue(targetSegment)})-1)", false, false, true);
@@ -85,7 +85,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).DayOfYear);
 
                         return targetSegment.Change($"DATEPART(DAYOFYEAR,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -96,7 +96,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Hour);
 
                         return targetSegment.Change($"DATEPART(HOUR,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -107,7 +107,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Kind);
                         throw new NotSupportedException("不支持的成员访问，DateTime只支持常量的Kind成员访问");
                     });
@@ -117,7 +117,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Millisecond);
 
                         return targetSegment.Change($"(DATEPART(MILLISECOND,{this.GetQuotedValue(targetSegment)})/1000)", false, false, true);
@@ -128,7 +128,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Minute);
 
                         return targetSegment.Change($"DATEPART(MINUTE,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -139,7 +139,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Month);
 
                         return targetSegment.Change($"DATEPART(MONTH,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -150,7 +150,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Second);
 
                         return targetSegment.Change($"DATEPART(SECOND,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -161,7 +161,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Ticks);
 
                         return targetSegment.Change($"(CAST(DATEDIFF(SECOND,'1970-01-01',{this.GetQuotedValue(targetSegment)}) AS BIGINT)*10000000+621355968000000000)", false, false, true);
@@ -172,7 +172,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).TimeOfDay);
 
                         return targetSegment.Change($"DATEDIFF(SECOND,CONVERT(CHAR(10),{this.GetQuotedValue(targetSegment)},120),{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -183,7 +183,7 @@ partial class SqlServerProvider
                     memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                     {
                         var targetSegment = visitor.VisitAndDeferred(target);
-                        if (targetSegment.IsConstantValue)
+                        if (targetSegment.IsConstant)
                             return targetSegment.Change(((DateTime)targetSegment.Value).Year);
 
                         return targetSegment.Change($"DATEPART(YEAR,{this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -211,7 +211,7 @@ partial class SqlServerProvider
                         var leftSegment = visitor.VisitAndDeferred(args[0]);
                         var rightSegment = visitor.VisitAndDeferred(args[1]);
 
-                        if (leftSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (leftSegment.IsConstant && rightSegment.IsConstant)
                             return leftSegment.Change(DateTime.DaysInMonth(Convert.ToInt32(leftSegment.Value), Convert.ToInt32(rightSegment.Value)));
 
                         leftSegment.Merge(rightSegment);
@@ -223,7 +223,7 @@ partial class SqlServerProvider
                     methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                     {
                         var valueSegment = visitor.VisitAndDeferred(args[0]);
-                        if (valueSegment.IsConstantValue)
+                        if (valueSegment.IsConstant)
                             return valueSegment.Change(DateTime.IsLeapYear(Convert.ToInt32(valueSegment.Value)));
 
                         return args[0].Change($"(({valueSegment})%4=0 AND ({valueSegment})%100<>0 OR ({valueSegment})%400=0)", false, false, true);
@@ -235,7 +235,7 @@ partial class SqlServerProvider
                     methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                     {
                         var valueSegment = visitor.VisitAndDeferred(args[0]);
-                        if (valueSegment.IsConstantValue)
+                        if (valueSegment.IsConstant)
                             return valueSegment.Change(DateTime.Parse(valueSegment.ToString()));
 
                         return valueSegment.Change($"CAST({this.GetQuotedValue(valueSegment)} AS DATETIME)", false, false, true);
@@ -252,7 +252,7 @@ partial class SqlServerProvider
                         var formatSegment = visitor.VisitAndDeferred(args[1]);
                         var providerSegment = visitor.VisitAndDeferred(args[2]);
 
-                        if (valueSegment.IsConstantValue && formatSegment.IsConstantValue && providerSegment.IsConstantValue)
+                        if (valueSegment.IsConstant && formatSegment.IsConstant && providerSegment.IsConstant)
                             return valueSegment.Change(DateTime.ParseExact(valueSegment.ToString(), formatSegment.ToString(), (IFormatProvider)providerSegment.Value));
 
                         valueSegment.Merge(formatSegment);
@@ -285,7 +285,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).Add((TimeSpan)rightSegment.Value));
 
                         targetSegment.Merge(rightSegment);
@@ -299,7 +299,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddDays(Convert.ToDouble(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -313,7 +313,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddHours(Convert.ToDouble(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -327,7 +327,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddMilliseconds(Convert.ToDouble(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -341,7 +341,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddMinutes(Convert.ToDouble(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -355,7 +355,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddMonths(Convert.ToInt32(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -369,7 +369,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddSeconds(Convert.ToDouble(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -383,12 +383,12 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddTicks(Convert.ToInt64(rightSegment.Value)));
                         targetSegment.Merge(rightSegment);
 
                         double milliSeconds = 0;
-                        if (rightSegment.IsConstantValue)
+                        if (rightSegment.IsConstant)
                         {
                             milliSeconds = TimeSpan.FromTicks(Convert.ToInt64(rightSegment.Value)).TotalMilliseconds;
                             return targetSegment.Change($"DATEADD(MS,{milliSeconds},{this.GetQuotedValue(targetSegment)})", false, true);
@@ -403,7 +403,7 @@ partial class SqlServerProvider
                         var targetSegment = visitor.VisitAndDeferred(target);
                         var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                        if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                        if (targetSegment.IsConstant && rightSegment.IsConstant)
                             return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).AddYears(Convert.ToInt32(rightSegment.Value)));
 
                         targetSegment.Merge(rightSegment);
@@ -419,7 +419,7 @@ partial class SqlServerProvider
                             var targetSegment = visitor.VisitAndDeferred(target);
                             var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                            if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                            if (targetSegment.IsConstant && rightSegment.IsConstant)
                                 return targetSegment.Change(this.GetQuotedValue(Convert.ToDateTime(targetSegment.Value).Subtract(Convert.ToDateTime(rightSegment.Value))));
 
                             targetSegment.Merge(rightSegment);
@@ -434,7 +434,7 @@ partial class SqlServerProvider
                             var targetSegment = visitor.VisitAndDeferred(target);
                             var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                            if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                            if (targetSegment.IsConstant && rightSegment.IsConstant)
                                 return targetSegment.Change(Convert.ToDateTime(targetSegment.Value).Subtract((TimeSpan)rightSegment.Value));
                             targetSegment.Merge(rightSegment);
 
@@ -471,7 +471,7 @@ partial class SqlServerProvider
                         methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                         {
                             var targetSegment = visitor.VisitAndDeferred(target);
-                            if (targetSegment.IsConstantValue)
+                            if (targetSegment.IsConstant)
                                 return targetSegment.Change(this.GetQuotedValue(targetSegment));
 
                             return targetSegment.Change($"CONVERT(VARCHAR,{this.GetQuotedValue(targetSegment)},121)", false, false, true);
@@ -485,10 +485,10 @@ partial class SqlServerProvider
                             var targetSegment = visitor.VisitAndDeferred(target);
                             var rightSegment = visitor.VisitAndDeferred(args[0]);
 
-                            if (targetSegment.IsConstantValue && rightSegment.IsConstantValue)
+                            if (targetSegment.IsConstant && rightSegment.IsConstant)
                                 return targetSegment.Change(((DateTime)targetSegment.Value).ToString(rightSegment.ToString()));
 
-                            if (rightSegment.IsConstantValue)
+                            if (rightSegment.IsConstant)
                                 return targetSegment.Change($"FORMAT({this.GetQuotedValue(targetSegment)},{this.GetQuotedValue(rightSegment)})", false, false, true);
 
                             throw new NotSupportedException("DateTime类型暂时不支持非常量的格式化字符串");

@@ -32,7 +32,7 @@ partial class MySqlProvider
                 memberAccessSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target) =>
                 {
                     var targetSegment = visitor.VisitAndDeferred(target);
-                    if (targetSegment.IsConstantValue)
+                    if (targetSegment.IsConstant)
                         return targetSegment.Change(((string)targetSegment.Value).Length);
 
                     return targetSegment.Change($"CHAR_LENGTH({this.GetQuotedValue(targetSegment)})", false, false, true);
@@ -78,7 +78,7 @@ partial class MySqlProvider
                                 if (i == 0) resultSegment = sqlSegment;
                                 else resultSegment.Merge(sqlSegment);
 
-                                if (sqlSegment.IsConstantValue)
+                                if (sqlSegment.IsConstant)
                                     constBuilder.Append(sqlSegment.ToString());
                                 else
                                 {
@@ -136,7 +136,7 @@ partial class MySqlProvider
                                 if (i == 0) resultSegment = sqlSegment;
                                 else resultSegment.Merge(sqlSegment);
 
-                                if (sqlSegment.IsConstantValue)
+                                if (sqlSegment.IsConstant)
                                 {
                                     constBuilder.Append(sqlSegment.ToString());
                                     continue;
@@ -199,7 +199,7 @@ partial class MySqlProvider
                         {
                             var valueSegment = visitor.VisitAndDeferred(args[0]);
                             string targetAugment = null;
-                            if (valueSegment.IsConstantValue)
+                            if (valueSegment.IsConstant)
                                 targetAugment = this.GetQuotedValue(valueSegment.ToString());
                             else targetAugment = valueSegment.ToString();
                             return valueSegment.Change($"({targetAugment} IS NULL OR {targetAugment}='')", false, false, true);
@@ -214,7 +214,7 @@ partial class MySqlProvider
                         {
                             var targetSegment = visitor.VisitAndDeferred(args[0]);
                             string targetAugment = null;
-                            if (targetSegment.IsConstantValue)
+                            if (targetSegment.IsConstant)
                                 targetAugment = this.GetQuotedValue(targetSegment.ToString());
                             else targetAugment = targetSegment.ToString();
                             return targetSegment.Change($"({targetAugment} IS NULL OR {targetAugment}='' OR TRIM({targetAugment})='')", false, false, true);
@@ -230,11 +230,11 @@ partial class MySqlProvider
                             var separatorSegment = visitor.VisitAndDeferred(args[0]);
                             var valuesSegment = visitor.VisitAndDeferred(args[1]);
 
-                            if (separatorSegment.IsConstantValue && valuesSegment.IsConstantValue)
+                            if (separatorSegment.IsConstant && valuesSegment.IsConstant)
                                 return valuesSegment.Change(string.Join(separatorSegment.ToString(), valuesSegment.Value as List<SqlSegment>));
 
                             string separatorAugment = null;
-                            if (separatorSegment.IsConstantValue)
+                            if (separatorSegment.IsConstant)
                                 separatorAugment = this.GetQuotedValue(separatorSegment.ToString());
                             else separatorAugment = separatorSegment.ToString();
 
@@ -245,14 +245,14 @@ partial class MySqlProvider
                             {
                                 var strValue = sqlSegment.ToString();
 
-                                if (separatorSegment.IsConstantValue && constBuilder.Length > 0)
+                                if (separatorSegment.IsConstant && constBuilder.Length > 0)
                                     constBuilder.Append(separatorAugment);
-                                if (!separatorSegment.IsConstantValue && builder.Length > 0)
+                                if (!separatorSegment.IsConstant && builder.Length > 0)
                                     builder.Append(separatorAugment);
 
-                                if (sqlSegment.IsConstantValue)
+                                if (sqlSegment.IsConstant)
                                 {
-                                    if (separatorSegment.IsConstantValue && constBuilder.Length > 0)
+                                    if (separatorSegment.IsConstant && constBuilder.Length > 0)
                                         constBuilder.Append(separatorAugment);
                                     constBuilder.Append(strValue);
                                 }
@@ -296,11 +296,11 @@ partial class MySqlProvider
                             var index = visitor.Evaluate<int>(args[2].Expression);
                             var length = visitor.Evaluate<int>(args[3].Expression);
 
-                            if (separatorSegment.IsConstantValue && valuesSegment.IsConstantValue)
+                            if (separatorSegment.IsConstant && valuesSegment.IsConstant)
                                 return valuesSegment.Change(string.Join(separatorSegment.ToString(), valuesSegment.Value as List<SqlSegment>, index, length));
 
                             string separatorAugment = null;
-                            if (separatorSegment.IsConstantValue)
+                            if (separatorSegment.IsConstant)
                                 separatorAugment = this.GetQuotedValue(separatorSegment.ToString());
                             else separatorAugment = separatorSegment.ToString();
 
@@ -312,14 +312,14 @@ partial class MySqlProvider
                             {
                                 var strValue = sqlSegments[i].ToString();
 
-                                if (separatorSegment.IsConstantValue && constBuilder.Length > 0)
+                                if (separatorSegment.IsConstant && constBuilder.Length > 0)
                                     constBuilder.Append(separatorAugment);
-                                if (!separatorSegment.IsConstantValue && builder.Length > 0)
+                                if (!separatorSegment.IsConstant && builder.Length > 0)
                                     builder.Append(separatorAugment);
 
-                                if (sqlSegments[i].IsConstantValue)
+                                if (sqlSegments[i].IsConstant)
                                 {
-                                    if (separatorSegment.IsConstantValue && constBuilder.Length > 0)
+                                    if (separatorSegment.IsConstant && constBuilder.Length > 0)
                                         constBuilder.Append(separatorAugment);
                                     constBuilder.Append(strValue);
                                 }
@@ -405,7 +405,7 @@ partial class MySqlProvider
                             var rightSegment = visitor.VisitAndDeferred(args[0]);
 
                             string rightArgument = null;
-                            if (rightSegment.IsConstantValue)
+                            if (rightSegment.IsConstant)
                                 rightArgument = $"'%{rightSegment}%'";
                             else rightArgument = $"CONCAT('%',REPLACE({rightSegment},'%','\\%'),'%')";
 
@@ -583,7 +583,7 @@ partial class MySqlProvider
                             var rightSegment = visitor.VisitAndDeferred(args[0]);
 
                             string rightArgument = null;
-                            if (rightSegment.IsConstantValue)
+                            if (rightSegment.IsConstant)
                                 rightArgument = $"'{rightSegment}%'";
                             else rightArgument = $"CONCAT({rightSegment},'%')";
                             int notIndex = 0;
@@ -618,7 +618,7 @@ partial class MySqlProvider
                             var rightSegment = visitor.VisitAndDeferred(args[0]);
 
                             string rightArgument = null;
-                            if (rightSegment.IsConstantValue)
+                            if (rightSegment.IsConstant)
                                 rightArgument = $"'%{rightSegment}'";
                             else rightArgument = $"CONCAT('%',{rightSegment})";
                             int notIndex = 0;
@@ -653,7 +653,7 @@ partial class MySqlProvider
                             var indexSegment = visitor.VisitAndDeferred(args[0]);
                             var lengthSegment = visitor.VisitAndDeferred(args[1]);
 
-                            if (targetSegment.IsConstantValue && indexSegment.IsConstantValue && lengthSegment.IsConstantValue)
+                            if (targetSegment.IsConstant && indexSegment.IsConstant && lengthSegment.IsConstant)
                                 return targetSegment.Change(targetSegment.Value.ToString().Substring(Convert.ToInt32(indexSegment.Value), Convert.ToInt32(lengthSegment.Value)));
 
                             targetSegment.Merge(indexSegment);
@@ -669,7 +669,7 @@ partial class MySqlProvider
                             var targetSegment = visitor.VisitAndDeferred(target);
                             var indexSegment = visitor.VisitAndDeferred(args[0]);
 
-                            if (targetSegment.IsConstantValue && indexSegment.IsConstantValue)
+                            if (targetSegment.IsConstant && indexSegment.IsConstant)
                                 return targetSegment.Change(targetSegment.Value.ToString().Substring(Convert.ToInt32(indexSegment.Value)));
 
                             targetSegment.Merge(indexSegment);
@@ -692,7 +692,7 @@ partial class MySqlProvider
                             methodCallSqlFormatterCache.TryAdd(cacheKey, formatter = (visitor, target, deferExprs, args) =>
                             {
                                 var targetSegment = visitor.VisitAndDeferred(target);
-                                if (targetSegment.IsConstantValue)
+                                if (targetSegment.IsConstant)
                                     return targetSegment.Change(this.GetQuotedValue(targetSegment));
                                 return targetSegment.Change(this.CastTo(typeof(string), this.GetQuotedValue(targetSegment)), false, false, true);
                             });
@@ -724,7 +724,7 @@ partial class MySqlProvider
                             var valueSegment = visitor.VisitAndDeferred(args[0]);
                             var startIndexSegment = visitor.VisitAndDeferred(args[1]);
                             string startIndex = null;
-                            if (startIndexSegment.IsConstantValue)
+                            if (startIndexSegment.IsConstant)
                                 startIndex = $"{(int)startIndexSegment.Value + 1}";
                             else startIndex = $"{startIndexSegment}+1";
                             targetSegment.Merge(valueSegment);
