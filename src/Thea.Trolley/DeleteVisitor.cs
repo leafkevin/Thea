@@ -147,10 +147,13 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
         //private Order order; Where(f=>f.OrderId==this.Order.Id); this.Order.Id
         //var orderId=10; Select(f=>new {OrderId=orderId,...}
         //Select(f=>new {OrderId=this.Order.Id, ...}
-        sqlSegment.Change(this.Evaluate(sqlSegment), false, false, false);
+        this.Evaluate(sqlSegment);
 
         //这里不做参数化，后面统一走参数化处理
+        sqlSegment.IsConstant = false;
         sqlSegment.IsVariable = true;
+        sqlSegment.IsExpression = false;
+        sqlSegment.IsMethodCall = false;
         return sqlSegment;
     }
     public override SqlSegment VisitNew(SqlSegment sqlSegment)
@@ -212,7 +215,7 @@ public class DeleteVisitor : SqlVisitor, IDeleteVisitor
                 this.dbParameters.Add(dbParameter);
                 sqlSegment.Value = parameterName;
                 sqlSegment.IsParameter = true;
-				sqlSegment.IsVariable = false;
+                sqlSegment.IsVariable = false;
                 sqlSegment.IsConstant = false;
                 builder.Append(sqlSegment.Value.ToString());
             }

@@ -1112,7 +1112,7 @@ public class SqlVisitor : ISqlVisitor
         isNeedAlias = queryVisitor.IsNeedAlias;
         return result;
     }
-    public virtual string GetQuotedValue(object fieldValue, bool? isVariable = null, int? index = null)
+    public virtual string GetQuotedValue(object fieldValue, MemberMap memberMapper = null, bool? isVariable = null, int? index = null)
     {
         if (fieldValue is DBNull)
             return "NULL";
@@ -1134,7 +1134,11 @@ public class SqlVisitor : ISqlVisitor
                     parameterName = this.OrmProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
                 if (index.HasValue)
                     parameterName += index.ToString();
-                var dbParameter = this.CreateParameter(sqlSegment.MemberMapper, parameterName, sqlSegment.Value);
+                var myMemberMapper = sqlSegment.MemberMapper ?? memberMapper;
+                IDbDataParameter dbParameter = null;
+                if (myMemberMapper != null)
+                    dbParameter = this.CreateParameter(myMemberMapper, parameterName, sqlSegment.Value);
+                else dbParameter = this.OrmProvider.CreateParameter(parameterName, fieldValue);
                 this.dbParameters.Add(dbParameter);
                 return parameterName;
             }
@@ -1150,7 +1154,10 @@ public class SqlVisitor : ISqlVisitor
                 var parameterName = this.OrmProvider.ParameterPrefix + this.parameterPrefix + this.dbParameters.Count.ToString();
                 if (index.HasValue)
                     parameterName += index.ToString();
-                var dbParameter = this.OrmProvider.CreateParameter(parameterName, fieldValue);
+                IDbDataParameter dbParameter = null;
+                if (memberMapper != null)
+                    dbParameter = this.CreateParameter(memberMapper, parameterName, fieldValue);
+                else dbParameter = this.OrmProvider.CreateParameter(parameterName, fieldValue);
                 this.dbParameters.Add(dbParameter);
                 return parameterName;
             }
@@ -1185,7 +1192,7 @@ public class SqlVisitor : ISqlVisitor
         string strExpression = null;
         if ((this.isSelect && !sqlSegment.IsExpression)
             || (this.isWhere && !sqlSegment.IsExpression))
-            strExpression = $"{sqlSegment} {strOperator} {this.GetQuotedValue(deferredSegment)}";
+            strExpression = $"{sqlSegment} {strOperator} {this.GetQuotedValue(deferredSegment, sqlSegment.MemberMapper)}";
         else strExpression = $"{sqlSegment}";
 
         if (this.isSelect || (this.isWhere && !isExpectBooleanType))

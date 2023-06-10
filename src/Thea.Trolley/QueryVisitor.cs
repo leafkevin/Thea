@@ -880,11 +880,14 @@ public class QueryVisitor : SqlVisitor, IQueryVisitor
         //private Order order; Where(f=>f.OrderId==this.Order.Id); this.Order.Id
         //var orderId=10; Select(f=>new {OrderId=orderId,...}
         //Select(f=>new {OrderId=this.Order.Id, ...}
-        sqlSegment.Change(this.Evaluate(sqlSegment), false, false, false);
+        this.Evaluate(sqlSegment);
 
         //当变量为数组或是IEnumerable时，此处变为参数，方法Sql.In，Contains无法继续解析
         //这里不做参数化，后面统一走参数化处理，在二元操作表达式解析时做参数化处理
+        sqlSegment.IsConstant = false;
         sqlSegment.IsVariable = true;
+        sqlSegment.IsExpression = false;
+        sqlSegment.IsMethodCall = false;
         return sqlSegment;
     }
     public virtual TableSegment InitTableAlias(LambdaExpression lambdaExpr)

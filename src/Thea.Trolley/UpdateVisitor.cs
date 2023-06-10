@@ -502,10 +502,13 @@ public class UpdateVisitor : SqlVisitor, IUpdateVisitor
         //private Order order; Where(f=>f.OrderId==this.Order.Id); this.Order.Id
         //var orderId=10; Select(f=>new {OrderId=orderId,...}
         //Select(f=>new {OrderId=this.Order.Id, ...}
-        sqlSegment.Change(this.Evaluate(sqlSegment), false, false, false);
+        this.Evaluate(sqlSegment);
 
         //只有WithBy场景做参数化处理，这里不做参数化，后面统一走参数化处理 
+        sqlSegment.IsConstant = false;
         sqlSegment.IsVariable = true;
+        sqlSegment.IsExpression = false;
+        sqlSegment.IsMethodCall = false;
         return sqlSegment;
     }
     public override SqlSegment VisitNew(SqlSegment sqlSegment)

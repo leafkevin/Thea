@@ -24,7 +24,7 @@ public interface ISqlVisitor
     List<SqlSegment> VisitLogicBinaryExpr(Expression conditionExpr);
     SqlSegment Evaluate(SqlSegment sqlSegment);
     T Evaluate<T>(Expression expr);
-    string GetQuotedValue(object fieldValue, bool? isVariable = null, int? index = null);
+    string GetQuotedValue(object fieldValue, MemberMap memberMapper = null, bool? isVariable = null, int? index = null);
     IDbDataParameter CreateParameter(MemberMap memberMapper, string parameterName, object fieldValue);
     SqlSegment VisitSqlMethodCall(SqlSegment sqlSegment);
     bool IsStringConcatOperator(SqlSegment sqlSegment, out SqlSegment result);
