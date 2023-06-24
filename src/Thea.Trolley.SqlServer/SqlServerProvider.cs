@@ -119,7 +119,7 @@ public partial class SqlServerProvider : BaseOrmProvider
         return parameter;
     }
     public override IQueryVisitor NewQueryVisitor(string dbKey, IEntityMapProvider mapProvider, bool isParameterized = false, char tableAsStart = 'a', string parameterPrefix = "p")
-       => new SqlServerQueryVisitor(dbKey, this, mapProvider, isParameterized, tableAsStart, parameterPrefix);
+        => new SqlServerQueryVisitor(dbKey, this, mapProvider, isParameterized, tableAsStart, parameterPrefix);
     public override IUpdateVisitor NewUpdateVisitor(string dbKey, IEntityMapProvider mapProvider, Type entityType, bool isParameterized = false, char tableAsStart = 'a', string parameterPrefix = "p")
         => new SqlServerUpdateVisitor(dbKey, this, mapProvider, entityType, isParameterized, tableAsStart, parameterPrefix);
 
@@ -155,14 +155,6 @@ public partial class SqlServerProvider : BaseOrmProvider
         if (defaultMapTypes.TryGetValue(nativeDbType, out var result))
             return result;
         return typeof(object);
-    }
-    public override string GetQuotedValue(Type expectType, object value)
-    {
-        if (expectType == typeof(TimeSpan) && value is TimeSpan timeSpan)
-            return $"'{timeSpan.ToString("d\\ hh\\:mm\\:ss\\.fffffff")}'";
-        if (expectType == typeof(TimeOnly) && value is TimeOnly timeOnly)
-            return $"'{timeOnly.ToString("hh\\:mm\\:ss\\.fffffff")}'";
-        return base.GetQuotedValue(expectType, value);
     }
     public override string CastTo(Type type, object value)
         => $"CAST({value} AS {castTos[type]})";

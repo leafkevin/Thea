@@ -138,6 +138,16 @@ public class SqlSegment
             newSqlSegment.MemberMapper = this.MemberMapper;
         return newSqlSegment;
     }
+    public SqlSegment ToParameter(ISqlVisitor visitor)
+    {
+        if (this.IsVariable || (this.IsParameterized || visitor.IsParameterized) && this.IsConstant)
+        {
+            this.IsConstant = false;
+            this.IsVariable = false;
+            this.IsParameter = true;
+        }
+        return this;
+    }
     public void Push(DeferredExpr deferredExpr)
     {
         this.DeferredExprs ??= new();

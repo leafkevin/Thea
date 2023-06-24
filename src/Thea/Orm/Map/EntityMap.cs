@@ -8,6 +8,7 @@ namespace Thea.Orm;
 
 public class EntityMap
 {
+    private bool isBuild = false;
     private readonly ConcurrentDictionary<string, MemberMap> memberMaps = new();
     private List<MemberMap> memberMappers = new();
 
