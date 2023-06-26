@@ -58,7 +58,7 @@ namespace Thea.Logging
                                 {
                                     foreach (var logEntity in logEntities)
                                     {
-                                        var context = new LoggerHandlerContext(logEntityInfo);
+                                        var context = new LoggerHandlerContext(logEntity);
                                         await this.next.Invoke(context);
                                     }
                                     logEntities.Clear();
