@@ -33,6 +33,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Trolley.SqlServer", "T
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Logging.Template", "Thea.Logging.Template\Thea.Logging.Template.csproj", "{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Globalization", "Thea.Globalization\Thea.Globalization.csproj", "{789647EF-FCF5-42CA-9242-8EE2E19A869B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +89,10 @@ Global
 		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F2C26E05-40F2-4E49-8619-6B7F876BB1E2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{789647EF-FCF5-42CA-9242-8EE2E19A869B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{789647EF-FCF5-42CA-9242-8EE2E19A869B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{789647EF-FCF5-42CA-9242-8EE2E19A869B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{789647EF-FCF5-42CA-9242-8EE2E19A869B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
