@@ -54,6 +54,10 @@ public class SqlSegment
     /// </summary>
     public bool IsParameterized { get; set; }
     public bool IsArray { get; set; }
+    /// <summary>
+    /// 是否是字段类型
+    /// </summary>
+    public bool IsFieldType { get; set; }
     public Type Type
     {
         get
@@ -96,6 +100,8 @@ public class SqlSegment
     /// <returns>返回合并后的结果，并赋值到当前sqlSegment中</returns>
     public SqlSegment Merge(SqlSegment rightSegment)
     {
+        this.IsConstant = this.IsConstant && rightSegment.IsConstant;
+        this.IsVariable = this.IsVariable || rightSegment.IsVariable;
         this.HasField = this.HasField || rightSegment.HasField;
         this.IsParameter = this.IsParameter || rightSegment.IsParameter;
         return this;
@@ -134,7 +140,7 @@ public class SqlSegment
             ExpectType = this.ExpectType,
             TargetType = this.TargetType
         };
-        if (this.HasField && !this.IsExpression && !this.IsMethodCall)
+        if (this.HasField && (!this.IsExpression && !this.IsMethodCall || this.IsFieldType))
             newSqlSegment.MemberMapper = this.MemberMapper;
         return newSqlSegment;
     }

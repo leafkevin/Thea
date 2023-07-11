@@ -96,6 +96,7 @@ partial class MySqlProvider
                                     builder.Append(',');
                                 sqlSegment.Value = sqlSegment.Value.ToString();
                                 builder.Append(visitor.Change(sqlSegment));
+                                resultSegment.IsParameter = resultSegment.IsParameter || sqlSegment.IsParameter;
                             }
                             if (builder.Length > 0)
                             {
@@ -106,9 +107,9 @@ partial class MySqlProvider
                                 }
                                 builder.Insert(0, "CONCAT(");
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -152,6 +153,7 @@ partial class MySqlProvider
                                     builder.Append(',');
                                 sqlSegment.Value = sqlSegment.Value.ToString();
                                 builder.Append(visitor.Change(sqlSegment));
+                                resultSegment.IsParameter = resultSegment.IsParameter || sqlSegment.IsParameter;
                             }
 
                             if (builder.Length > 0)
@@ -163,9 +165,9 @@ partial class MySqlProvider
                                 }
                                 builder.Insert(0, "CONCAT(");
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -254,6 +256,7 @@ partial class MySqlProvider
                                     builder.Append(',');
                                     elementSegment.Value = elementSegment.Value.ToString();
                                     builder.Append(visitor.Change(elementSegment));
+                                    resultSegment.IsParameter = resultSegment.IsParameter || elementSegment.IsParameter;
                                 }
                                 else constBuilder.Append(item.ToString());
                                 index++;
@@ -267,9 +270,9 @@ partial class MySqlProvider
                                 }
                                 builder.Insert(0, "CONCAT(");
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -321,6 +324,7 @@ partial class MySqlProvider
                                     builder.Append(',');
                                     elementSegment.Value = elementSegment.Value.ToString();
                                     builder.Append(visitor.Change(elementSegment));
+                                    resultSegment.IsParameter = resultSegment.IsParameter || elementSegment.IsParameter;
                                 }
                                 else constBuilder.Append(item.ToString());
                                 index++;
@@ -334,9 +338,9 @@ partial class MySqlProvider
                                 }
                                 builder.Insert(0, "CONCAT(");
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -762,6 +766,7 @@ partial class MySqlProvider
                                     return visitor.Change(targetSegment, targetSegment.Value.ToString());
 
                                 var targetArgument = this.GetQuotedValue(visitor.Change(targetSegment));
+                                targetSegment.Type = methodInfo.ReturnType;
                                 return visitor.Change(targetSegment, this.CastTo(typeof(string), targetArgument), false, true);
                             });
                             result = true;

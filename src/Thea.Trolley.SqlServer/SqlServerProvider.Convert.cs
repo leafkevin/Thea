@@ -47,6 +47,7 @@ partial class SqlServerProvider
                                 methodCallCache.TryAdd(cacheKey, toValueDelegate);
                             }
                             var toValue = toValueDelegate as Func<object, object>;
+                            args0Segment.Type = methodInfo.ReturnType;
                             args0Segment.Value = toValue.Invoke(args0Segment.Value);
                             return visitor.Change(args0Segment);
                         }

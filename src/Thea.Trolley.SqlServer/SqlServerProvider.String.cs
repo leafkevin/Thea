@@ -94,9 +94,11 @@ partial class SqlServerProvider
                                 }
                                 if (builder.Length > 0)
                                     builder.Append('+');
-                                sqlSegment.Value = sqlSegment.Value.ToString();
+                                if (sqlSegment.Type != typeof(string) && (sqlSegment.HasField || sqlSegment.IsExpression || sqlSegment.IsMethodCall))
+                                    sqlSegment.Value = this.CastTo(typeof(string), sqlSegment.Value);
+                                else sqlSegment.Value = sqlSegment.Value.ToString();
                                 builder.Append(visitor.Change(sqlSegment));
-
+                                resultSegment.IsParameter = resultSegment.IsParameter || sqlSegment.IsParameter;
                             }
                             if (builder.Length > 0)
                             {
@@ -107,9 +109,9 @@ partial class SqlServerProvider
                                 }
                                 builder.Insert(0, '(');
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -151,8 +153,11 @@ partial class SqlServerProvider
                                 }
                                 if (builder.Length > 0)
                                     builder.Append('+');
-                                sqlSegment.Value = sqlSegment.Value.ToString();
+                                if (sqlSegment.Type != typeof(string) && (sqlSegment.HasField || sqlSegment.IsExpression || sqlSegment.IsMethodCall))
+                                    sqlSegment.Value = this.CastTo(typeof(string), sqlSegment.Value);
+                                else sqlSegment.Value = sqlSegment.Value.ToString();
                                 builder.Append(visitor.Change(sqlSegment));
+                                resultSegment.IsParameter = resultSegment.IsParameter || sqlSegment.IsParameter;
                             }
 
                             if (builder.Length > 0)
@@ -164,9 +169,9 @@ partial class SqlServerProvider
                                 }
                                 builder.Insert(0, '(');
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -253,8 +258,11 @@ partial class SqlServerProvider
                                         constBuilder.Clear();
                                     }
                                     builder.Append('+');
-                                    elementSegment.Value = elementSegment.Value.ToString();
+                                    if (elementSegment.Type != typeof(string) && (elementSegment.HasField || elementSegment.IsExpression || elementSegment.IsMethodCall))
+                                        elementSegment.Value = this.CastTo(typeof(string), elementSegment.Value);
+                                    else elementSegment.Value = elementSegment.Value.ToString();
                                     builder.Append(visitor.Change(elementSegment));
+                                    resultSegment.IsParameter = resultSegment.IsParameter || elementSegment.IsParameter;
                                 }
                                 else constBuilder.Append(item.ToString());
                                 index++;
@@ -268,9 +276,9 @@ partial class SqlServerProvider
                                 }
                                 builder.Insert(0, "(");
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -320,8 +328,11 @@ partial class SqlServerProvider
                                         constBuilder.Clear();
                                     }
                                     builder.Append('+');
-                                    elementSegment.Value = elementSegment.Value.ToString();
+                                    if (elementSegment.Type != typeof(string) && (elementSegment.HasField || elementSegment.IsExpression || elementSegment.IsMethodCall))
+                                        elementSegment.Value = this.CastTo(typeof(string), elementSegment.Value);
+                                    else elementSegment.Value = elementSegment.Value.ToString();
                                     builder.Append(visitor.Change(elementSegment));
+                                    resultSegment.IsParameter = resultSegment.IsParameter || elementSegment.IsParameter;
                                 }
                                 else constBuilder.Append(item.ToString());
                                 index++;
@@ -335,9 +346,9 @@ partial class SqlServerProvider
                                 }
                                 builder.Insert(0, "(");
                                 builder.Append(')');
-                                return visitor.Change(resultSegment, builder.ToString(), false, true);
+                                return resultSegment.Change(builder.ToString(), false, false, true);
                             }
-                            return visitor.Change(resultSegment, constBuilder.ToString());
+                            return resultSegment.Change(constBuilder.ToString());
                         });
                         result = true;
                     }
@@ -765,6 +776,7 @@ partial class SqlServerProvider
                                     return visitor.Change(targetSegment, targetSegment.Value.ToString());
 
                                 var targetArgument = this.GetQuotedValue(visitor.Change(targetSegment));
+                                targetSegment.Type = methodInfo.ReturnType;
                                 return visitor.Change(targetSegment, this.CastTo(typeof(string), targetArgument), false, true);
                             });
                             result = true;
