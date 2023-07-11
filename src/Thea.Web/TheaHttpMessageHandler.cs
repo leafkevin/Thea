@@ -12,24 +12,25 @@ namespace Thea.Web;
 
 public class TheaHttpMessageHandlerBuilder : HttpMessageHandlerBuilder
 {
-    public TheaHttpMessageHandlerBuilder(IServiceProvider services)
+    private string _name;
+    private readonly IServiceProvider serviceProvider;
+    public TheaHttpMessageHandlerBuilder(IServiceProvider serviceProvider)
     {
-        var messageHandler = services.GetService<TheaHttpMessageHandler>();
+        this.serviceProvider = serviceProvider;
+        var messageHandler = serviceProvider.GetService<TheaHttpMessageHandler>();
         this.AdditionalHandlers.Add(messageHandler);
     }
-    private string _name;
     public override string Name
     {
         get => _name;
         set
         {
             if (value == null)
-            {
                 throw new ArgumentNullException(nameof(value));
-            }
             _name = value;
         }
     }
+    public override IServiceProvider Services => this.serviceProvider;
     public override HttpMessageHandler PrimaryHandler { get; set; } = new HttpClientHandler();
     public override IList<DelegatingHandler> AdditionalHandlers { get; } = new List<DelegatingHandler>();
     public override HttpMessageHandler Build()
@@ -39,7 +40,6 @@ public class TheaHttpMessageHandlerBuilder : HttpMessageHandlerBuilder
             string message = $"The '{nameof(PrimaryHandler)}' must not be null.";
             throw new InvalidOperationException(message);
         }
-
         return CreateHandlerPipeline(PrimaryHandler, AdditionalHandlers);
     }
 }
