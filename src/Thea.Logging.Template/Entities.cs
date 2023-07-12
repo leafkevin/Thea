@@ -5,7 +5,7 @@ namespace Thea.Logging.Template;
 class TemplateLog
 {
     public string Id { get; set; }
-    public int TenantId { get; set; }
+    public string TenantId { get; set; }
     public string Category { get; set; }
     public string UserId { get; set; }
     public string ApiUrl { get; set; }
@@ -17,7 +17,7 @@ class TemplateLog
 class LogTemplate
 {
     public string Id { get; set; }
-    public int TenantId { get; set; }
+    public string TenantId { get; set; }
     public string Category { get; set; }
     public string ApiUrl { get; set; }
     public string TagFrom { get; set; }

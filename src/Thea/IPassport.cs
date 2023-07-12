@@ -19,7 +19,7 @@
     /// <summary>
     /// 租户ID
     /// </summary>
-    int? TenantId { get; }
+    string TenantId { get; }
     /// <summary>
     /// 邮箱地址
     /// </summary>

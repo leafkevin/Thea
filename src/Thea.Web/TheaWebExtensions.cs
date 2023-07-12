@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using System;
+using System.Net.Http;
 using System.Security.Claims;
 using System.Security.Cryptography;
 
@@ -24,7 +25,9 @@ public static class TheaWebExtensions
     {
         services.AddHttpContextAccessor();
         services.AddHttpClient();
+        services.AddTransient<IHttpClientFactory, TheaHttpClientFactory>();
         services.AddTransient<HttpMessageHandlerBuilder, TheaHttpMessageHandlerBuilder>();
+        services.AddTransient<ProxyHttpMessageHandlerBuilder>();
         services.AddTransient<TheaHttpMessageHandler>();
         return services;
     }

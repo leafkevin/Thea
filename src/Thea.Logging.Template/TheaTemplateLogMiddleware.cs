@@ -35,7 +35,7 @@ public class TheaTemplateLogMiddleware
                 {
                     if (!string.IsNullOrEmpty(logEntityInfo.ApiUrl)
                         && logEntityInfo.ApiUrl.ToLower().Contains(logTemplate.ApiUrl.ToLower())
-                        && (logTemplate.TenantId == 0 || logTemplate.TenantId == logEntityInfo.TenantId))
+                        && (string.IsNullOrEmpty(logTemplate.TenantId) || logTemplate.TenantId == logEntityInfo.TenantId))
                     {
                         string tagValue = null;
                         var tenantId = logEntityInfo.TenantId;
@@ -51,8 +51,7 @@ public class TheaTemplateLogMiddleware
                                     {
                                         userId = claims.Find(f => f.Type == "sub")?.Value;
                                         userName = claims.Find(f => f.Type == "name")?.Value;
-                                        if (int.TryParse(claims.Find(f => f.Type == "tenant")?.Value, out var iTenantId))
-                                            tenantId = iTenantId;
+                                        tenantId = claims.Find(f => f.Type == "tenant")?.Value;
                                     }
                                 }
                                 tagValue = userId;
@@ -75,7 +74,7 @@ public class TheaTemplateLogMiddleware
                             UserId = userId,
                             ApiUrl = logEntityInfo.ApiUrl,
                             Category = logTemplate.Category,
-                            TenantId = tenantId.Value,
+                            TenantId = tenantId,
                             Tag = tagValue,
                             Body = body,
                             ClientIp = logEntityInfo.ClientIp,

@@ -21,6 +21,16 @@ public static class TheaHttpExtensions
         httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         return httpClient;
     }
+    public static HttpClient CreateClient(this IHttpClientFactory clientFactory, string proxyAddress, string name = null, string proxyUser = null, string proxyPassword = null, bool isIgnoreSslError = true, int timeoutSeconds = 30)
+    {
+        var theaClientFactory = clientFactory as TheaHttpClientFactory;
+        if (theaClientFactory == null)
+            throw new Exception("请注册IHttpClientFactory默认实现类为TheaHttpClientFactory");
+
+        var httpClient = theaClientFactory.CreateClient(name, proxyAddress, proxyUser, proxyPassword, isIgnoreSslError);
+        httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        return httpClient;
+    }
     public static void WithToken(this HttpContent content, string token)
     {
         if (string.IsNullOrEmpty(token))
