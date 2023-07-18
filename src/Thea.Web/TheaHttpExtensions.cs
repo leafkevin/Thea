@@ -49,21 +49,6 @@ public static class TheaHttpExtensions
             throw new ArgumentNullException(nameof(mediaType));
         content.Headers.ContentType = new MediaTypeWithQualityHeaderValue(mediaType);
     }
-    public static async Task DownloadAsync(this HttpClient client, string url, string savePath)
-    {
-        using var stream = await client.GetStreamAsync(url);
-        using var fs = new FileStream(savePath, FileMode.Create);
-
-        byte[] bArr = new byte[1024];
-        int size = stream.Read(bArr, 0, (int)bArr.Length);
-        while (size > 0)
-        {
-            fs.Write(bArr, 0, size);
-            size = stream.Read(bArr, 0, (int)bArr.Length);
-        }
-        fs.Flush();
-        stream.Close();
-    }
     public static string GetTraceId(this IHttpContextAccessor contextAccessor)
     {
         if (contextAccessor == null)
