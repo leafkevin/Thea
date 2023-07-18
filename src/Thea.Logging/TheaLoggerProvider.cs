@@ -1,14 +1,11 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Concurrent;
-using System.Linq;
 
 namespace Thea.Logging;
 
 public class TheaLoggerProvider : ILoggerProvider
 {
-    private readonly ConcurrentDictionary<string, ILogger> loggers = new();
+    private ILogger logger;
     private readonly IConfiguration configuration;
     private readonly ILoggerProcessor processor;
 
@@ -19,22 +16,11 @@ public class TheaLoggerProvider : ILoggerProvider
     }
     public ILogger CreateLogger(string categoryName)
     {
-        if (this.loggers.TryGetValue(categoryName, out var logger))
-            return logger;
-        this.loggers.TryAdd(categoryName, logger = new TheaLogger(categoryName, this.configuration, this.processor));
-        return logger;
+        if (this.logger == null)
+            this.logger = new TheaLogger(categoryName, this.configuration, this.processor);
+        return this.logger;
     }
 
     public void Dispose()
-    {
-        var removeList = this.loggers.Keys.ToList();
-        foreach (var key in removeList)
-        {
-            if (!this.loggers.TryRemove(key, out var logger))
-                continue;
-            if (logger is IDisposable disposableObj)
-                disposableObj.Dispose();
-        }
-        this.loggers.Clear();
-    }
+        => this.logger = null;
 }
