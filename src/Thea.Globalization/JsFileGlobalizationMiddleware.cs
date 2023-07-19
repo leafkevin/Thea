@@ -12,31 +12,31 @@ public class JsFileGlobalizationMiddleware
     private readonly RequestDelegate next;
     private readonly IGlobalizationResource grService;
     private readonly IConfiguration configuration;
-    private readonly string fileExtensions;
+    private readonly string filterFileExtensions;
 
     public JsFileGlobalizationMiddleware(RequestDelegate next, IGlobalizationResource grService, IConfiguration configuration)
     {
         this.next = next;
         this.grService = grService;
         this.configuration = configuration;
-        this.fileExtensions = configuration["Globalization:StaticFileExtensions"];
+        this.filterFileExtensions = configuration["Globalization:FilterFileExtensions"];
     }
 
     public async Task Invoke(HttpContext context)
     {
         var urlPath = context.Request.Path.ToString();
         //只拦截所有js请求
-        if (!urlPath.EndsWith(this.fileExtensions))
+        if (!urlPath.EndsWith(this.filterFileExtensions))
         {
             await next(context);
             return;
         }
-        var cultureName = this.GetCulture(context);
+        var language = this.GetCulture(context);
         using var reader = File.OpenText("wwwroot/" + urlPath);
         var respBody = await reader.ReadToEndAsync();
         respBody = this.ReplaceConfigurations(respBody, @"\[\[\{(\w+(:\w+)+)\}\]\]");
         respBody = this.ReplaceConfigurations(respBody, @"\[\[\{(\w+)\}\]\]");
-        respBody = this.ReplaceTags(respBody, cultureName, @"\[\[([\w\-]+)\]\]");
+        respBody = this.ReplaceTags(respBody, language, @"\[\[([\w\-]+)\]\]");
         context.Response.ContentType = "text/javascript";
         await context.Response.WriteAsync(respBody);
     }
@@ -63,15 +63,15 @@ public class JsFileGlobalizationMiddleware
     }
     private string GetCulture(HttpContext context)
     {
-        string language = context.Request.Query["hl"];
+        string language = context.Request.Query["lang"];
         if (!string.IsNullOrEmpty(language))
         {
-            context.Response.Cookies.Append("hl", language);
+            context.Response.Cookies.Append("lang", language);
             return language;
         }
-        language = context.Request.Cookies["hl"];
+        language = context.Request.Cookies["lang"];
         if (!string.IsNullOrEmpty(language))
             return language;
-        return this.configuration["Globalization:DefaultCulture"];
+        return this.configuration["Globalization:DefaultLanguage"];
     }
 }

@@ -29,33 +29,31 @@ class GlobalizationResource : IGlobalizationResource
         var redisUrl = configuration["Globalization:Redis:Url"];
         if (string.IsNullOrEmpty(redisUrl))
             throw new ArgumentNullException("appsettings.json中缺少Globalization:Redis:Url配置项");
-        this.prefix = configuration["Globalization:Redis:Prefix"];
-        if (string.IsNullOrEmpty(this.prefix))
-            throw new ArgumentNullException("appsettings.json中缺少Globalization:Redis:Prefix配置项");
+        this.prefix = configuration["Globalization:Redis:Prefix"] ?? string.Empty;
         var database = configuration["Globalization:Redis:Database"];
         if (!string.IsNullOrEmpty(database) && int.TryParse(database, out var dbIndex))
             this.databaseIndex = dbIndex;
         this.connection = ConnectionMultiplexer.Connect(redisUrl);
     }
-    public string GetGlossary(string tagName, string cultureName = null, int lifetimeMinutes = 5)
+    public string GetGlossary(string tagName, string language = null, int lifetimeMinutes = 5)
     {
         if (string.IsNullOrEmpty(tagName))
             throw new ArgumentNullException(tagName);
-        cultureName ??= this.GetCulture();
-        if (!this.TryGetCache(tagName, cultureName, out var result) && !string.IsNullOrEmpty(result))
-            this.SetCache(tagName, cultureName, result, lifetimeMinutes);
+        language ??= this.GetCulture();
+        if (!this.TryGetCache(tagName, language, out var result) && !string.IsNullOrEmpty(result))
+            this.SetCache(tagName, language, result, lifetimeMinutes);
         if (string.IsNullOrEmpty(result))
             return string.Format("Unkown Tag : [{0}]", tagName);
         return result;
     }
-    public async Task<string> GetGlossaryAsync(string tagName, string cultureName = null, int lifetimeMinutes = 5)
+    public async Task<string> GetGlossaryAsync(string tagName, string language = null, int lifetimeMinutes = 5)
     {
         if (string.IsNullOrEmpty(tagName))
             throw new ArgumentNullException(tagName);
-        cultureName ??= this.GetCulture();
-        (var hasCache, var tagValue) = await this.GetCacheAsync(tagName, cultureName);
+        language ??= this.GetCulture();
+        (var hasCache, var tagValue) = await this.GetCacheAsync(tagName, language);
         if (!hasCache && !string.IsNullOrEmpty(tagValue))
-            await this.SetCacheAsync(tagName, cultureName, tagValue, lifetimeMinutes);
+            await this.SetCacheAsync(tagName, language, tagValue, lifetimeMinutes);
         if (string.IsNullOrEmpty(tagValue))
             return string.Format("Unkown Tag : [{0}]", tagName);
         return tagValue;
@@ -63,13 +61,13 @@ class GlobalizationResource : IGlobalizationResource
     public string GetCulture()
     {
         var context = this.contextAccessor.HttpContext;
-        string language = context.Request.Query["hl"];
+        string language = context.Request.Query["lang"];
         if (!string.IsNullOrEmpty(language))
         {
-            context.Response.Cookies.Append("hl", language);
+            context.Response.Cookies.Append("lang", language);
             return language;
         }
-        language = context.Request.Cookies["hl"];
+        language = context.Request.Cookies["lang"];
         if (!string.IsNullOrEmpty(language))
             return language;
         return this.configuration["Globalization:DefaultLanguage"];
@@ -108,15 +106,15 @@ class GlobalizationResource : IGlobalizationResource
         }
         return (true, redisValue.ToString().JsonTo<string>());
     }
-    private void SetCache(string tagName, string cultureName, string tagValue, int lifetimeMinutes = 5)
+    private void SetCache(string tagName, string language, string tagValue, int lifetimeMinutes = 5)
     {
-        var cacheKey = $"gr.{tagName}.{cultureName}";
+        var cacheKey = $"gr.{tagName}.{language}";
         var database = this.connection.GetDatabase(this.databaseIndex);
         database.StringSet(this.prefix + cacheKey, tagValue.ToJson(), TimeSpan.FromMinutes(lifetimeMinutes));
     }
-    private async Task SetCacheAsync(string tagName, string cultureName, string tagValue, int lifetimeMinutes = 5)
+    private async Task SetCacheAsync(string tagName, string language, string tagValue, int lifetimeMinutes = 5)
     {
-        var cacheKey = $"gr.{tagName}.{cultureName}";
+        var cacheKey = $"gr.{tagName}.{language}";
         var database = this.connection.GetDatabase(this.databaseIndex);
         await database.StringSetAsync(this.prefix + cacheKey, tagValue.ToJson(), TimeSpan.FromMinutes(lifetimeMinutes));
     }
