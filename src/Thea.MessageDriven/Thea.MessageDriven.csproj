@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net6.0</TargetFramework>
+		<LangVersion>10.0</LangVersion>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="7.0.0" />
+		<PackageReference Include="MySqlConnector" Version="2.2.5" />
+		<PackageReference Include="RabbitMQ.Client" Version="6.5.0" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Thea.Trolley.MySqlConnector\Thea.Trolley.MySqlConnector.csproj" />
+		<ProjectReference Include="..\Thea\Thea.csproj" />
+	</ItemGroup>
+</Project>
