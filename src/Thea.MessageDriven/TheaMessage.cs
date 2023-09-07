@@ -19,3 +19,13 @@ class TheaMessage
     [JsonIgnore]
     public TaskCompletionSource<TheaResponse> Waiter { get; set; }
 }
+enum MessageType
+{
+    TheaMessage,
+    Logs
+}
+class Message
+{
+    public MessageType Type { get; set; }
+    public object Body { get; set; }
+}

@@ -6,7 +6,7 @@ namespace Thea.MessageDriven;
 
 public interface IMessageDriven
 {
-    string NodeId { get; set; }
+    string HostName { get; set; }
     string DbKey { get; set; }
     void Start();
     void Shutdown();

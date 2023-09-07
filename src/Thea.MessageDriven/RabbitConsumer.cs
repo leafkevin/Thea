@@ -6,6 +6,7 @@ using System;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Thea.Logging;
 
 namespace Thea.MessageDriven;
 
@@ -14,7 +15,7 @@ class RabbitConsumer
     private ConnectionFactory factory;
     private Func<TheaMessage, Task<TheaResponse>> consumerHandler;
     private Action<TheaMessage> nextHandler;
-    private ClusterRepository repository;
+    private Action<ExecLog> addLogsHandler;
     private readonly ushort prefetchCount = 5;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly string nodeId;
@@ -24,7 +25,7 @@ class RabbitConsumer
     private volatile IModel channel = null;
     private volatile Cluster clusterInfo;
     private volatile Binding bindingInfo;
-
+    private DateTime updatedAt;
     public string Queue { get; set; }
 
     public bool IsAvailable
@@ -40,8 +41,8 @@ class RabbitConsumer
     }
     public RabbitConsumer(MessageDrivenService parent, IServiceProvider serviceProvider)
     {
-        this.nodeId = parent.NodeId;
-        this.repository = parent.repository;
+        this.nodeId = parent.HostName;
+        this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         this.nextHandler = parent.Next;
     }
@@ -74,7 +75,7 @@ class RabbitConsumer
     public RabbitConsumer Bind(string consumerId, Cluster clusterInfo, Binding bindingInfo)
     {
         this.consumerId = consumerId;
-        if (this.clusterInfo == null || clusterInfo.UpdatedAt > this.clusterInfo.UpdatedAt)
+        if (this.clusterInfo == null || clusterInfo.UpdatedAt > this.clusterInfo.UpdatedAt || bindingInfo.UpdatedAt > this.updatedAt)
         {
             this.factory = new ConnectionFactory
             {
@@ -110,22 +111,23 @@ class RabbitConsumer
             _ => clusterId
         };
         this.channel.ExchangeDeclare(exchange, bindType, true);
-        this.channel.QueueDeclare(queue, true, false, false, null);
-        this.channel.QueueBind(queue, clusterId, bindingKey, null);
+        this.channel.QueueDeclare(queue, true, false, false);
+        this.channel.QueueBind(queue, clusterId, bindingKey);
         this.isNeedBuiding = false;
     }
-    public void CreateReplyQueue(string clusterId, string nodeId)
+    public void CreateReplyQueue(string clusterId, string hostName)
     {
         if (!this.isNeedBuiding) return;
         var exchange = $"{clusterId}.result";
-        var queue = $"{clusterId}.{nodeId}.result";
+        var queue = $"{clusterId}.{hostName}.result";
         this.channel.ExchangeDeclare(exchange, "direct", true);
-        this.channel.QueueDeclare(queue, true, false, false, null);
-        this.channel.QueueBind(queue, exchange, nodeId, null);
+        this.channel.QueueDeclare(queue, true, false, false);
+        this.channel.QueueBind(queue, exchange, hostName);
         this.isNeedBuiding = false;
     }
     public void Start()
     {
+        if (this.factory == null && !this.isNeedBuiding) return;
         this.connection = this.factory.CreateConnection();
         this.channel = this.connection.CreateModel();
 
@@ -140,7 +142,7 @@ class RabbitConsumer
             //其他的Consumer,客户端已提供恢复了
             model.BasicQos(0, this.prefetchCount, false);
         };
-        this.BindConsumer(this.channel);
+        this.BindHandler(this.channel, this.bindingInfo.Queue);
     }
     public void Shutdown()
     {
@@ -157,7 +159,7 @@ class RabbitConsumer
         this.Shutdown();
         this.Start();
     }
-    private void BindConsumer(IModel channel)
+    private void BindHandler(IModel channel, string queue)
     {
         var consumer = new EventingBasicConsumer(channel);
         consumer.Received += async (model, ea) =>
@@ -203,18 +205,18 @@ class RabbitConsumer
                 CreatedAt = DateTime.Now,
                 CreatedBy = this.consumerId,
                 UpdatedAt = DateTime.Now,
-                UpdatedBy = $"{this.Queue}-{this.consumerId}"
+                UpdatedBy = this.consumerId
             };
-            await this.repository.AddLog(logInfo);
-            if (!isSuccess) this.logger.LogError($"Consume message failed, Detail:{logInfo.ToJson()}");
+            this.addLogsHandler.Invoke(logInfo);
+            if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
             if (message.Status != MessageStatus.None)
             {
                 message.Message = resp.ToJson();
                 message.Status = message.Status + 1;
-                this.nextHandler(message);
+                this.nextHandler.Invoke(message);
             }
             channel.BasicAck(ea.DeliveryTag, false);
         };
-        channel.BasicConsume(this.Queue, false, consumer);
+        channel.BasicConsume(queue, false, consumer);
     }
 }

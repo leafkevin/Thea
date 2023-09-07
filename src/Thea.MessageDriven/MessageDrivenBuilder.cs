@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.DependencyInjection;
+using System;
 using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
@@ -6,12 +7,17 @@ namespace Thea.MessageDriven;
 public class MessageDrivenBuilder
 {
     private readonly MessageDrivenService service;
-    internal MessageDrivenBuilder(MessageDrivenService service) => this.service = service;
+    private readonly IServiceProvider serviceProvider;
+    internal MessageDrivenBuilder(IServiceProvider serviceProvider)
+    {
+        this.serviceProvider = serviceProvider;
+        this.service = serviceProvider.GetService<IMessageDriven>() as MessageDrivenService;
+    }
 
     public MessageDrivenBuilder Create(string dbKey, string nodeId)
     {
         this.service.DbKey = dbKey;
-        this.service.NodeId = nodeId;
+        this.service.HostName = nodeId;
         return this;
     }
     public MessageDrivenBuilder AddProducer(string clusterId, bool isUseRpc = false)
@@ -24,5 +30,10 @@ public class MessageDrivenBuilder
         Func<TheaMessage, Task<TheaResponse>> theaConsumerHandler = theaMessage => consumerHandler.Invoke(theaMessage.Message);
         this.service.AddConsumer(clusterId, theaConsumerHandler);
         return this;
+    }
+    public MessageDrivenBuilder AddConsumer<TConsumer>(string clusterId, Func<TConsumer, Func<string, Task<TheaResponse>>> consumerHandler)
+    {
+        var consumer = serviceProvider.GetService<TConsumer>();
+        return this.AddConsumer(clusterId, consumerHandler.Invoke(consumer));
     }
 }

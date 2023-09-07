@@ -10,7 +10,6 @@
 		<PackageReference Include="RabbitMQ.Client" Version="6.5.0" />
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\Thea.Trolley.MySqlConnector\Thea.Trolley.MySqlConnector.csproj" />
 		<ProjectReference Include="..\Thea\Thea.csproj" />
 	</ItemGroup>
 </Project>
