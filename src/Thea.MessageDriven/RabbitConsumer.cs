@@ -14,7 +14,7 @@ class RabbitConsumer
 {
     private ConnectionFactory factory;
     private Func<string, Task<object>> consumerHandler;
-    private readonly Action<TheaMessage> nextHandler;
+    private readonly Action<TheaMessage, Exception> nextHandler;
     private Action<ExecLog> addLogsHandler;
     private readonly ushort prefetchCount = 5;
     private readonly ILogger<RabbitConsumer> logger;
@@ -67,7 +67,6 @@ class RabbitConsumer
         this.channel.BasicRecoverOk += (o, e) =>
         {
             var model = o as IModel;
-            //其他的Consumer,客户端已提供恢复了
             model.BasicQos(0, this.prefetchCount, false);
         };
         this.BindHandler(this.channel, this.bindingInfo.Queue);
@@ -182,7 +181,7 @@ class RabbitConsumer
                 iLoop++;
                 Thread.Sleep(1000);
             }
-            var result = isSuccess ? resp.ToJson() : $"Message:{jsonBody},Exception:{exception}";
+            var result = isSuccess ? resp.ToJson() : exception.ToString();
             var logInfo = new ExecLog
             {
                 LogId = ObjectId.NewId(),
@@ -199,11 +198,11 @@ class RabbitConsumer
             };
             this.addLogsHandler.Invoke(logInfo);
             if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
-            if (message.Status != MessageStatus.None)
+            if (message.Status == MessageStatus.WaitForReply)
             {
                 message.Message = resp.ToJson();
-                message.Status = message.Status + 1;
-                this.nextHandler.Invoke(message);
+                message.Status = isSuccess ? MessageStatus.SetResult : MessageStatus.SetException;
+                this.nextHandler.Invoke(message, exception);
             }
             channel.BasicAck(ea.DeliveryTag, false);
         };

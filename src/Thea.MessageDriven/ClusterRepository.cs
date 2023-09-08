@@ -14,12 +14,12 @@ class ClusterRepository
         this.dbFactory = dbFactory;
         this.dbKey = dbKey;
     }
-    public async Task<(List<Cluster>, List<Binding>, List<Consumer>)> GetClusterInfo(string HostName, List<string> clusterIds)
+    public async Task<(List<Cluster>, List<Binding>, List<Consumer>)> GetClusterInfo(string hostName, List<string> clusterIds)
     {
         using var repository = this.dbFactory.Create(this.dbKey);
         return (await repository.QueryAsync<Cluster>(f => clusterIds.Contains(f.ClusterId)),
             await repository.QueryAsync<Binding>(f => clusterIds.Contains(f.ClusterId)),
-            await repository.QueryAsync<Consumer>(f => f.HostName == HostName && clusterIds.Contains(f.ClusterId)));
+            await repository.QueryAsync<Consumer>(f => f.HostName == hostName && clusterIds.Contains(f.ClusterId)));
     }
     public async Task<int> Register(List<Cluster> clusters)
     {

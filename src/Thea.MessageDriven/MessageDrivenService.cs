@@ -127,6 +127,12 @@ class MessageDrivenService : IMessageDriven
     public void Shutdown()
     {
         this.cancellationSource.Cancel();
+        foreach (var producerInfo in this.producers.Values)
+            producerInfo.RabbitProducer.Close();
+        foreach (var consumerInfos in this.consumers.Values)
+            consumerInfos.ForEach(f => f.RabbitConsumer.Shutdown());
+        foreach (var consumer in this.replyConsumers.Values)
+            consumer.Shutdown();
         if (this.task != null)
             this.task.Wait();
         this.cancellationSource.Dispose();
@@ -329,8 +335,9 @@ class MessageDrivenService : IMessageDriven
         if (!this.localClusterIds.Contains(clusterId))
             this.localClusterIds.Add(clusterId);
     }
-    public void Next(TheaMessage message)
+    public void Next(TheaMessage message, Exception ex)
     {
+        ResultWaiter resultWaiter = null;
         switch (message.Status)
         {
             case MessageStatus.WaitForReply:
@@ -340,11 +347,18 @@ class MessageDrivenService : IMessageDriven
                 producer.RabbitProducer.TryPublish(message.ReplyExchange, message.HostName, message.ToJson());
                 break;
             case MessageStatus.SetResult:
-                if (this.messageResults.TryRemove(message.MessageId, out var resultWaiter))
+                if (this.messageResults.TryRemove(message.MessageId, out resultWaiter))
                 {
                     var result = TheaJsonSerializer.Deserialize(message.Message, resultWaiter.ResponseType);
                     if (resultWaiter.Waiter != null)
                         resultWaiter.Waiter.TrySetResult(result);
+                }
+                break;
+            case MessageStatus.SetException:
+                if (this.messageResults.TryRemove(message.MessageId, out resultWaiter))
+                {
+                    if (resultWaiter.Waiter != null)
+                        resultWaiter.Waiter.TrySetException(ex);
                 }
                 break;
         }

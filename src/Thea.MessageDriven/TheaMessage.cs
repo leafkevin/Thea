@@ -16,6 +16,14 @@ class TheaMessage
     public MessageStatus Status { get; set; }
     public string Message { get; set; }
 }
+public enum MessageStatus
+{
+    None = 0,
+    WaitForReply,
+    SetResult,
+    SetException,
+    Completed
+}
 enum MessageType
 {
     TheaMessage,
