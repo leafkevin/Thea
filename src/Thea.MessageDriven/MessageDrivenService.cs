@@ -64,7 +64,7 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每1分钟更新一次链接信息
-                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromSeconds(30))
+                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromHours(1))
                     {
                         await this.Initialize();
                         //确保Consumer是活的
