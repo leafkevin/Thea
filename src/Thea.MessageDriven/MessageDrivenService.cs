@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Thea.Json;
@@ -312,8 +313,10 @@ class MessageDrivenService : IMessageDriven
         if (!this.localClusterIds.Contains(clusterId))
             this.localClusterIds.Add(clusterId);
     }
-    public void AddConsumer(string clusterId, object target, Type parametersType, ObjectMethodExecutor methodExecutor)
+    public void AddConsumer(string clusterId, object target, MethodInfo methodInfo)
     {
+        var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
+        var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
         Func<string, Task<object>> consumerHandler = async message =>
         {
             var parameters = TheaJsonSerializer.Deserialize(message, parametersType);

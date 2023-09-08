@@ -1,7 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using System;
-using System.Linq;
-using System.Reflection;
 using Thea.Orm;
 
 namespace Thea.MessageDriven;
@@ -34,9 +32,7 @@ public class MessageDrivenBuilder
     {
         var consumer = serviceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        var executor = ObjectMethodExecutor.Create(methodInfo, typeof(TConsumer).GetTypeInfo());
-        var parameterType = methodInfo.GetParameters().First().ParameterType;
-        this.service.AddConsumer(clusterId, consumer, parameterType, executor);
+        this.service.AddConsumer(clusterId, consumer, methodInfo);
         return this;
     }
     public MessageDrivenBuilder Configure<TOrmProvider>(IModelConfiguration configuration) where TOrmProvider : class, IOrmProvider, new()
