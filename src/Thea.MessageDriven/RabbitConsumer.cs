@@ -182,7 +182,6 @@ class RabbitConsumer
                 iLoop++;
                 Thread.Sleep(1000);
             }
-            Console.WriteLine($"Invoke Completed: {message.MessageId}");
             var result = isSuccess ? resp.ToJson() : $"Message:{jsonBody},Exception:{exception}";
             var logInfo = new ExecLog
             {
@@ -202,11 +201,9 @@ class RabbitConsumer
             if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
             if (message.Status != MessageStatus.None)
             {
-                Console.WriteLine($"WaitForReply ... : {message.MessageId}");
                 message.Message = resp.ToJson();
                 message.Status = message.Status + 1;
                 this.nextHandler.Invoke(message);
-                Console.WriteLine($"WaitForReply Completed: {message.MessageId}");
             }
             channel.BasicAck(ea.DeliveryTag, false);
         };

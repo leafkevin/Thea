@@ -97,7 +97,7 @@ class MessageDrivenService : IMessageDriven
 
                                 int routingKey = 0;
                                 if (producerInfo.ConsumerTotalCount > 1)
-                                    routingKey = HashCode.Combine(theaMessage.RoutingKey) % producerInfo.ConsumerTotalCount;
+                                    routingKey = Math.Abs(HashCode.Combine(theaMessage.RoutingKey)) % producerInfo.ConsumerTotalCount;
                                 producerInfo.RabbitProducer.TryPublish(theaMessage.Exchange, routingKey.ToString(), theaMessage.ToJson());
                                 break;
                             case MessageType.Logs:
@@ -241,15 +241,13 @@ class MessageDrivenService : IMessageDriven
         var results = new List<Task<object>>();
         foreach (var message in messages)
         {
-            var routingKeyValue = routingKeySelector.Invoke(message);
-            var routingKey = HashCode.Combine(routingKeyValue) % producerInfo.ConsumerTotalCount;
             var theaMessage = new TheaMessage
             {
                 MessageId = ObjectId.NewId(),
                 HostName = this.HostName,
                 ClusterId = producerInfo.ClusterId,
                 Exchange = exchange,
-                RoutingKey = routingKey.ToString(),
+                RoutingKey = routingKeySelector.Invoke(message),
                 Message = message.ToJson(),
                 Status = MessageStatus.WaitForReply
             };
@@ -273,15 +271,13 @@ class MessageDrivenService : IMessageDriven
         var taskResults = new List<Task<object>>();
         foreach (var message in messages)
         {
-            var routingKeyValue = routingKeySelector.Invoke(message);
-            var routingKey = HashCode.Combine(routingKeyValue) % producerInfo.ConsumerTotalCount;
             var theaMessage = new TheaMessage
             {
                 MessageId = ObjectId.NewId(),
                 HostName = this.HostName,
                 ClusterId = producerInfo.ClusterId,
                 Exchange = exchange,
-                RoutingKey = routingKey.ToString(),
+                RoutingKey = routingKeySelector.Invoke(message),
                 Message = message.ToJson(),
                 Status = MessageStatus.WaitForReply
             };
@@ -342,7 +338,6 @@ class MessageDrivenService : IMessageDriven
                     this.producers.TryAdd(message.ReplyExchange, new ProducerInfo { ClusterId = message.ClusterId, RabbitProducer = new RabbitProducer() });
 
                 producer.RabbitProducer.TryPublish(message.ReplyExchange, message.HostName, message.ToJson());
-                Console.WriteLine($"WaitForReply Completed: {message.MessageId}");
                 break;
             case MessageStatus.SetResult:
                 if (this.messageResults.TryRemove(message.MessageId, out var resultWaiter))
@@ -351,7 +346,6 @@ class MessageDrivenService : IMessageDriven
                     if (resultWaiter.Waiter != null)
                         resultWaiter.Waiter.TrySetResult(result);
                 }
-                Console.WriteLine($"TrySetResult Completed: {message.MessageId}");
                 break;
         }
     }

@@ -58,7 +58,6 @@ public class JsFileGlobalizationMiddleware
             var tagName = match.Groups[1].Value;
             return this.grService.GetGlossary(tagName, cultureName);
         });
-        Console.WriteLine("content=" + content);
         return content;
     }
     private string GetCulture(HttpContext context)
