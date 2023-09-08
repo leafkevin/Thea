@@ -13,8 +13,8 @@ public interface IMessageDriven
 
     void Publish<TMessage>(string exchange, string routingKey, TMessage message);
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message);
-    void Publish<TMessage>(string exchange, string routingKey, List<TMessage> messages);
-    Task PublishAsync<TMessage>(string exchange, string routingKey, List<TMessage> messages);
+    void Publish<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector);
+    Task PublishAsync<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector);
     TResponse Request<TRequst, TResponse>(string exchange, string routingKey, TRequst message);
     Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest message);
     List<TResponse> Request<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector);

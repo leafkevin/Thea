@@ -156,7 +156,7 @@ class MessageDrivenService : IMessageDriven
         this.Publish(exchange, routingKey, message);
         return Task.CompletedTask;
     }
-    public void Publish<TMessage>(string exchange, string routingKey, List<TMessage> messages)
+    public void Publish<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector)
     {
         if (!this.producers.TryGetValue(exchange, out var producerInfo))
             throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
@@ -164,26 +164,24 @@ class MessageDrivenService : IMessageDriven
             throw new ArgumentNullException(nameof(messages));
         messages.ForEach(f =>
         {
+            var routingKeyValue = routingKeySelector.Invoke(f);
+            var routingKey = HashCode.Combine(routingKeyValue) % producerInfo.ConsumerTotalCount;
             var theaMessage = new TheaMessage
             {
                 MessageId = ObjectId.NewId(),
                 HostName = this.HostName,
                 ClusterId = producerInfo.ClusterId,
                 Exchange = exchange,
-                RoutingKey = routingKey,
+                RoutingKey = routingKey.ToString(),
                 Message = f.ToJson(),
                 Status = MessageStatus.None
             };
             this.messageQueue.Enqueue(new Message { Type = MessageType.TheaMessage, Body = theaMessage });
         });
     }
-    public Task PublishAsync<TMessage>(string exchange, string routingKey, List<TMessage> messages)
+    public Task PublishAsync<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector)
     {
-        if (!this.producers.TryGetValue(exchange, out _))
-            throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
-        if (messages == null || messages.Count == 0)
-            throw new ArgumentNullException(nameof(messages));
-        messages.ForEach(f => this.Publish(exchange, routingKey, f));
+        this.Publish(exchange, messages, routingKeySelector);
         return Task.CompletedTask;
     }
     public TResponse Request<TRequst, TResponse>(string exchange, string routingKey, TRequst message)
