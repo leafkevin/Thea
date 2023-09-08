@@ -40,12 +40,12 @@ namespace Thea.Job
         public Type OrmProviderType { get; private set; }
         internal JobSchedulerBuilder(JobService jobService)
             => this.jobService = jobService;
-        public JobSchedulerBuilder SetNodeId(string nodeId)
+        public JobSchedulerBuilder SetHostName(string HostName)
         {
-            this.jobService.NodeId = nodeId;
-            var envNodeId = Environment.GetEnvironmentVariable("NodeId");
-            if (!string.IsNullOrEmpty(envNodeId))
-                this.jobService.NodeId = nodeId;
+            this.jobService.HostName = HostName;
+            var envHostName = Environment.GetEnvironmentVariable("HostName");
+            if (!string.IsNullOrEmpty(envHostName))
+                this.jobService.HostName = HostName;
             return this;
         }
         public JobSchedulerBuilder SetOrmProvider<TOrmProvider>(string dbKey) where TOrmProvider : IOrmProvider

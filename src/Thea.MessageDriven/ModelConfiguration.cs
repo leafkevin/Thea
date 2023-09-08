@@ -29,7 +29,9 @@ class ModelConfiguration : IModelConfiguration
             f.Member(t => t.ClusterId).Field(nameof(Binding.ClusterId)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.Exchange).Field(nameof(Binding.Exchange)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.Queue).Field(nameof(Binding.Queue)).NativeDbType(MySqlDbType.VarChar);
+            f.Member(t => t.BindType).Field(nameof(Binding.BindType)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.BindingKey).Field(nameof(Binding.BindingKey)).NativeDbType(MySqlDbType.VarChar);
+            f.Member(t => t.HostName).Field(nameof(Binding.HostName)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.IsReply).Field(nameof(Binding.IsReply)).NativeDbType(MySqlDbType.Bool);
             f.Member(t => t.IsEnabled).Field(nameof(Binding.IsEnabled)).NativeDbType(MySqlDbType.Bool);
             f.Member(t => t.CreatedBy).Field(nameof(Binding.CreatedBy)).NativeDbType(MySqlDbType.VarChar);

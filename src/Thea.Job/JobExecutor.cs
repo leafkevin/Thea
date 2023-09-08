@@ -25,7 +25,7 @@ class JobExecutor
     private readonly ILogger<JobExecutor> logger;
 
     public string AppId { get; private set; }
-    public string NodeId { get; private set; }
+    public string HostName { get; private set; }
     public JobExecutor(JobService parent, IServiceProvider serviceProvider)
     {
         this.parent = parent;
@@ -33,7 +33,7 @@ class JobExecutor
         var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
         this.logger = loggerFactory.CreateLogger<JobExecutor>();
         this.AppId = parent.AppId;
-        this.NodeId = parent.NodeId;
+        this.HostName = parent.HostName;
 
         this.task = Task.Factory.StartNew(() =>
         {
@@ -113,11 +113,11 @@ class JobExecutor
             IsTempFired = jobArgs.IsTempFired,
             SchedId = jobArgs.SchedId,
             SchedTime = schedTime,
-            Host = this.NodeId,
+            Host = this.HostName,
             Result = JobStatus.Ready,
             RetryTimes = 0,
-            CreatedBy = this.NodeId,
-            UpdatedBy = this.NodeId,
+            CreatedBy = this.HostName,
+            UpdatedBy = this.HostName,
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now
         };

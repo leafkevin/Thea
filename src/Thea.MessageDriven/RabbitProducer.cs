@@ -1,34 +1,28 @@
 ﻿using RabbitMQ.Client;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
 namespace Thea.MessageDriven;
 
-class RabbitProducer
+class RabbitProducer : IDisposable
 {
     private ConnectionFactory factory;
     private IConnection connection;
-    private Dictionary<int, Channel> channelList = new();
+    private ConcurrentDictionary<int, Channel> channels = new();
     private BlockingCollection<Channel> channelQueue = new();
     private volatile Cluster clusterInfo;
     private readonly int channelSize = 10;
 
-    public string ClusterId { get; private set; }
-    public RabbitProducer(string clusterId, int channelSize = 10)
+    public string ClusterId => this.clusterInfo?.ClusterId;
+    public RabbitProducer(int channelSize = 10) => this.channelSize = channelSize;
+    public RabbitProducer Create(Cluster clusterInfo)
     {
-        this.ClusterId = clusterId;
-        this.channelSize = channelSize;
-    }
-    public void Create(Cluster clusterInfo)
-    {
-        if (this.clusterInfo == null || clusterInfo.UpdatedAt > this.clusterInfo.UpdatedAt)
+        if (this.clusterInfo == null || clusterInfo.Url != this.clusterInfo.Url
+            || clusterInfo.User != this.clusterInfo.User || clusterInfo.Password != this.clusterInfo.Password)
         {
             if (this.connection != null)
                 this.connection.Close();
-
             this.factory = new ConnectionFactory
             {
                 Uri = new Uri(clusterInfo.Url),
@@ -43,10 +37,12 @@ class RabbitProducer
             for (int i = 0; i < channelSize; i++)
             {
                 var channel = new Channel(this.connection);
-                this.channelList.Add(i, channel);
+                this.channels.TryAdd(i, channel);
             }
             this.AddChannelsToQueue();
+            this.clusterInfo = clusterInfo;
         }
+        return this;
     }
     public void TryPublish(string exchange, string routingKey, string message)
     {
@@ -57,27 +53,43 @@ class RabbitProducer
     }
     public void Close()
     {
-        var keyList = this.channelList.Keys.ToList();
-        for (int i = 0; i < keyList.Count; i++)
+        if (this.channels != null && this.channels.Count > 0)
         {
-            if (this.channelList.TryGetValue(keyList[i], out var channel))
-            {
+            foreach (var channel in this.channels.Values)
                 channel.Close();
-            }
+            this.channels.Clear();
         }
-        this.channelList.Clear();
+        this.channels = null;
+        if (this.channelQueue != null && this.channelQueue.Count > 0)
+            while (this.channelQueue.TryTake(out _)) ;
+        this.channelQueue = null;
         //等待本次消息消费结束 
         if (this.connection != null)
             this.connection.Close();
         this.connection = null;
     }
+    public void CreateWorkerQueue(string clusterId, string bindType, string bindingKey, string queue)
+    {
+        var channel = this.channelQueue.Take();
+        channel.CreateExchangeQueue(clusterId, bindType, bindingKey, queue);
+        this.channelQueue.Add(channel);
+    }
+    public void CreateReplyQueue(string clusterId, string HostName)
+    {
+        var exchange = $"{clusterId}.result";
+        var queue = $"{clusterId}.{HostName}.result";
+        var channel = this.channelQueue.Take();
+        channel.CreateExchangeQueue(exchange, "direct", HostName, queue);
+        this.channelQueue.Add(channel);
+    }
     private void AddChannelsToQueue()
     {
-        foreach (var channel in this.channelList.Values)
+        foreach (var channel in this.channels.Values)
         {
             this.channelQueue.Add(channel);
         }
     }
+    public void Dispose() => this.Close();
 }
 class Channel
 {
@@ -90,6 +102,14 @@ class Channel
         this.Properties.Persistent = true;
     }
     public void TryPublish(string exchange, string routingKey, byte[] message)
-       => this.Model.BasicPublish(exchange, routingKey, this.Properties, message);
+        => this.Model.BasicPublish(exchange, routingKey, this.Properties, message);
+    public void CreateExchangeQueue(string exchange, string bindType, string bindingKey, string queue)
+    {
+        if (string.IsNullOrEmpty(bindType))
+            bindType = "direct";
+        this.Model.ExchangeDeclare(exchange, bindType, true, false);
+        this.Model.QueueDeclare(queue, true, false, false);
+        this.Model.QueueBind(queue, exchange, bindingKey);
+    }
     public void Close() => this.Model.Close();
 }

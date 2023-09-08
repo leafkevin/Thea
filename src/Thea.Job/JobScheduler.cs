@@ -27,7 +27,7 @@ class JobScheduler
     private DateTime lastUpdatedTime = DateTime.MinValue;
     private DateTime lastCheckedTime = DateTime.MinValue;
     private string AppId { get; set; }
-    public string NodeId { get; set; }
+    public string HostName { get; set; }
     public string DbKey { get; set; }
     public List<JobDetail> JobDetails => this.jobDetails.Values.ToList();
 
@@ -139,8 +139,8 @@ class JobScheduler
             CronExpr = cronExpr,
             AdjustedCronExpr = cronExpr,
             IsEnabled = true,
-            CreatedBy = this.NodeId,
-            UpdatedBy = this.NodeId,
+            CreatedBy = this.HostName,
+            UpdatedBy = this.HostName,
             IsLocal = true
         };
         this.jobDetails.AddOrUpdate(jobId, jobDetail, (k, o) => jobDetail);

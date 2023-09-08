@@ -13,7 +13,7 @@ class JobService : IJobService
     private readonly JobExecutor jobExecutor;
     private readonly JobRepository jobRepository;
     public string AppId { get; set; }
-    public string NodeId { get; set; }
+    public string HostName { get; set; }
     public string DbKey { get; set; }
 
     public JobService(IServiceProvider serviceProvider)
