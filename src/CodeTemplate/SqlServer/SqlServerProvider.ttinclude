@@ -41,7 +41,8 @@ class SqlServerProvider : DbHelper
                LEFT JOIN sysindexes ki ON ki.name=ko.name AND B.id=ki.id
                LEFT JOIN sysindexkeys  kc On kc.indid=ki.indid and A.colid=kc.colid and kc.id=OBJECT_ID('{0}')
                LEFT JOIN SYS.syscomments F ON A.cdefault=F.id
-                   WHERE B.xtype='U' AND B.name='{0}' ORDER BY A.COLID";
+                   WHERE B.xtype='U' AND B.name='{0}' 
+                ORDER BY A.COLID";
 
         sql = string.Format(sql, tableName);
         var result = new List<ColumnInfo>();
