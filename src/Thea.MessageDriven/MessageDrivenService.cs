@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,6 +32,7 @@ class MessageDrivenService : IMessageDriven
     //Key=exchange, cluster.result
     private readonly ConcurrentDictionary<string, RabbitConsumer> replyConsumers = new();
     private readonly ConcurrentDictionary<string, ResultWaiter> messageResults = new();
+    private readonly ConcurrentDictionary<string, ConsumerType> consumerTypes = new();
     private readonly ConcurrentDictionary<string, Func<string, Task<object>>> consumerHandlers = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
@@ -65,7 +67,7 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每1分钟更新一次链接信息
-                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromSeconds(30))
+                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromSeconds(3000))
                     {
                         await this.Initialize();
                         //确保Consumer是活的
@@ -82,7 +84,7 @@ class MessageDrivenService : IMessageDriven
                         }
                         this.lastUpdateTime = DateTime.Now;
                     }
-                    if (logs.Count >= 200)
+                    if (logs.Count >= 100)
                     {
                         await this.repository.AddLogs(logs);
                         logs.Clear();
@@ -332,9 +334,41 @@ class MessageDrivenService : IMessageDriven
             ClusterId = clusterId,
             ConsumerId = $"{clusterId}.{this.HostName}.worker0",
             RoutingKey = "0",
+            Queue = $"{this.HostName}.queue0",
             RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
         };
         this.consumers.TryAdd(clusterId, new List<ConsumerInfo> { consumerInfo });
+        this.consumerTypes.TryAdd(clusterId, ConsumerType.Consumer);
+        if (!this.localClusterIds.Contains(clusterId))
+            this.localClusterIds.Add(clusterId);
+    }
+    public void AddSubscriber(string clusterId, string queue, object target, MethodInfo methodInfo)
+    {
+        var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
+        var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
+        Func<string, Task<object>> consumerHandler = async message =>
+        {
+            var parameters = TheaJsonSerializer.Deserialize(message, parametersType);
+            object result;
+            if (methodExecutor.IsMethodAsync)
+                result = await methodExecutor.ExecuteAsync(target, parameters);
+            else result = methodExecutor.Execute(target, parameters);
+            return result;
+        };
+        this.consumerHandlers.TryAdd(clusterId, consumerHandler);
+        var consumerInfo = new ConsumerInfo
+        {
+            ClusterId = clusterId,
+            ConsumerId = $"{clusterId}.{queue}.worker0",
+            RoutingKey = "#",
+            Queue = queue,
+            RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
+        };
+        if (!this.consumers.TryGetValue(clusterId, out var consumerInfos))
+            this.consumers.TryAdd(clusterId, consumerInfos = new List<ConsumerInfo> { consumerInfo });
+        if (!consumerInfos.Exists(f => f.Queue == queue))
+            consumerInfos.Add(consumerInfo);
+        this.consumerTypes.TryAdd(clusterId, ConsumerType.Subscriber);
         if (!this.localClusterIds.Contains(clusterId))
             this.localClusterIds.Add(clusterId);
     }
@@ -388,13 +422,14 @@ class MessageDrivenService : IMessageDriven
         {
             var now = DateTime.UtcNow;
             var dbClusterInfo = dbClusters.Find(f => f.ClusterId == clusterId);
+            var consumerType = this.consumerTypes[clusterId];
             if (dbClusterInfo == null)
             {
                 registerClusters.Add(dbClusterInfo = new Cluster
                 {
                     ClusterId = clusterId,
                     ClusterName = clusterId,
-                    BindType = "direct",
+                    BindType = consumerType == ConsumerType.Consumer ? "direct" : "topic",
                     IsEnabled = true,
                     CreatedAt = now,
                     CreatedBy = this.HostName,
@@ -402,7 +437,6 @@ class MessageDrivenService : IMessageDriven
                     UpdatedBy = this.HostName
                 });
             }
-            //dbClusterInfo.UpdatedAt = DateTime.MinValue;
             this.clusters.TryAdd(clusterId, dbClusterInfo);
             //手动更改
             if (!dbClusterInfo.IsEnabled) continue;
@@ -411,40 +445,44 @@ class MessageDrivenService : IMessageDriven
             var ipAddress = this.GetIpAddress();
             if (clusterBindings == null || clusterBindings.Count == 0)
             {
-                var queue = $"{clusterId}.{this.HostName}.queue{dbBindings.Count}";
-                registerBindings.Add(new Binding
+                foreach (var consumrInfo in this.consumers[clusterId])
                 {
-                    BindingId = $"{clusterId}.{this.HostName}{dbBindings.Count}",
-                    ClusterId = clusterId,
-                    BindType = "direct",
-                    BindingKey = dbBindings.Count.ToString(),
-                    Exchange = clusterId,
-                    Queue = queue,
-                    HostName = this.HostName,
-                    IsReply = false,
-                    IsEnabled = true,
-                    CreatedAt = now,
-                    CreatedBy = this.HostName,
-                    UpdatedAt = now,
-                    UpdatedBy = this.HostName
-                });
-                registerConsumers.Add(new Consumer
-                {
-                    ConsumerId = $"{clusterId}.{this.HostName}.worker{dbBindings.Count}",
-                    ClusterId = clusterId,
-                    HostName = this.HostName,
-                    IpAddress = ipAddress,
-                    Queue = queue,
-                    IsReply = false,
-                    IsEnabled = true,
-                    CreatedAt = now,
-                    CreatedBy = this.HostName,
-                    UpdatedAt = now,
-                    UpdatedBy = this.HostName
-                });
+                    registerBindings.Add(new Binding
+                    {
+                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{dbBindings.Count}" : $"{clusterId}.{consumrInfo.Queue}",
+                        ClusterId = clusterId,
+                        BindType = consumerType == ConsumerType.Consumer ? "direct" : "topic",
+                        BindingKey = consumerType == ConsumerType.Consumer ? dbBindings.Count.ToString() : "#",
+                        Exchange = clusterId,
+                        Queue = $"{clusterId}.{consumrInfo.Queue}",
+                        HostName = this.HostName,
+                        IsReply = false,
+                        IsEnabled = true,
+                        CreatedAt = now,
+                        CreatedBy = this.HostName,
+                        UpdatedAt = now,
+                        UpdatedBy = this.HostName
+                    });
+                    var queue = consumerType == ConsumerType.Consumer ? this.HostName : consumrInfo.Queue;
+                    registerConsumers.Add(new Consumer
+                    {
+                        ConsumerId = $"{clusterId}.{queue}.worker{dbBindings.Count}",
+                        ClusterId = clusterId,
+                        HostName = this.HostName,
+                        IpAddress = ipAddress,
+                        Queue = $"{clusterId}.{consumrInfo.Queue}",
+                        IsReply = false,
+                        IsEnabled = true,
+                        CreatedAt = now,
+                        CreatedBy = this.HostName,
+                        UpdatedAt = now,
+                        UpdatedBy = this.HostName
+                    });
+                }
+
+                //只有consumer 有状态类型，才会有结果队列，订阅模式不会有结果队列
                 if (this.replyConsumers.TryGetValue(clusterId + ".result", out _))
                 {
-                    queue = $"{clusterId}.{this.HostName}.result";
                     registerBindings.Add(new Binding
                     {
                         BindingId = $"{clusterId}.result",
@@ -452,7 +490,7 @@ class MessageDrivenService : IMessageDriven
                         BindType = "direct",
                         BindingKey = this.HostName,
                         Exchange = $"{clusterId}.result",
-                        Queue = queue,
+                        Queue = $"{clusterId}.{this.HostName}.result",
                         HostName = this.HostName,
                         IsReply = true,
                         IsEnabled = true,
@@ -467,7 +505,7 @@ class MessageDrivenService : IMessageDriven
                         ClusterId = clusterId,
                         HostName = this.HostName,
                         IpAddress = ipAddress,
-                        Queue = queue,
+                        Queue = $"{clusterId}.{this.HostName}.result",
                         IsReply = true,
                         IsEnabled = true,
                         CreatedAt = now,
@@ -512,38 +550,39 @@ class MessageDrivenService : IMessageDriven
             var clusterId = localClusterInfo.ClusterId;
             this.clusters[clusterId] = dbClusterInfo;
 
+            RabbitProducer rabbitProducer = null;
             if (this.producers.TryGetValue(clusterId, out var producerInfo))
             {
                 var totalCount = dbBindings.Count(f => f.ClusterId == clusterId && !f.IsReply);
                 producerInfo.ConsumerTotalCount = totalCount;
                 producerInfo.RabbitProducer.Create(localClusterInfo);
+                rabbitProducer = producerInfo.RabbitProducer;
             }
             //确保交换机、队列及绑定存在
-            //if (clusterBindings.Count > 0)
-            //{
-            //    if (clusterBindings.Count > 1)
-            //        clusterBindings.Sort((x, y) => x.Queue.CompareTo(y.Queue));
+            if (clusterBindings.Count > 0)
+            {
+                if (clusterBindings.Count > 1)
+                    clusterBindings.Sort((x, y) => x.Queue.CompareTo(y.Queue));
 
-            //    bool isCreated = false;
-            //    if (rabbitProducer == null)
-            //    {
-            //        rabbitProducer = new RabbitProducer(1).Create(dbClusterInfo);
-            //        isCreated = true;
-            //    }
-            //    foreach (var dbClusterBinding in clusterBindings)
-            //    {
-            //        if (dbClusterBinding.IsReply)
-            //            rabbitProducer.CreateReplyQueue(clusterId, this.HostName);
-            //        else rabbitProducer.CreateWorkerQueue(clusterId, "direct", dbClusterBinding.BindingKey, dbClusterBinding.Queue);
-            //    }
-            //    if (isCreated) rabbitProducer.Close();
-            //}
+                bool isCreated = false;
+                if (rabbitProducer == null)
+                {
+                    rabbitProducer = new RabbitProducer(1).Create(dbClusterInfo);
+                    isCreated = true;
+                }
+                foreach (var dbClusterBinding in clusterBindings)
+                {
+                    if (dbClusterBinding.IsReply)
+                        rabbitProducer.CreateReplyQueue(clusterId, this.HostName);
+                    else rabbitProducer.CreateWorkerQueue(clusterId, dbClusterBinding.BindType, dbClusterBinding.BindingKey, dbClusterBinding.Queue);
+                }
+                if (isCreated) rabbitProducer.Close();
+            }
 
             if (this.consumers.TryGetValue(clusterId, out var localConsumerInfos))
             {
                 var requiredBindings = clusterBindings.FindAll(f => f.HostName == this.HostName && !f.IsReply);
-                //localConsumerInfos.Sort((x,y)=>x.)
-                requiredBindings.Sort((x, y) => int.Parse(x.BindingKey).CompareTo(int.Parse(y.BindingKey)));
+                requiredBindings.Sort((x, y) => x.BindingKey.CompareTo(y.BindingKey));
                 for (int i = 0; i < requiredBindings.Count; i++)
                 {
                     var dbBinding = requiredBindings[i];
@@ -602,5 +641,10 @@ class MessageDrivenService : IMessageDriven
             }
         }
         return string.Empty;
+    }
+    enum ConsumerType
+    {
+        Consumer,
+        Subscriber
     }
 }

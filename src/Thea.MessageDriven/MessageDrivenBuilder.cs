@@ -35,6 +35,13 @@ public class MessageDrivenBuilder
         this.service.AddConsumer(clusterId, consumer, methodInfo);
         return this;
     }
+    public MessageDrivenBuilder AddSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)
+    {
+        var consumer = serviceProvider.GetService<TConsumer>();
+        var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
+        this.service.AddSubscriber(clusterId, queue, consumer, methodInfo);
+        return this;
+    }
     public MessageDrivenBuilder Configure<TOrmProvider>(IModelConfiguration configuration) where TOrmProvider : class, IOrmProvider, new()
     {
         this.dbFactory.Configure(typeof(TOrmProvider), configuration);

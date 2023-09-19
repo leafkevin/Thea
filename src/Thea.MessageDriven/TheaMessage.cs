@@ -51,6 +51,7 @@ class ConsumerInfo
     public string ClusterId { get; set; }
     public string ConsumerId { get; set; }
     public string RoutingKey { get; set; }
+    public string Queue { get; set; }
     public RabbitConsumer RabbitConsumer { get; set; }
 }
 class ConsumerExecutor
