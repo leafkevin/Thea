@@ -62,7 +62,8 @@ class MySqlProvider : DbHelper
 				           A.EXTRA,
 				           A.IS_NULLABLE
 				       FROM INFORMATION_SCHEMA.COLUMNS A
-				       WHERE A.TABLE_SCHEMA='{0}' AND A.TABLE_NAME='{1}'";
+				       WHERE A.TABLE_SCHEMA='{0}' AND A.TABLE_NAME='{1}'
+                       ORDER BY A.ORDINAL_POSITION";
 
         sql = String.Format(sql, database, tableName);
         var result = new List<ColumnInfo>();

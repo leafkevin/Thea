@@ -39,7 +39,8 @@ class NpgSqlProvider : DbHelper
 		left join pg_constraint f on a.oid=f.conrelid and f.contype='u' and f.conkey @> array[b.attnum]
 		left join pg_attrdef g on a.oid=g.adrelid and b.attnum=g.adnum
 		left join (select dp.refobjid,dp.refobjsubid from pg_depend dp,pg_class cs where dp.objid=cs.oid and cs.relkind='S') h 
-		on a.oid=h.refobjid and b.attnum=h.refobjsubid where a.relkind='r' and b.attnum>0 and a.relname='{0}' order by b.attnum asc";
+		on a.oid=h.refobjid and b.attnum=h.refobjsubid where a.relkind='r' and b.attnum>0 and a.relname='{0}' 
+        order by b.attnum asc";
 
         sql = string.Format(sql, tableName);
         var result = new List<ColumnInfo>();
