@@ -16,7 +16,7 @@ class RabbitConsumer
     private Func<string, Task<object>> consumerHandler;
     private readonly Action<TheaMessage, Exception> nextHandler;
     private Action<ExecLog> addLogsHandler;
-    private readonly ushort prefetchCount = 5;
+    private readonly ushort prefetchCount = 200;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly string HostName;
     private string consumerId;

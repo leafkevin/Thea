@@ -28,7 +28,7 @@ public class MessageDrivenBuilder
         this.service.AddProducer(clusterId, isUseRpc);
         return this;
     }
-    public MessageDrivenBuilder AddConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
+    public MessageDrivenBuilder AddStatefulConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
     {
         var consumer = serviceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;

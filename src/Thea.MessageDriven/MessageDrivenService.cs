@@ -67,7 +67,7 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每1分钟更新一次链接信息
-                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromSeconds(3000))
+                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromSeconds(30))
                     {
                         await this.Initialize();
                         //确保Consumer是活的
@@ -372,7 +372,7 @@ class MessageDrivenService : IMessageDriven
         if (!this.localClusterIds.Contains(clusterId))
             this.localClusterIds.Add(clusterId);
     }
-    public void Next(TheaMessage message, Exception ex)
+    public void Next(TheaMessage message, Exception exception)
     {
         ResultWaiter resultWaiter = null;
         switch (message.Status)
@@ -395,7 +395,7 @@ class MessageDrivenService : IMessageDriven
                 if (this.messageResults.TryRemove(message.MessageId, out resultWaiter))
                 {
                     if (resultWaiter.Waiter != null)
-                        resultWaiter.Waiter.TrySetException(ex);
+                        resultWaiter.Waiter.TrySetException(exception);
                 }
                 break;
         }
