@@ -20,9 +20,11 @@ namespace Thea.MessageDriven;
 class MessageDrivenService : IMessageDriven
 {
     private readonly Task task;
+    private readonly TimeSpan cycle = TimeSpan.FromSeconds(30);
     private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
     private readonly EventWaitHandle readyToStart = new EventWaitHandle(false, EventResetMode.AutoReset);
     private readonly List<string> localClusterIds = new();
+    private readonly List<DeferredRemovedConsumer> deferredRemovedConsumers = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
     private readonly ConcurrentDictionary<string, Cluster> clusters = new();
     //Key=exchang
@@ -67,7 +69,7 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每1分钟更新一次链接信息
-                    if (DateTime.Now - this.lastInitedTime > TimeSpan.FromSeconds(30))
+                    if (DateTime.Now - this.lastInitedTime > this.cycle)
                     {
                         await this.Initialize();
                         //确保Consumer是活的
@@ -334,7 +336,7 @@ class MessageDrivenService : IMessageDriven
             ClusterId = clusterId,
             ConsumerId = $"{clusterId}.{this.HostName}.worker0",
             RoutingKey = "0",
-            Queue = $"{this.HostName}.queue0",
+            Queue = $"{clusterId}.{this.HostName}.queue0",
             RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
         };
         this.consumers.TryAdd(clusterId, new List<ConsumerInfo> { consumerInfo });
@@ -359,7 +361,7 @@ class MessageDrivenService : IMessageDriven
         var consumerInfo = new ConsumerInfo
         {
             ClusterId = clusterId,
-            ConsumerId = $"{clusterId}.{queue}.worker0",
+            ConsumerId = $"{queue}.worker0",
             RoutingKey = "#",
             Queue = queue,
             RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
@@ -438,7 +440,6 @@ class MessageDrivenService : IMessageDriven
                 });
             }
             this.clusters.TryAdd(clusterId, dbClusterInfo);
-            //手动更改
             if (!dbClusterInfo.IsEnabled) continue;
 
             var clusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId);
@@ -449,12 +450,12 @@ class MessageDrivenService : IMessageDriven
                 {
                     registerBindings.Add(new Binding
                     {
-                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{dbBindings.Count}" : $"{clusterId}.{consumrInfo.Queue}",
+                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{dbBindings.Count}" : $"{consumrInfo.Queue}",
                         ClusterId = clusterId,
                         BindType = consumerType == ConsumerType.Consumer ? "direct" : "topic",
                         BindingKey = consumerType == ConsumerType.Consumer ? dbBindings.Count.ToString() : "#",
                         Exchange = clusterId,
-                        Queue = $"{clusterId}.{consumrInfo.Queue}",
+                        Queue = consumrInfo.Queue,
                         HostName = this.HostName,
                         IsReply = false,
                         IsEnabled = true,
@@ -463,14 +464,14 @@ class MessageDrivenService : IMessageDriven
                         UpdatedAt = now,
                         UpdatedBy = this.HostName
                     });
-                    var queue = consumerType == ConsumerType.Consumer ? this.HostName : consumrInfo.Queue;
+                    var queue = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}" : consumrInfo.Queue;
                     registerConsumers.Add(new Consumer
                     {
-                        ConsumerId = $"{clusterId}.{queue}.worker{dbBindings.Count}",
+                        ConsumerId = $"{queue}.worker{dbBindings.Count}",
                         ClusterId = clusterId,
                         HostName = this.HostName,
                         IpAddress = ipAddress,
-                        Queue = $"{clusterId}.{consumrInfo.Queue}",
+                        Queue = consumrInfo.Queue,
                         IsReply = false,
                         IsEnabled = true,
                         CreatedAt = now,
@@ -615,10 +616,25 @@ class MessageDrivenService : IMessageDriven
                 while (index >= requiredBindings.Count)
                 {
                     //队列也删除掉
-                    localConsumerInfos[index].RabbitConsumer.Remove();
-                    localConsumerInfos[index].RabbitConsumer.Shutdown();
+                    this.deferredRemovedConsumers.Add(new DeferredRemovedConsumer
+                    {
+                        RabbitConsumer = localConsumerInfos[index].RabbitConsumer,
+                        RemovedAt = DateTime.Now
+                    });
                     localConsumerInfos.RemoveAt(index);
                     index--;
+                }
+            }
+        }
+
+        if (this.deferredRemovedConsumers.Count > 0)
+        {
+            foreach (var deferredRemovedConsumer in this.deferredRemovedConsumers)
+            {
+                if (DateTime.Now - deferredRemovedConsumer.RemovedAt > this.cycle * 2)
+                {
+                    deferredRemovedConsumer.RabbitConsumer.Remove();
+                    deferredRemovedConsumer.RabbitConsumer.Shutdown();
                 }
             }
         }
@@ -648,5 +664,10 @@ class MessageDrivenService : IMessageDriven
     {
         Consumer,
         Subscriber
+    }
+    struct DeferredRemovedConsumer
+    {
+        public RabbitConsumer RabbitConsumer { get; set; }
+        public DateTime RemovedAt { get; set; }
     }
 }
