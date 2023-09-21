@@ -72,6 +72,11 @@ class RabbitConsumer
         this.BindHandler(this.channel, this.bindingInfo.Queue);
         this.isNeedBuiding = false;
     }
+    public void Remove()
+    {
+        if (this.channel != null)
+            channel.QueueDelete(this.Queue);
+    }
     public void Shutdown()
     {
         if (this.channel != null)

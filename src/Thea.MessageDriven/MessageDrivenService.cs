@@ -614,6 +614,8 @@ class MessageDrivenService : IMessageDriven
                 var index = localConsumerInfos.Count - 1;
                 while (index >= requiredBindings.Count)
                 {
+                    //队列也删除掉
+                    localConsumerInfos[index].RabbitConsumer.Remove();
                     localConsumerInfos[index].RabbitConsumer.Shutdown();
                     localConsumerInfos.RemoveAt(index);
                     index--;
