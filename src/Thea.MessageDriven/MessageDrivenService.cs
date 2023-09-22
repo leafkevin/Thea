@@ -442,15 +442,15 @@ class MessageDrivenService : IMessageDriven
             this.clusters.TryAdd(clusterId, dbClusterInfo);
             if (!dbClusterInfo.IsEnabled) continue;
 
-            var clusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId);
+            var myClusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId && f.HostName == this.HostName);
             var ipAddress = this.GetIpAddress();
-            if (clusterBindings == null || clusterBindings.Count == 0)
+            if (myClusterBindings == null || myClusterBindings.Count == 0)
             {
                 foreach (var consumrInfo in this.consumers[clusterId])
                 {
                     registerBindings.Add(new Binding
                     {
-                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{dbBindings.Count}" : $"{consumrInfo.Queue}",
+                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myClusterBindings.Count}" : $"{consumrInfo.Queue}{myClusterBindings.Count}",
                         ClusterId = clusterId,
                         BindType = consumerType == ConsumerType.Consumer ? "direct" : "topic",
                         BindingKey = consumerType == ConsumerType.Consumer ? dbBindings.Count.ToString() : "#",
@@ -467,7 +467,7 @@ class MessageDrivenService : IMessageDriven
                     var queue = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}" : consumrInfo.Queue;
                     registerConsumers.Add(new Consumer
                     {
-                        ConsumerId = $"{queue}.worker{dbBindings.Count}",
+                        ConsumerId = $"{queue}.worker{myClusterBindings.Count}",
                         ClusterId = clusterId,
                         HostName = this.HostName,
                         IpAddress = ipAddress,
