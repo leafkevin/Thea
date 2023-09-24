@@ -169,7 +169,17 @@ class RabbitConsumer
             jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             message = jsonBody.JsonTo<TheaMessage>();
             message.Queue = this.Queue;
-
+            //兼容现非框架队列消息
+            if (string.IsNullOrEmpty(message.MessageId) && string.IsNullOrEmpty(message.ClusterId))
+            {
+                message.ClusterId = this.clusterInfo.ClusterId;
+                message.RoutingKey = this.bindingInfo.BindingKey;
+                message.MessageId = ObjectId.NewId();
+                message.HostName = this.HostName;
+                message.Exchange = this.bindingInfo.Exchange;
+                message.Status = MessageStatus.None;
+                message.Message = jsonBody;
+            }
             while (iLoop < 3)
             {
                 try
@@ -192,6 +202,7 @@ class RabbitConsumer
                 LogId = ObjectId.NewId(),
                 ClusterId = message.ClusterId,
                 RoutingKey = ea.RoutingKey,
+                Queue = this.Queue,
                 Body = jsonBody,
                 IsSuccess = isSuccess,
                 Result = result,

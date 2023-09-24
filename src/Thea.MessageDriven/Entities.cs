@@ -182,6 +182,10 @@ public class ExecLog
     /// </summary>
     public string RoutingKey { get; set; }
     /// <summary>
+    /// 队列
+    /// </summary>
+    public string Queue { get; set; }
+    /// <summary>
     /// 消息内容
     /// </summary>
     public string Body { get; set; }

@@ -69,14 +69,14 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每1分钟更新一次链接信息
-                    if (DateTime.Now - this.lastInitedTime > this.cycle)
+                    if (DateTime.UtcNow - this.lastInitedTime > this.cycle)
                     {
                         await this.Initialize();
                         //确保Consumer是活的
                         this.EnsureAvailable();
-                        this.lastInitedTime = DateTime.Now;
+                        this.lastInitedTime = DateTime.UtcNow;
                     }
-                    if (DateTime.Now - this.lastUpdateTime > TimeSpan.FromSeconds(10))
+                    if (DateTime.UtcNow - this.lastUpdateTime > TimeSpan.FromSeconds(10))
                     {
                         await this.repository.Update(this.HostName);
                         if (logs.Count > 0)
@@ -84,7 +84,7 @@ class MessageDrivenService : IMessageDriven
                             await this.repository.AddLogs(logs);
                             logs.Clear();
                         }
-                        this.lastUpdateTime = DateTime.Now;
+                        this.lastUpdateTime = DateTime.UtcNow;
                     }
                     if (logs.Count >= 100)
                     {
@@ -142,7 +142,6 @@ class MessageDrivenService : IMessageDriven
             this.task.Wait();
         this.cancellationSource.Dispose();
     }
-
     public void Publish<TMessage>(string exchange, string routingKey, TMessage message)
     {
         if (!this.producers.TryGetValue(exchange, out var producerInfo))
@@ -442,36 +441,37 @@ class MessageDrivenService : IMessageDriven
             this.clusters.TryAdd(clusterId, dbClusterInfo);
             if (!dbClusterInfo.IsEnabled) continue;
 
-            var myClusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId && f.HostName == this.HostName);
-            var ipAddress = this.GetIpAddress();
-            if (myClusterBindings == null || myClusterBindings.Count == 0)
+            if (!this.consumers.TryGetValue(clusterId, out var localConsumers)
+                || localConsumers == null || localConsumers.Count == 0)
+                continue;
+
+            foreach (var localConsumer in localConsumers)
             {
-                foreach (var consumrInfo in this.consumers[clusterId])
+                List<Binding> myClusterBindings = null;
+                if (consumerType == ConsumerType.Consumer)
+                    myClusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId && f.HostName == this.HostName);
+                else myClusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId && f.Queue == localConsumer.Queue);
+                string bingdingKey = "#";
+                if (consumerType == ConsumerType.Consumer)
+                    bingdingKey = dbBindings.Count(f => f.ClusterId == clusterId && f.Queue == localConsumer.Queue).ToString();
+                var ipAddress = this.GetIpAddress();
+
+                //判断队列交换机绑定是否存在
+                if (myClusterBindings == null || myClusterBindings.Count == 0)
                 {
+                    string queue = null;
+                    if (consumerType == ConsumerType.Consumer)
+                        queue = $"{clusterId}.{this.HostName}{myClusterBindings.Count}";
+
                     registerBindings.Add(new Binding
                     {
-                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myClusterBindings.Count}" : $"{consumrInfo.Queue}{myClusterBindings.Count}",
+                        BindingId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myClusterBindings.Count}" : localConsumer.Queue,
                         ClusterId = clusterId,
                         BindType = consumerType == ConsumerType.Consumer ? "direct" : "topic",
-                        BindingKey = consumerType == ConsumerType.Consumer ? dbBindings.Count.ToString() : "#",
+                        BindingKey = bingdingKey,
                         Exchange = clusterId,
-                        Queue = consumrInfo.Queue,
+                        Queue = localConsumer.Queue,
                         HostName = this.HostName,
-                        IsReply = false,
-                        IsEnabled = true,
-                        CreatedAt = now,
-                        CreatedBy = this.HostName,
-                        UpdatedAt = now,
-                        UpdatedBy = this.HostName
-                    });
-                    var queue = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}" : consumrInfo.Queue;
-                    registerConsumers.Add(new Consumer
-                    {
-                        ConsumerId = $"{queue}.worker{myClusterBindings.Count}",
-                        ClusterId = clusterId,
-                        HostName = this.HostName,
-                        IpAddress = ipAddress,
-                        Queue = consumrInfo.Queue,
                         IsReply = false,
                         IsEnabled = true,
                         CreatedAt = now,
@@ -480,9 +480,10 @@ class MessageDrivenService : IMessageDriven
                         UpdatedBy = this.HostName
                     });
                 }
-
                 //只有consumer 有状态类型，才会有结果队列，订阅模式不会有结果队列
-                if (this.replyConsumers.TryGetValue(clusterId + ".result", out _))
+                if (this.replyConsumers.TryGetValue(clusterId + ".result", out _)
+                    && (myClusterBindings == null || myClusterBindings.Count == 0
+                    || !myClusterBindings.Exists(f => f.ClusterId == clusterId && f.Queue == $"{clusterId}.result")))
                 {
                     registerBindings.Add(new Binding
                     {
@@ -508,6 +509,24 @@ class MessageDrivenService : IMessageDriven
                         IpAddress = ipAddress,
                         Queue = $"{clusterId}.{this.HostName}.result",
                         IsReply = true,
+                        IsEnabled = true,
+                        CreatedAt = now,
+                        CreatedBy = this.HostName,
+                        UpdatedAt = now,
+                        UpdatedBy = this.HostName
+                    });
+                }
+                //判断consumer是否存在
+                if (!dbConsumers.Exists(f => f.ClusterId == clusterId && f.HostName == this.HostName && f.Queue == localConsumer.Queue))
+                {
+                    registerConsumers.Add(new Consumer
+                    {
+                        ConsumerId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myClusterBindings.Count}" : $"{localConsumer.Queue}.worker{myClusterBindings.Count}",
+                        ClusterId = clusterId,
+                        HostName = this.HostName,
+                        IpAddress = ipAddress,
+                        Queue = localConsumer.Queue,
+                        IsReply = false,
                         IsEnabled = true,
                         CreatedAt = now,
                         CreatedBy = this.HostName,
@@ -582,8 +601,15 @@ class MessageDrivenService : IMessageDriven
 
             if (this.consumers.TryGetValue(clusterId, out var localConsumerInfos))
             {
-                var requiredBindings = clusterBindings.FindAll(f => f.HostName == this.HostName && !f.IsReply);
-                requiredBindings.Sort((x, y) => x.BindingKey.CompareTo(y.BindingKey));
+                List<Binding> requiredBindings = null;
+                if (!this.consumerTypes.TryGetValue(clusterId, out var consumerType))
+                    continue;
+                if (consumerType == ConsumerType.Consumer)
+                    requiredBindings = clusterBindings.FindAll(f => f.HostName == this.HostName && !f.IsReply);
+                else requiredBindings = clusterBindings.FindAll(f => !f.IsReply);
+
+                if (requiredBindings.Count > 1)
+                    requiredBindings.Sort((x, y) => x.BindingKey.CompareTo(y.BindingKey));
                 for (int i = 0; i < requiredBindings.Count; i++)
                 {
                     var dbBinding = requiredBindings[i];
