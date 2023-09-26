@@ -519,9 +519,13 @@ class MessageDrivenService : IMessageDriven
                 //判断consumer是否存在
                 if (!dbConsumers.Exists(f => f.ClusterId == clusterId && f.HostName == this.HostName && f.Queue == localConsumer.Queue))
                 {
+                    int myConsumerCount = 0;
+                    if (consumerType == ConsumerType.Consumer)
+                        myConsumerCount = dbConsumers.Count(f => f.ClusterId == clusterId && f.HostName == this.HostName && f.Queue == localConsumer.Queue);
+                    else myConsumerCount = dbConsumers.Count(f => f.ClusterId == clusterId && f.Queue == localConsumer.Queue);
                     registerConsumers.Add(new Consumer
                     {
-                        ConsumerId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myClusterBindings.Count}" : $"{localConsumer.Queue}.worker{myClusterBindings.Count}",
+                        ConsumerId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myConsumerCount}" : $"{localConsumer.Queue}.worker{myConsumerCount}",
                         ClusterId = clusterId,
                         HostName = this.HostName,
                         IpAddress = ipAddress,
