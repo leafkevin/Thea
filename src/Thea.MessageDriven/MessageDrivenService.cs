@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -525,7 +524,7 @@ class MessageDrivenService : IMessageDriven
                     else myConsumerCount = dbConsumers.Count(f => f.ClusterId == clusterId && f.Queue == localConsumer.Queue);
                     registerConsumers.Add(new Consumer
                     {
-                        ConsumerId = consumerType == ConsumerType.Consumer ? $"{clusterId}.{this.HostName}{myConsumerCount}" : $"{localConsumer.Queue}.worker{myConsumerCount}",
+                        ConsumerId = ObjectId.NewId(),
                         ClusterId = clusterId,
                         HostName = this.HostName,
                         IpAddress = ipAddress,
