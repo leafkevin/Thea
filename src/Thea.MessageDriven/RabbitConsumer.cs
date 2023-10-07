@@ -62,11 +62,11 @@ class RabbitConsumer
             this.CreateReplyQueue(this.clusterInfo.ClusterId, this.HostName);
         else this.CreateWorkerQueue(this.clusterInfo.ClusterId, this.clusterInfo.BindType, this.bindingInfo.BindingKey, this.bindingInfo.Queue);
 
-        this.channel.BasicQos(0, (ushort)this.clusterInfo.PrefetchCount, false);
+        this.channel.BasicQos(0, (ushort)this.bindingInfo.PrefetchCount, false);
         this.channel.BasicRecoverOk += (o, e) =>
         {
             var model = o as IModel;
-            model.BasicQos(0, (ushort)this.clusterInfo.PrefetchCount, false);
+            model.BasicQos(0, (ushort)this.bindingInfo.PrefetchCount, false);
         };
         this.BindHandler(this.channel, this.bindingInfo.Queue);
         this.isNeedBuiding = false;
@@ -102,7 +102,8 @@ class RabbitConsumer
         this.consumerId = consumerId;
         if (this.isNeedBuiding || this.bindingInfo == null || bindingInfo.BindType != this.bindingInfo.BindType
             || bindingInfo.BindingKey != this.bindingInfo.BindingKey || bindingInfo.Queue != this.bindingInfo.Queue
-            || bindingInfo.Exchange != this.bindingInfo.Exchange || bindingInfo.IsReply != this.bindingInfo.IsReply)
+            || bindingInfo.Exchange != this.bindingInfo.Exchange || bindingInfo.IsReply != this.bindingInfo.IsReply
+            || bindingInfo.PrefetchCount != this.bindingInfo.PrefetchCount)
         {
             this.Shutdown();
             this.factory = new ConnectionFactory

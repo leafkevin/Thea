@@ -32,10 +32,6 @@ public class Cluster
     /// </summary>
     public string Password { get; set; }
     /// <summary>
-    /// 预取消息个数
-    /// </summary>
-    public int PrefetchCount { get; set; }
-    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
@@ -89,6 +85,10 @@ public class Binding
     /// 主机名称
     /// </summary>
     public string HostName { get; set; }
+    /// <summary>
+    /// 预取消息个数
+    /// </summary>
+    public int PrefetchCount { get; set; }
     /// <summary>
     /// 是否应答队列
     /// </summary>
