@@ -1,6 +1,7 @@
 ﻿using RabbitMQ.Client;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 
 namespace Thea.MessageDriven;
@@ -31,7 +32,11 @@ class RabbitProducer : IDisposable
                 UseBackgroundThreadsForIO = true,
                 AutomaticRecoveryEnabled = true,
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
-                NetworkRecoveryInterval = TimeSpan.FromSeconds(2)
+                NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
+                ClientProperties = new Dictionary<string, object>() {
+                    { "application", $"{clusterInfo.ClusterId}.producer" },
+                    { "client_api", $"Thea.MessageDriven" }
+                }
             };
             this.connection = this.factory.CreateConnection();
             for (int i = 0; i < channelSize; i++)

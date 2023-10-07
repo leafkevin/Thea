@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -114,7 +115,11 @@ class RabbitConsumer
                 UseBackgroundThreadsForIO = true,
                 AutomaticRecoveryEnabled = true,
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
-                NetworkRecoveryInterval = TimeSpan.FromSeconds(2)
+                NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
+                ClientProperties = new Dictionary<string, object>() {
+                    { "application", $"{clusterInfo.ClusterId}.{consumerId}" },
+                    { "client_api", $"Thea.MessageDriven" }
+                }
             };
             this.clusterInfo = clusterInfo;
             this.isNeedBuiding = true;
