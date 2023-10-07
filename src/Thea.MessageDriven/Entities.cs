@@ -32,6 +32,10 @@ public class Cluster
     /// </summary>
     public string Password { get; set; }
     /// <summary>
+    /// 预取消息个数
+    /// </summary>
+    public int PrefetchCount { get; set; }
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }

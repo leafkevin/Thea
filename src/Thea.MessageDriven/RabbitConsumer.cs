@@ -17,7 +17,6 @@ class RabbitConsumer
     private Func<string, Task<object>> consumerHandler;
     private readonly Action<TheaMessage, Exception> nextHandler;
     private Action<ExecLog> addLogsHandler;
-    private readonly ushort prefetchCount = 200;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly string HostName;
     private string consumerId;
@@ -26,7 +25,6 @@ class RabbitConsumer
     private volatile IModel channel = null;
     private volatile Cluster clusterInfo;
     private volatile Binding bindingInfo;
-    private DateTime updatedAt;
     public string Queue { get; set; }
 
     public bool IsAvailable
@@ -64,11 +62,11 @@ class RabbitConsumer
             this.CreateReplyQueue(this.clusterInfo.ClusterId, this.HostName);
         else this.CreateWorkerQueue(this.clusterInfo.ClusterId, this.clusterInfo.BindType, this.bindingInfo.BindingKey, this.bindingInfo.Queue);
 
-        this.channel.BasicQos(0, this.prefetchCount, false);
+        this.channel.BasicQos(0, (ushort)this.clusterInfo.PrefetchCount, false);
         this.channel.BasicRecoverOk += (o, e) =>
         {
             var model = o as IModel;
-            model.BasicQos(0, this.prefetchCount, false);
+            model.BasicQos(0, (ushort)this.clusterInfo.PrefetchCount, false);
         };
         this.BindHandler(this.channel, this.bindingInfo.Queue);
         this.isNeedBuiding = false;
