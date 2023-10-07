@@ -34,11 +34,11 @@ class RabbitProducer : IDisposable
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
                 NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
                 ClientProperties = new Dictionary<string, object>() {
-                    { "application", $"{clusterInfo.ClusterId}.producer" },
+                    { "connection_name", $"{clusterInfo.ClusterId}.producer" },
                     { "client_api", $"Thea.MessageDriven" }
                 }
             };
-            this.connection = this.factory.CreateConnection();
+            this.connection = this.factory.CreateConnection($"{clusterInfo.ClusterId}.producer");
             for (int i = 0; i < channelSize; i++)
             {
                 var channel = new Channel(this.connection);

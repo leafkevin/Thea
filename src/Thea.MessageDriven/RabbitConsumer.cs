@@ -57,7 +57,7 @@ class RabbitConsumer
     public void Start()
     {
         if (this.factory == null || !this.isNeedBuiding) return;
-        this.connection = this.factory.CreateConnection();
+        this.connection = this.factory.CreateConnection(this.consumerId);
         this.channel = this.connection.CreateModel();
 
         if (this.bindingInfo.IsReply)
@@ -117,7 +117,7 @@ class RabbitConsumer
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
                 NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
                 ClientProperties = new Dictionary<string, object>() {
-                    { "application", $"{clusterInfo.ClusterId}.{consumerId}" },
+                    { "connection_name", consumerId },
                     { "client_api", $"Thea.MessageDriven" }
                 }
             };
