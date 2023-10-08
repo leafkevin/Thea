@@ -75,6 +75,7 @@ class RabbitProducer : IDisposable
     }
     public void CreateWorkerQueue(string clusterId, string bindType, string bindingKey, string queue)
     {
+        //ring buffer环形无锁channel池
         var channel = this.channelQueue.Take();
         channel.CreateExchangeQueue(clusterId, bindType, bindingKey, queue);
         this.channelQueue.Add(channel);

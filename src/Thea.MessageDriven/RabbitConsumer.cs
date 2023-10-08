@@ -103,7 +103,7 @@ class RabbitConsumer
         if (this.isNeedBuiding || this.bindingInfo == null || bindingInfo.BindType != this.bindingInfo.BindType
             || bindingInfo.BindingKey != this.bindingInfo.BindingKey || bindingInfo.Queue != this.bindingInfo.Queue
             || bindingInfo.Exchange != this.bindingInfo.Exchange || bindingInfo.IsReply != this.bindingInfo.IsReply
-            || bindingInfo.PrefetchCount != this.bindingInfo.PrefetchCount)
+            || bindingInfo.PrefetchCount != this.bindingInfo.PrefetchCount || bindingInfo.IsSingleActiveConsumer != this.bindingInfo.IsSingleActiveConsumer)
         {
             this.Shutdown();
             this.factory = new ConnectionFactory
@@ -146,7 +146,10 @@ class RabbitConsumer
             _ => clusterId
         };
         this.channel.ExchangeDeclare(exchange, bindType, true);
-        this.channel.QueueDeclare(queue, true, false, false);
+        IDictionary<string, object> arguments = null;
+        if (this.bindingInfo.IsSingleActiveConsumer)
+            arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
+        this.channel.QueueDeclare(queue, true, false, false, arguments);
         this.channel.QueueBind(queue, clusterId, bindingKey);
     }
     private void CreateReplyQueue(string clusterId, string hostName)
@@ -155,6 +158,7 @@ class RabbitConsumer
         var exchange = $"{clusterId}.result";
         var queue = $"{clusterId}.{hostName}.result";
         this.channel.ExchangeDeclare(exchange, "direct", true);
+        //应答队列暂时不做Single Active Consumer
         this.channel.QueueDeclare(queue, true, false, false);
         this.channel.QueueBind(queue, exchange, hostName);
     }
@@ -172,7 +176,6 @@ class RabbitConsumer
 
             jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             message = jsonBody.JsonTo<TheaMessage>();
-            message.Queue = this.Queue;
             //兼容现非框架队列消息
             if (string.IsNullOrEmpty(message.MessageId) && string.IsNullOrEmpty(message.ClusterId))
             {
@@ -184,6 +187,7 @@ class RabbitConsumer
                 message.Status = MessageStatus.None;
                 message.Message = jsonBody;
             }
+            message.Queue = this.Queue;
             while (iLoop < 3)
             {
                 try

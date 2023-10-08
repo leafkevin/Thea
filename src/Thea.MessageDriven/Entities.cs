@@ -90,6 +90,10 @@ public class Binding
     /// </summary>
     public int PrefetchCount { get; set; }
     /// <summary>
+    /// 是否单一激活消费者
+    /// </summary>
+    public bool IsSingleActiveConsumer { get; set; }
+    /// <summary>
     /// 是否应答队列
     /// </summary>
     public bool IsReply { get; set; }

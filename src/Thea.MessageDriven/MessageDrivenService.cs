@@ -472,6 +472,7 @@ class MessageDrivenService : IMessageDriven
                         Queue = localConsumer.Queue,
                         HostName = this.HostName,
                         PrefetchCount = 250,
+                        IsSingleActiveConsumer = true,
                         IsReply = false,
                         IsEnabled = true,
                         CreatedAt = now,
@@ -494,7 +495,23 @@ class MessageDrivenService : IMessageDriven
                         Exchange = $"{clusterId}.result",
                         Queue = $"{clusterId}.{this.HostName}.result",
                         HostName = this.HostName,
-                        PrefetchCount = 1,
+                        PrefetchCount = 250,
+                        IsSingleActiveConsumer = true,
+                        IsReply = true,
+                        IsEnabled = true,
+                        CreatedAt = now,
+                        CreatedBy = this.HostName,
+                        UpdatedAt = now,
+                        UpdatedBy = this.HostName
+                    });
+                    //结果队列在sac模式启动两个消费者
+                    registerConsumers.Add(new Consumer
+                    {
+                        ConsumerId = $"{clusterId}.{this.HostName}.result0",
+                        ClusterId = clusterId,
+                        HostName = this.HostName,
+                        IpAddress = ipAddress,
+                        Queue = $"{clusterId}.{this.HostName}.result",
                         IsReply = true,
                         IsEnabled = true,
                         CreatedAt = now,
@@ -504,7 +521,7 @@ class MessageDrivenService : IMessageDriven
                     });
                     registerConsumers.Add(new Consumer
                     {
-                        ConsumerId = $"{clusterId}.{this.HostName}.result",
+                        ConsumerId = $"{clusterId}.{this.HostName}.result1",
                         ClusterId = clusterId,
                         HostName = this.HostName,
                         IpAddress = ipAddress,
