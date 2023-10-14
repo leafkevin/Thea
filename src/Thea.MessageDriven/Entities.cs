@@ -32,6 +32,10 @@ public class Cluster
     /// </summary>
     public string Password { get; set; }
     /// <summary>
+    /// 是否开启日志
+    /// </summary>
+    public bool IsLogEnabled { get; set; }
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
@@ -97,60 +101,6 @@ public class Binding
     /// 是否应答队列
     /// </summary>
     public bool IsReply { get; set; }
-    /// <summary>
-    /// 是否启用
-    /// </summary>
-    public bool IsEnabled { get; set; }
-    /// <summary>
-    /// 创建人
-    /// </summary>
-    public string CreatedBy { get; set; }
-    /// <summary>
-    /// 创建日期
-    /// </summary>
-    public DateTime CreatedAt { get; set; }
-    /// <summary>
-    /// 最后更新人
-    /// </summary>
-    public string UpdatedBy { get; set; }
-    /// <summary>
-    /// 最后更新日期
-    /// </summary>
-    public DateTime UpdatedAt { get; set; }
-}
-/// <summary>
-/// 消费者表，描述消息驱动所有的业务的消费者
-/// </summary>
-public class Consumer
-{
-    /// <summary>
-    /// 消费者ID
-    /// </summary>
-    public string ConsumerId { get; set; }
-    /// <summary>
-    /// 集群ID
-    /// </summary>
-    public string ClusterId { get; set; }
-    /// <summary>
-    /// 队列
-    /// </summary>
-    public string Queue { get; set; }
-    /// <summary>
-    /// 是否应答消费者
-    /// </summary>
-    public bool IsReply { get; set; }
-    /// <summary>
-    /// 主机名称
-    /// </summary>
-    public string HostName { get; set; }
-    /// <summary>
-    /// IP地址
-    /// </summary>
-    public string IpAddress { get; set; }
-    /// <summary>
-    /// 最后运行时间
-    /// </summary>
-    public DateTime LastExecutedTime { get; set; }
     /// <summary>
     /// 是否启用
     /// </summary>

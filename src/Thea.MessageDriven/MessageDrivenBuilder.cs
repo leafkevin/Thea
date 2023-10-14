@@ -32,7 +32,7 @@ public class MessageDrivenBuilder
     {
         var consumer = serviceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.service.AddConsumer(clusterId, consumer, methodInfo);
+        this.service.AddStatefulConsumer(clusterId, consumer, methodInfo);
         return this;
     }
     public MessageDrivenBuilder AddSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)

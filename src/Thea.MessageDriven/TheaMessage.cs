@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
 
-class TheaMessage
+public class TheaMessage
 {
     public string MessageId { get; set; }
     public string HostName { get; set; }
@@ -27,6 +27,7 @@ public enum MessageStatus
 enum MessageType
 {
     TheaMessage,
+    OrgMessage,
     Logs
 }
 class Message
@@ -52,6 +53,7 @@ class ConsumerInfo
     public string ConsumerId { get; set; }
     public string RoutingKey { get; set; }
     public string Queue { get; set; }
+    public bool IsStateful { get; set; }
     public RabbitConsumer RabbitConsumer { get; set; }
 }
 class ConsumerExecutor

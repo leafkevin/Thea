@@ -11,12 +11,12 @@ public interface IMessageDriven
     void Start();
     void Shutdown();
 
-    void Publish<TMessage>(string exchange, string routingKey, TMessage message);
-    Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message);
-    void Publish<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector);
-    Task PublishAsync<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector);
-    TResponse Request<TRequst, TResponse>(string exchange, string routingKey, TRequst message);
-    Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest message);
-    List<TResponse> Request<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector);
-    Task<List<TResponse>> RequestAsync<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector);
+    void Publish<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true);
+    Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true);
+    void Publish<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector, bool isTheaMessage = true);
+    Task PublishAsync<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector, bool isTheaMessage = true);
+    TResponse Request<TRequst, TResponse>(string exchange, string routingKey, TRequst message, bool isTheaMessage = true);
+    Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest message, bool isTheaMessage = true);
+    List<TResponse> Request<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector, bool isTheaMessage = true);
+    Task<List<TResponse>> RequestAsync<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector, bool isTheaMessage = true);
 }

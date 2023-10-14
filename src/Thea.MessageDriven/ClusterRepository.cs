@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Thea.Orm;
 
@@ -14,12 +13,11 @@ class ClusterRepository
         this.dbFactory = dbFactory;
         this.dbKey = dbKey;
     }
-    public async Task<(List<Cluster>, List<Binding>, List<Consumer>)> GetClusterInfo(string hostName, List<string> clusterIds)
+    public async Task<(List<Cluster>, List<Binding>)> GetClusterInfo(List<string> clusterIds)
     {
         using var repository = this.dbFactory.Create(this.dbKey);
         return (await repository.QueryAsync<Cluster>(f => clusterIds.Contains(f.ClusterId)),
-            await repository.QueryAsync<Binding>(f => clusterIds.Contains(f.ClusterId)),
-            await repository.QueryAsync<Consumer>(f => f.HostName == hostName && clusterIds.Contains(f.ClusterId)));
+            await repository.QueryAsync<Binding>(f => clusterIds.Contains(f.ClusterId)));
     }
     public async Task<int> Register(List<Cluster> clusters)
     {
@@ -30,17 +28,6 @@ class ClusterRepository
     {
         using var repository = this.dbFactory.Create(this.dbKey);
         return await repository.CreateAsync<Binding>(bindings);
-    }
-    public async Task<int> Register(List<Consumer> consumers)
-    {
-        using var repository = this.dbFactory.Create(this.dbKey);
-        return await repository.CreateAsync<Consumer>(consumers);
-    }
-    public async Task Update(string hostName)
-    {
-        using var repository = this.dbFactory.Create(this.dbKey);
-        await repository.UpdateAsync<Consumer>(f => new { LastExecutedTime = DateTime.Now }, f => f.HostName == hostName);
-        repository.Close();
     }
     public async Task AddLogs(List<ExecLog> logInfos)
     {

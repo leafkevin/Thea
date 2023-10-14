@@ -25,6 +25,7 @@ class RabbitConsumer
     private volatile IModel channel = null;
     private volatile Cluster clusterInfo;
     private volatile Binding bindingInfo;
+    private volatile bool isLogEnabled = false;
     public string Queue { get; set; }
 
     public bool IsAvailable
@@ -71,7 +72,7 @@ class RabbitConsumer
         this.BindHandler(this.channel, this.bindingInfo.Queue);
         this.isNeedBuiding = false;
     }
-    public void Remove()
+    public void RemoveQueue()
     {
         if (this.channel != null)
             channel.QueueDelete(this.Queue);
@@ -131,6 +132,8 @@ class RabbitConsumer
             this.Queue = this.bindingInfo.Queue;
             this.isNeedBuiding = true;
         }
+        if (clusterInfo != null)
+            this.isLogEnabled = clusterInfo.IsLogEnabled;
         return this;
     }
     private void CreateWorkerQueue(string clusterId, string bindType, string bindingKey, string queue)
@@ -177,14 +180,13 @@ class RabbitConsumer
             jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             message = jsonBody.JsonTo<TheaMessage>();
             //兼容现非框架队列消息
-            if (string.IsNullOrEmpty(message.MessageId) && string.IsNullOrEmpty(message.ClusterId))
+            if (message.Message == null)
             {
-                message.ClusterId = this.clusterInfo.ClusterId;
-                message.RoutingKey = this.bindingInfo.BindingKey;
-                message.MessageId = ObjectId.NewId();
-                message.HostName = this.HostName;
-                message.Exchange = this.bindingInfo.Exchange;
-                message.Status = MessageStatus.None;
+                message.ClusterId ??= this.clusterInfo.ClusterId;
+                message.RoutingKey ??= this.bindingInfo.BindingKey;
+                message.MessageId ??= ObjectId.NewId();
+                message.HostName ??= this.HostName;
+                message.Exchange ??= this.bindingInfo.Exchange;
                 message.Message = jsonBody;
             }
             message.Queue = this.Queue;
@@ -198,8 +200,7 @@ class RabbitConsumer
                 catch (Exception ex)
                 {
                     isSuccess = false;
-                    exception = ex;
-                    resp = TheaResponse.Fail(-1, ex.ToString(), ex);
+                    exception = ex.InnerException ?? ex;
                 }
                 iLoop++;
                 Thread.Sleep(1000);
@@ -220,12 +221,19 @@ class RabbitConsumer
                 UpdatedAt = DateTime.Now,
                 UpdatedBy = this.consumerId
             };
-            this.addLogsHandler.Invoke(logInfo);
-            if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
+            if (this.isLogEnabled || !isSuccess)
+            {
+                this.addLogsHandler.Invoke(logInfo);
+                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
+            }
             if (message.Status == MessageStatus.WaitForReply)
             {
-                message.Message = resp.ToJson();
-                message.Status = isSuccess ? MessageStatus.SetResult : MessageStatus.SetException;
+                if (isSuccess)
+                {
+                    message.Message = resp.ToJson();
+                    message.Status = MessageStatus.SetResult;
+                }
+                else message.Status = MessageStatus.SetException;
                 this.nextHandler.Invoke(message, exception);
             }
             channel.BasicAck(ea.DeliveryTag, false);

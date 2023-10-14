@@ -15,9 +15,8 @@ class RabbitProducer : IDisposable
     private volatile Cluster clusterInfo;
     private readonly int channelSize = 10;
 
-    public string ClusterId => this.clusterInfo?.ClusterId;
     public RabbitProducer(int channelSize = 10) => this.channelSize = channelSize;
-    public RabbitProducer Create(Cluster clusterInfo)
+    public RabbitProducer Create(string producerName, Cluster clusterInfo)
     {
         if (this.clusterInfo == null || clusterInfo.Url != this.clusterInfo.Url
             || clusterInfo.User != this.clusterInfo.User || clusterInfo.Password != this.clusterInfo.Password)
@@ -34,11 +33,11 @@ class RabbitProducer : IDisposable
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
                 NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
                 ClientProperties = new Dictionary<string, object>() {
-                    { "connection_name", $"{clusterInfo.ClusterId}.producer" },
-                    { "client_api", $"Thea.MessageDriven" }
+                    { "connection_name", producerName },
+                    { "client_api", $"MessageDriven" }
                 }
             };
-            this.connection = this.factory.CreateConnection($"{clusterInfo.ClusterId}.producer");
+            this.connection = this.factory.CreateConnection(producerName);
             for (int i = 0; i < channelSize; i++)
             {
                 var channel = new Channel(this.connection);
@@ -73,11 +72,11 @@ class RabbitProducer : IDisposable
             this.connection.Close();
         this.connection = null;
     }
-    public void CreateWorkerQueue(string clusterId, string bindType, string bindingKey, string queue)
+    public void CreateWorkerQueue(string clusterId, Binding bindingInfo)
     {
         //ring buffer环形无锁channel池
         var channel = this.channelQueue.Take();
-        channel.CreateExchangeQueue(clusterId, bindType, bindingKey, queue);
+        channel.CreateExchangeQueue(clusterId, bindingInfo);
         this.channelQueue.Add(channel);
     }
     public void CreateReplyQueue(string clusterId, string HostName)
@@ -85,7 +84,8 @@ class RabbitProducer : IDisposable
         var exchange = $"{clusterId}.result";
         var queue = $"{clusterId}.{HostName}.result";
         var channel = this.channelQueue.Take();
-        channel.CreateExchangeQueue(exchange, "direct", HostName, queue);
+        var bindingInfo = new Binding { BindType = "direct", BindingKey = HostName, Queue = queue };
+        channel.CreateExchangeQueue(exchange, bindingInfo);
         this.channelQueue.Add(channel);
     }
     private void AddChannelsToQueue()
@@ -109,13 +109,17 @@ class Channel
     }
     public void TryPublish(string exchange, string routingKey, byte[] message)
         => this.Model.BasicPublish(exchange, routingKey, this.Properties, message);
-    public void CreateExchangeQueue(string exchange, string bindType, string bindingKey, string queue)
+    public void CreateExchangeQueue(string exchange, Binding bindingInfo)
     {
+        var bindType = bindingInfo.BindType;
         if (string.IsNullOrEmpty(bindType))
             bindType = "direct";
+        IDictionary<string, object> arguments = null;
+        if (bindingInfo.IsSingleActiveConsumer)
+            arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
         this.Model.ExchangeDeclare(exchange, bindType, true, false);
-        this.Model.QueueDeclare(queue, true, false, false);
-        this.Model.QueueBind(queue, exchange, bindingKey);
+        this.Model.QueueDeclare(bindingInfo.Queue, true, false, false, arguments);
+        this.Model.QueueBind(bindingInfo.Queue, exchange, bindingInfo.BindingKey);
     }
     public void Close() => this.Model.Close();
 }
