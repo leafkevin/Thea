@@ -10,7 +10,7 @@ public class MessageDrivenBuilder
     private readonly IOrmDbFactory dbFactory;
     private readonly IServiceProvider serviceProvider;
 
-    internal MessageDrivenBuilder(IServiceProvider serviceProvider)
+    public MessageDrivenBuilder(IServiceProvider serviceProvider)
     {
         this.serviceProvider = serviceProvider;
         this.service = serviceProvider.GetService<IMessageDriven>() as MessageDrivenService;

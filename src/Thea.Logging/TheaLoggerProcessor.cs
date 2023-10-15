@@ -63,8 +63,8 @@ namespace Thea.Logging
                                     }
                                     logEntities.Clear();
                                 }
-								else await this.next.Invoke(LoggerHandlerContext.Instance);
-                            }                            
+                                else await this.next.Invoke(LoggerHandlerContext.Instance);
+                            }
                         }
                         if (this.messageQueue.Count <= 0)
                             Thread.Sleep(100);
@@ -72,6 +72,7 @@ namespace Thea.Logging
                     catch (Exception ex)
                     {
                         Console.WriteLine(ex.ToString());
+                        logEntities.Clear();
                     }
                 }
             }, this.stopTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
