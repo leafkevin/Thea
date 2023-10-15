@@ -58,8 +58,16 @@ namespace Thea.Logging
                                 {
                                     foreach (var logEntity in logEntities)
                                     {
-                                        var context = new LoggerHandlerContext(logEntity);
-                                        await this.next.Invoke(context);
+                                        try
+                                        {
+                                            var context = new LoggerHandlerContext(logEntity);
+                                            await this.next.Invoke(context);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Console.WriteLine($"LoggerHandler execute error,{ex}");
+                                            logEntities.Remove(logEntity);
+                                        }
                                     }
                                     logEntities.Clear();
                                 }

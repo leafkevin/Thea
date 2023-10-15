@@ -213,9 +213,8 @@ class JobScheduler
         {
             var interval = this.GetMinInterval(jobDetail.CronExpr);
             if (!intervalList.TryGetValue(interval, out var jobList))
-            {
                 intervalList.TryAdd(interval, jobList = new List<JobDetail>());//   n/{interval}
-            }
+
             jobList.Add(jobDetail);
         }
         //把频度按照从小到大排序

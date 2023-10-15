@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
+using Microsoft.Net.Http.Headers;
 using System;
 using System.IO;
 using System.Net.NetworkInformation;
@@ -41,7 +42,7 @@ public class TheaWebMiddleware
             }
             catch (Exception ex)
             {
-                excepition = ex;
+                excepition = ex.InnerException ?? ex;
             }
             var response = await this.ReadBody(memoryStream);
             response = this.ProcessCustomResponse(context, response, excepition, logEntityInfo);
@@ -117,7 +118,7 @@ public class TheaWebMiddleware
     {
         var response = originalResponse;
         logEntityInfo.StatusCode = context.Response.StatusCode;
-        if (excepition != null && logEntityInfo.StatusCode == 200)
+        if (excepition != null && logEntityInfo.StatusCode != 500)
             logEntityInfo.StatusCode = 500;
         logEntityInfo.Body = $"Request finished. Status code: {logEntityInfo.StatusCode}";
         switch (context.Response.StatusCode)
@@ -148,8 +149,18 @@ public class TheaWebMiddleware
         }
         if (excepition != null)
         {
+            context.Response.Clear();
             context.Response.StatusCode = 200;
             context.Response.ContentType = "application/json;charset=utf-8";
+            context.Response.OnStarting(state =>
+            {
+                var response = (HttpResponse)state;
+                response.Headers[HeaderNames.CacheControl] = "no-cache";
+                response.Headers[HeaderNames.Pragma] = "no-cache";
+                response.Headers[HeaderNames.Expires] = "-1";
+                response.Headers.Remove(HeaderNames.ETag);
+                return Task.CompletedTask;
+            }, context.Response);
             response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.Message.ToString()).ToJson();
             logEntityInfo.Exception = excepition;
             logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";

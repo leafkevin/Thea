@@ -524,12 +524,8 @@ class MessageDrivenService : IMessageDriven
                 producerInfo.ConsumerTotalCount = totalCount;
                 //相同Url/User/Password只建立一个生产者
                 var hashKey = HashCode.Combine(dbClusterInfo.Url, dbClusterInfo.User, dbClusterInfo.Password);
-                if (!this.rabbitProducers.TryGetValue(hashKey, out var rabbitProducer))
-                {
-                    var producerName = $"{this.HostName}.producer{this.rabbitProducers.Count}";
-                    this.rabbitProducers.TryAdd(hashKey, rabbitProducer = new RabbitProducer());
-                    rabbitProducer.Create(producerName, dbClusterInfo);
-                }
+                var rabbitProducer = this.rabbitProducers.GetOrAdd(hashKey, f =>
+                    new RabbitProducer().Create($"{this.HostName}.producer", dbClusterInfo));
                 if (producerInfo.RabbitProducer == null)
                     producerInfo.RabbitProducer = rabbitProducer;
             }
