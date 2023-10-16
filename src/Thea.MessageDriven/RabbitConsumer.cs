@@ -112,7 +112,6 @@ class RabbitConsumer
                 Uri = new Uri(clusterInfo.Url),
                 UserName = clusterInfo.User,
                 Password = clusterInfo.Password,
-                UseBackgroundThreadsForIO = true,
                 AutomaticRecoveryEnabled = true,
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
                 NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
@@ -224,7 +223,7 @@ class RabbitConsumer
             if (this.isLogEnabled || !isSuccess)
             {
                 this.addLogsHandler.Invoke(logInfo);
-                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
+                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
             }
             if (message.Status == MessageStatus.WaitForReply)
             {
