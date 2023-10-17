@@ -1,5 +1,4 @@
 ﻿using MySqlConnector;
-using System.Data;
 using Thea.Orm;
 
 namespace Thea.MessageDriven;
@@ -17,6 +16,8 @@ class ModelConfiguration : IModelConfiguration
             f.Member(t => t.Url).Field(nameof(Cluster.Url)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.User).Field(nameof(Cluster.User)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.Password).Field(nameof(Cluster.Password)).NativeDbType(MySqlDbType.VarChar);
+            f.Member(t => t.IsUseRpc).Field(nameof(Cluster.IsUseRpc)).NativeDbType(MySqlDbType.Bool);
+            f.Member(t => t.IsUseDelay).Field(nameof(Cluster.IsUseDelay)).NativeDbType(MySqlDbType.Bool);
             f.Member(t => t.IsLogEnabled).Field(nameof(Cluster.IsLogEnabled)).NativeDbType(MySqlDbType.Bool);
             f.Member(t => t.IsEnabled).Field(nameof(Cluster.IsEnabled)).NativeDbType(MySqlDbType.Bool);
             f.Member(t => t.CreatedBy).Field(nameof(Cluster.CreatedBy)).NativeDbType(MySqlDbType.VarChar);

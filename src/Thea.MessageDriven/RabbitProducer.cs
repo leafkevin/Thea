@@ -1,10 +1,8 @@
-﻿using Microsoft.AspNetCore.Mvc.ModelBinding;
-using RabbitMQ.Client;
+﻿using RabbitMQ.Client;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
-using System.Threading.Channels;
 
 namespace Thea.MessageDriven;
 
@@ -114,7 +112,7 @@ class Channel
         properties.Persistent = true;
         var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
         properties.Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } };
-        this.Model.BasicPublish(exchange + ".delay", routingKey, this.Properties, message);
+        this.Model.BasicPublish(exchange + ".delay", routingKey, properties, message);
     }
     public void CreateExchange(Cluster clusterInfo, string hostName)
     {
@@ -142,46 +140,5 @@ class Channel
             this.Model.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
         }
     }
-    //public void CreateExchangeQueue(Cluster clusterInfo, Binding bindingInfo, string hostName)
-    //{
-    //    var bindType = clusterInfo.BindType;
-    //    if (string.IsNullOrEmpty(bindType))
-    //        bindType = "direct";
-    //    var exchange = clusterInfo.ClusterId;
-    //    this.Model.ExchangeDeclare(exchange, bindType, true);
-
-    //    IDictionary<string, object> queueArguments = null;
-    //    if (bindingInfo.IsSingleActiveConsumer)
-    //        queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-    //    this.Model.QueueDeclare(bindingInfo.Queue, true, false, false, queueArguments);
-    //    this.Model.QueueBind(bindingInfo.Queue, clusterInfo.ClusterId, bindingInfo.BindingKey);
-
-    //    if (bindingInfo.IsReply)
-    //    {
-    //        exchange = $"{clusterInfo.ClusterId}.result";
-    //        var queue = $"{clusterInfo.ClusterId}.{hostName}.result";
-    //        this.Model.ExchangeDeclare(exchange, "direct", true);
-    //        //应答队列暂时不做Single Active Consumer
-    //        this.Model.QueueDeclare(queue, true, false, false);
-    //        this.Model.QueueBind(queue, exchange, hostName);
-    //    }
-
-    //    if (clusterInfo.IsUseDelay)
-    //    {
-    //        exchange = clusterInfo.ClusterId + ".delay";
-    //        bindType = "x-delayed-message";
-    //        var exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
-    //        this.Model.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
-    //        this.Model.QueueBind(bindingInfo.Queue, exchange, bindingInfo.BindingKey);
-    //    }
-
-    //    IDictionary<string, object> arguments = null;
-    //    if (clusterInfo.IsUseDelay)
-    //    {
-    //        bindType = "x-delayed-message";
-    //        arguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
-    //    }
-    //    this.Model.ExchangeDeclare(exchange, bindType, true, false, arguments);
-    //}
     public void Close() => this.Model.Close();
 }

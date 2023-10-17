@@ -44,7 +44,6 @@ class ResultWaiter
 class ProducerInfo
 {
     public string ClusterId { get; set; }
-    public bool IsUseRpc { get; set; }
     public int ConsumerTotalCount { get; set; }
     public RabbitProducer RabbitProducer { get; set; }
 }

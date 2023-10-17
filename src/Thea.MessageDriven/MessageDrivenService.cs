@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO.MemoryMappedFiles;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -91,7 +92,11 @@ class MessageDrivenService : IMessageDriven
                                 if (producerInfo.ConsumerTotalCount > 1)
                                     routingKey = Math.Abs(HashCode.Combine(theaMessage.RoutingKey)) % producerInfo.ConsumerTotalCount;
                                 var messageBody = message.Type == MessageType.OrgMessage ? theaMessage.Message : theaMessage.ToJson();
-                                producerInfo.RabbitProducer.Publish(theaMessage.Exchange, routingKey.ToString(), messageBody);
+
+                                //延时消息
+                                if (theaMessage.ScheduleTimeUtc.HasValue)
+                                    producerInfo.RabbitProducer.Schedule(theaMessage.Exchange, routingKey.ToString(), theaMessage.ScheduleTimeUtc.Value, messageBody);
+                                else producerInfo.RabbitProducer.Publish(theaMessage.Exchange, routingKey.ToString(), messageBody);
                                 break;
                             case MessageType.Logs:
                                 logs.Add(message.Body as ExecLog);
@@ -156,8 +161,10 @@ class MessageDrivenService : IMessageDriven
         this.Publish(exchange, routingKey, message, isTheaMessage);
         return Task.CompletedTask;
     }
-    public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime delayEnqueueTimeUtc, bool isTheaMessage = true)
+    public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, bool isTheaMessage = true)
     {
+        if (enqueueTimeUtc < DateTime.UtcNow)
+            throw new Exception($"只能选择未来时间");
         if (!this.producers.TryGetValue(exchange, out var producerInfo))
             throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
         if (message == null)
@@ -171,15 +178,15 @@ class MessageDrivenService : IMessageDriven
             Exchange = exchange,
             RoutingKey = routingKey,
             Message = message.ToJson(),
-            ScheduleTimeUtc = delayEnqueueTimeUtc,
+            ScheduleTimeUtc = enqueueTimeUtc,
             Status = MessageStatus.None
         };
         var messageType = isTheaMessage ? MessageType.TheaMessage : MessageType.OrgMessage;
         this.messageQueue.Enqueue(new Message { Type = messageType, Body = theaMessage });
     }
-    public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime delayEnqueueTimeUtc, bool isTheaMessage = true)
+    public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, bool isTheaMessage = true)
     {
-        this.Schedule(exchange, routingKey, message, delayEnqueueTimeUtc, isTheaMessage);
+        this.Schedule(exchange, routingKey, message, enqueueTimeUtc, isTheaMessage);
         return Task.CompletedTask;
     }
     public TResponse Request<TRequst, TResponse>(string exchange, string routingKey, TRequst message, bool isTheaMessage = true)
@@ -230,77 +237,10 @@ class MessageDrivenService : IMessageDriven
         var result = await resultWaiter.Waiter.Task;
         return (TResponse)result;
     }
-    public List<TResponse> Request<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector, bool isTheaMessage = true)
-    {
-        if (!this.producers.TryGetValue(exchange, out var producerInfo))
-            throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
-        if (messages == null || messages.Count == 0)
-            throw new ArgumentNullException(nameof(messages));
-        if (routingKeySelector == null)
-            throw new ArgumentNullException(nameof(routingKeySelector));
 
-        var results = new List<Task<object>>();
-        foreach (var message in messages)
-        {
-            var theaMessage = new TheaMessage
-            {
-                MessageId = ObjectId.NewId(),
-                HostName = this.HostName,
-                ClusterId = producerInfo.ClusterId,
-                Exchange = exchange,
-                RoutingKey = routingKeySelector.Invoke(message),
-                Message = message.ToJson(),
-                Status = MessageStatus.WaitForReply
-            };
-            var resultWaiter = new ResultWaiter { ResponseType = typeof(TResponse), Waiter = new TaskCompletionSource<object>() };
-            this.messageResults.TryAdd(theaMessage.MessageId, resultWaiter);
-            var messageType = isTheaMessage ? MessageType.TheaMessage : MessageType.OrgMessage;
-            this.messageQueue.Enqueue(new Message { Type = messageType, Body = theaMessage });
-            results.Add(resultWaiter.Waiter.Task);
-        }
-        Task.WaitAll(results.ToArray());
-        return results.Select(f => (TResponse)f.Result).ToList();
-    }
-    public async Task<List<TResponse>> RequestAsync<TRequst, TResponse>(string exchange, List<TRequst> messages, Func<TRequst, string> routingKeySelector, bool isTheaMessage = true)
+    public void AddProducer(string clusterId, bool isUseRpc)
     {
-        if (!this.producers.TryGetValue(exchange, out var producerInfo))
-            throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
-        if (messages == null || messages.Count == 0)
-            throw new ArgumentNullException(nameof(messages));
-        if (routingKeySelector == null)
-            throw new ArgumentNullException(nameof(routingKeySelector));
-
-        var taskResults = new List<Task<object>>();
-        foreach (var message in messages)
-        {
-            var theaMessage = new TheaMessage
-            {
-                MessageId = ObjectId.NewId(),
-                HostName = this.HostName,
-                ClusterId = producerInfo.ClusterId,
-                Exchange = exchange,
-                RoutingKey = routingKeySelector.Invoke(message),
-                Message = message.ToJson(),
-                Status = MessageStatus.WaitForReply
-            };
-            var resultWaiter = new ResultWaiter { ResponseType = typeof(TResponse), Waiter = new TaskCompletionSource<object>() };
-            this.messageResults.TryAdd(theaMessage.MessageId, resultWaiter);
-            var messageType = isTheaMessage ? MessageType.TheaMessage : MessageType.OrgMessage;
-            this.messageQueue.Enqueue(new Message { Type = messageType, Body = theaMessage });
-            taskResults.Add(resultWaiter.Waiter.Task);
-        }
-        var results = await Task.WhenAll(taskResults);
-        return results.Cast<TResponse>().ToList();
-    }
-
-    public void AddProducer(string clusterId, bool isUseRpc, bool isUseDelay)
-    {
-        this.producers.TryAdd(clusterId, new ProducerInfo
-        {
-            ClusterId = clusterId,
-            IsUseRpc = isUseRpc,
-            IsUseDelay = isUseDelay
-        });
+        this.producers.TryAdd(clusterId, new ProducerInfo { ClusterId = clusterId });
         if (isUseRpc)
         {
             var exchange = clusterId + ".result";
@@ -383,16 +323,12 @@ class MessageDrivenService : IMessageDriven
                 if (this.messageResults.TryRemove(message.MessageId, out resultWaiter))
                 {
                     var result = TheaJsonSerializer.Deserialize(message.Message, resultWaiter.ResponseType);
-                    if (resultWaiter.Waiter != null)
-                        resultWaiter.Waiter.TrySetResult(result);
+                    resultWaiter.Waiter?.TrySetResult(result);
                 }
                 break;
             case MessageStatus.SetException:
                 if (this.messageResults.TryRemove(message.MessageId, out resultWaiter))
-                {
-                    if (resultWaiter.Waiter != null)
-                        resultWaiter.Waiter.TrySetException(exception);
-                }
+                    resultWaiter.Waiter?.TrySetException(exception);
                 break;
         }
     }
@@ -514,6 +450,7 @@ class MessageDrivenService : IMessageDriven
             var clusterId = localClusterInfo.ClusterId;
             this.clusters[clusterId] = dbClusterInfo;
 
+            bool isNeedCreateExchange = true;
             if (this.producers.TryGetValue(clusterId, out var producerInfo))
             {
                 var totalCount = dbBindings.Count(f => f.ClusterId == clusterId && !f.IsReply);
@@ -526,6 +463,7 @@ class MessageDrivenService : IMessageDriven
                     producerInfo.RabbitProducer = rabbitProducer;
                 //创建Exchange
                 rabbitProducer.CreateExchange(dbClusterInfo, this.HostName);
+                isNeedCreateExchange = false;
             }
 
             //没有消费者
@@ -560,14 +498,15 @@ class MessageDrivenService : IMessageDriven
                     localConsumerInfo.RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, this.consumerHandlers[clusterId]);
                     localConsumerInfos.Add(localConsumerInfo);
                 }
-                localConsumerInfo.RabbitConsumer.Build(localConsumerInfo.ConsumerId, dbClusterInfo, dbBindingInfo);
+                localConsumerInfo.RabbitConsumer.Build(localConsumerInfo.ConsumerId, dbClusterInfo, dbBindingInfo, isNeedCreateExchange);
+                isNeedCreateExchange = false;
             }
             //应答队列
             var replyQueue = $"{clusterId}.{this.HostName}.result";
             if (this.replyConsumers.TryGetValue(replyQueue, out var replyRabbitConsumer))
             {
                 var replyBinding = clusterBindings.Find(f => f.HostName == this.HostName && f.IsReply && f.IsEnabled);
-                if (replyBinding != null) replyRabbitConsumer.Build(replyQueue, dbClusterInfo, replyBinding);
+                if (replyBinding != null) replyRabbitConsumer.Build(replyQueue, dbClusterInfo, replyBinding, isNeedCreateExchange);
             }
 
             //多余的本地消费者标记为删除，删除队列，一定要从后面往前删除，以免丢失消息
