@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO.MemoryMappedFiles;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -107,7 +106,8 @@ class MessageDrivenService : IMessageDriven
                 }
                 catch (Exception ex)
                 {
-                    this.logger.LogTagError("MessageDriven", ex, "MessageDriven:消费者守护宿主线程执行异常");
+                    var exception = ex.InnerException ?? ex;
+                    this.logger.LogTagError("MessageDriven", exception, "MessageDriven:消费者守护宿主线程执行异常");
                     logs.Clear();
                 }
             }
