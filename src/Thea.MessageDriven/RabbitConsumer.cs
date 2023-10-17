@@ -227,7 +227,7 @@ class RabbitConsumer
             if (this.isLogEnabled || !isSuccess)
             {
                 this.addLogsHandler.Invoke(logInfo);
-                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", $"Consume message failed, Detail:{logInfo.ToJson()}");
+                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
             }
             if (message.Status == MessageStatus.WaitForReply)
             {
