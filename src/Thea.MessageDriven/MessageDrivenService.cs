@@ -91,7 +91,7 @@ class MessageDrivenService : IMessageDriven
                                 if (producerInfo.ConsumerTotalCount > 1)
                                     routingKey = Math.Abs(HashCode.Combine(theaMessage.RoutingKey)) % producerInfo.ConsumerTotalCount;
                                 var messageBody = message.Type == MessageType.OrgMessage ? theaMessage.Message : theaMessage.ToJson();
-                                producerInfo.RabbitProducer.TryPublish(theaMessage.Exchange, routingKey.ToString(), messageBody);
+                                producerInfo.RabbitProducer.Publish(theaMessage.Exchange, routingKey.ToString(), messageBody);
                                 break;
                             case MessageType.Logs:
                                 logs.Add(message.Body as ExecLog);
@@ -156,34 +156,30 @@ class MessageDrivenService : IMessageDriven
         this.Publish(exchange, routingKey, message, isTheaMessage);
         return Task.CompletedTask;
     }
-    public void Publish<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector, bool isTheaMessage = true)
+    public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime delayEnqueueTimeUtc, bool isTheaMessage = true)
     {
         if (!this.producers.TryGetValue(exchange, out var producerInfo))
             throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
-        if (messages == null || messages.Count == 0)
-            throw new ArgumentNullException(nameof(messages));
+        if (message == null)
+            throw new ArgumentNullException(nameof(message));
 
-        messages.ForEach(f =>
+        var theaMessage = new TheaMessage
         {
-            var routingKeyValue = routingKeySelector.Invoke(f);
-            var routingKey = HashCode.Combine(routingKeyValue) % producerInfo.ConsumerTotalCount;
-            var theaMessage = new TheaMessage
-            {
-                MessageId = ObjectId.NewId(),
-                HostName = this.HostName,
-                ClusterId = producerInfo.ClusterId,
-                Exchange = exchange,
-                RoutingKey = routingKey.ToString(),
-                Message = f.ToJson(),
-                Status = MessageStatus.None
-            };
-            var messageType = isTheaMessage ? MessageType.TheaMessage : MessageType.OrgMessage;
-            this.messageQueue.Enqueue(new Message { Type = messageType, Body = theaMessage });
-        });
+            MessageId = ObjectId.NewId(),
+            HostName = this.HostName,
+            ClusterId = producerInfo.ClusterId,
+            Exchange = exchange,
+            RoutingKey = routingKey,
+            Message = message.ToJson(),
+            ScheduleTimeUtc = delayEnqueueTimeUtc,
+            Status = MessageStatus.None
+        };
+        var messageType = isTheaMessage ? MessageType.TheaMessage : MessageType.OrgMessage;
+        this.messageQueue.Enqueue(new Message { Type = messageType, Body = theaMessage });
     }
-    public Task PublishAsync<TMessage>(string exchange, List<TMessage> messages, Func<TMessage, string> routingKeySelector, bool isTheaMessage = true)
+    public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime delayEnqueueTimeUtc, bool isTheaMessage = true)
     {
-        this.Publish(exchange, messages, routingKeySelector, isTheaMessage);
+        this.Schedule(exchange, routingKey, message, delayEnqueueTimeUtc, isTheaMessage);
         return Task.CompletedTask;
     }
     public TResponse Request<TRequst, TResponse>(string exchange, string routingKey, TRequst message, bool isTheaMessage = true)
@@ -297,12 +293,13 @@ class MessageDrivenService : IMessageDriven
         return results.Cast<TResponse>().ToList();
     }
 
-    public void AddProducer(string clusterId, bool isUseRpc)
+    public void AddProducer(string clusterId, bool isUseRpc, bool isUseDelay)
     {
         this.producers.TryAdd(clusterId, new ProducerInfo
         {
             ClusterId = clusterId,
-            IsUseRpc = isUseRpc
+            IsUseRpc = isUseRpc,
+            IsUseDelay = isUseDelay
         });
         if (isUseRpc)
         {
@@ -380,7 +377,7 @@ class MessageDrivenService : IMessageDriven
                 if (!this.producers.TryGetValue(message.ReplyExchange, out var producer))
                     this.producers.TryAdd(message.ReplyExchange, new ProducerInfo { ClusterId = message.ClusterId, RabbitProducer = new RabbitProducer() });
 
-                producer.RabbitProducer.TryPublish(message.ReplyExchange, message.HostName, message.ToJson());
+                producer.RabbitProducer.Publish(message.ReplyExchange, message.HostName, message.ToJson());
                 break;
             case MessageStatus.SetResult:
                 if (this.messageResults.TryRemove(message.MessageId, out resultWaiter))
@@ -430,7 +427,6 @@ class MessageDrivenService : IMessageDriven
                     ClusterId = clusterId,
                     ClusterName = clusterId,
                     BindType = consumerType == ConsumerType.StatefulConsumer ? "direct" : "topic",
-                    IsLogEnabled = false,
                     IsEnabled = true,
                     CreatedAt = now,
                     CreatedBy = this.HostName,
@@ -528,6 +524,8 @@ class MessageDrivenService : IMessageDriven
                     new RabbitProducer().Create($"{this.HostName}.producer", dbClusterInfo));
                 if (producerInfo.RabbitProducer == null)
                     producerInfo.RabbitProducer = rabbitProducer;
+                //创建Exchange
+                rabbitProducer.CreateExchange(dbClusterInfo, this.HostName);
             }
 
             //没有消费者

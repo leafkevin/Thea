@@ -23,7 +23,7 @@ public class MessageDrivenBuilder
         this.service.HostName = hostName;
         return this;
     }
-    public MessageDrivenBuilder AddProducer(string clusterId, bool isUseRpc = false)
+    public MessageDrivenBuilder AddProducer(string clusterId, bool isUseRpc = false, bool isUseDelay = false)
     {
         this.service.AddProducer(clusterId, isUseRpc);
         return this;

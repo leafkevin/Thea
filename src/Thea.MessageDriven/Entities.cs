@@ -32,6 +32,14 @@ public class Cluster
     /// </summary>
     public string Password { get; set; }
     /// <summary>
+    /// 是否使用RPC模式
+    /// </summary>
+    public bool IsUseRpc { get; set; }
+    /// <summary>
+    /// 是否使用延时队列
+    /// </summary>
+    public bool IsUseDelay { get; set; }
+    /// <summary>
     /// 是否开启日志
     /// </summary>
     public bool IsLogEnabled { get; set; }

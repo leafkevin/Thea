@@ -1,8 +1,10 @@
-﻿using RabbitMQ.Client;
+﻿using Microsoft.AspNetCore.Mvc.ModelBinding;
+using RabbitMQ.Client;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Channels;
 
 namespace Thea.MessageDriven;
 
@@ -28,7 +30,6 @@ class RabbitProducer : IDisposable
                 Uri = new Uri(clusterInfo.Url),
                 UserName = clusterInfo.User,
                 Password = clusterInfo.Password,
-                UseBackgroundThreadsForIO = true,
                 AutomaticRecoveryEnabled = true,
                 RequestedHeartbeat = TimeSpan.FromSeconds(10),
                 NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
@@ -48,11 +49,18 @@ class RabbitProducer : IDisposable
         }
         return this;
     }
-    public void TryPublish(string exchange, string routingKey, string message)
+    public void Publish(string exchange, string routingKey, string message)
     {
         var channel = this.channelQueue.Take();
         var body = Encoding.UTF8.GetBytes(message);
-        channel.TryPublish(exchange, routingKey, body);
+        channel.Publish(exchange, routingKey, body);
+        this.channelQueue.Add(channel);
+    }
+    public void Schedule(string exchange, string routingKey, DateTime scheduleTimeUtc, string message)
+    {
+        var channel = this.channelQueue.Take();
+        var body = Encoding.UTF8.GetBytes(message);
+        channel.Schedule(exchange, routingKey, scheduleTimeUtc, body);
         this.channelQueue.Add(channel);
     }
     public void Close()
@@ -72,20 +80,11 @@ class RabbitProducer : IDisposable
             this.connection.Close();
         this.connection = null;
     }
-    public void CreateWorkerQueue(string clusterId, Binding bindingInfo)
+    public void CreateExchange(Cluster clusterInfo, string hostName)
     {
         //ring buffer环形无锁channel池
         var channel = this.channelQueue.Take();
-        channel.CreateExchangeQueue(clusterId, bindingInfo);
-        this.channelQueue.Add(channel);
-    }
-    public void CreateReplyQueue(string clusterId, string HostName)
-    {
-        var exchange = $"{clusterId}.result";
-        var queue = $"{clusterId}.{HostName}.result";
-        var channel = this.channelQueue.Take();
-        var bindingInfo = new Binding { BindType = "direct", BindingKey = HostName, Queue = queue };
-        channel.CreateExchangeQueue(exchange, bindingInfo);
+        channel.CreateExchange(clusterInfo, hostName);
         this.channelQueue.Add(channel);
     }
     private void AddChannelsToQueue()
@@ -107,19 +106,82 @@ class Channel
         this.Properties = this.Model.CreateBasicProperties();
         this.Properties.Persistent = true;
     }
-    public void TryPublish(string exchange, string routingKey, byte[] message)
+    public void Publish(string exchange, string routingKey, byte[] message)
         => this.Model.BasicPublish(exchange, routingKey, this.Properties, message);
-    public void CreateExchangeQueue(string exchange, Binding bindingInfo)
+    public void Schedule(string exchange, string routingKey, DateTime scheduleTimeUtc, byte[] message)
     {
-        var bindType = bindingInfo.BindType;
+        var properties = this.Model.CreateBasicProperties();
+        properties.Persistent = true;
+        var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
+        properties.Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } };
+        this.Model.BasicPublish(exchange + ".delay", routingKey, this.Properties, message);
+    }
+    public void CreateExchange(Cluster clusterInfo, string hostName)
+    {
+        var bindType = clusterInfo.BindType;
         if (string.IsNullOrEmpty(bindType))
             bindType = "direct";
-        IDictionary<string, object> arguments = null;
-        if (bindingInfo.IsSingleActiveConsumer)
-            arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-        this.Model.ExchangeDeclare(exchange, bindType, true, false);
-        this.Model.QueueDeclare(bindingInfo.Queue, true, false, false, arguments);
-        this.Model.QueueBind(bindingInfo.Queue, exchange, bindingInfo.BindingKey);
+        var exchange = clusterInfo.ClusterId;
+        this.Model.ExchangeDeclare(exchange, bindType, true);
+
+        if (clusterInfo.IsUseRpc)
+        {
+            exchange = $"{clusterInfo.ClusterId}.result";
+            var queue = $"{clusterInfo.ClusterId}.{hostName}.result";
+            this.Model.ExchangeDeclare(exchange, "direct", true);
+            //应答队列暂时不做Single Active Consumer
+            this.Model.QueueDeclare(queue, true, false, false);
+            this.Model.QueueBind(queue, exchange, hostName);
+        }
+
+        if (clusterInfo.IsUseDelay)
+        {
+            exchange = clusterInfo.ClusterId + ".delay";
+            bindType = "x-delayed-message";
+            var exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
+            this.Model.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
+        }
     }
+    //public void CreateExchangeQueue(Cluster clusterInfo, Binding bindingInfo, string hostName)
+    //{
+    //    var bindType = clusterInfo.BindType;
+    //    if (string.IsNullOrEmpty(bindType))
+    //        bindType = "direct";
+    //    var exchange = clusterInfo.ClusterId;
+    //    this.Model.ExchangeDeclare(exchange, bindType, true);
+
+    //    IDictionary<string, object> queueArguments = null;
+    //    if (bindingInfo.IsSingleActiveConsumer)
+    //        queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
+    //    this.Model.QueueDeclare(bindingInfo.Queue, true, false, false, queueArguments);
+    //    this.Model.QueueBind(bindingInfo.Queue, clusterInfo.ClusterId, bindingInfo.BindingKey);
+
+    //    if (bindingInfo.IsReply)
+    //    {
+    //        exchange = $"{clusterInfo.ClusterId}.result";
+    //        var queue = $"{clusterInfo.ClusterId}.{hostName}.result";
+    //        this.Model.ExchangeDeclare(exchange, "direct", true);
+    //        //应答队列暂时不做Single Active Consumer
+    //        this.Model.QueueDeclare(queue, true, false, false);
+    //        this.Model.QueueBind(queue, exchange, hostName);
+    //    }
+
+    //    if (clusterInfo.IsUseDelay)
+    //    {
+    //        exchange = clusterInfo.ClusterId + ".delay";
+    //        bindType = "x-delayed-message";
+    //        var exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
+    //        this.Model.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
+    //        this.Model.QueueBind(bindingInfo.Queue, exchange, bindingInfo.BindingKey);
+    //    }
+
+    //    IDictionary<string, object> arguments = null;
+    //    if (clusterInfo.IsUseDelay)
+    //    {
+    //        bindType = "x-delayed-message";
+    //        arguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
+    //    }
+    //    this.Model.ExchangeDeclare(exchange, bindType, true, false, arguments);
+    //}
     public void Close() => this.Model.Close();
 }

@@ -12,6 +12,7 @@ public class TheaMessage
     public string ReplyExchange { get; set; }
     public string RoutingKey { get; set; }
     public string Queue { get; set; }
+    public DateTime? ScheduleTimeUtc { get; set; }
     //public bool IsGroupMessage { get; set; }
     public MessageStatus Status { get; set; }
     public string Message { get; set; }
