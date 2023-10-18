@@ -73,17 +73,9 @@ class RabbitProducer : IDisposable
         if (this.channelQueue != null && this.channelQueue.Count > 0)
             while (this.channelQueue.TryTake(out _)) ;
         this.channelQueue = null;
-        //等待本次消息消费结束 
         if (this.connection != null)
             this.connection.Close();
         this.connection = null;
-    }
-    public void CreateExchange(Cluster clusterInfo, string hostName)
-    {
-        //ring buffer环形无锁channel池
-        var channel = this.channelQueue.Take();
-        channel.CreateExchange(clusterInfo, hostName);
-        this.channelQueue.Add(channel);
     }
     private void AddChannelsToQueue()
     {
@@ -113,32 +105,6 @@ class Channel
         var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
         properties.Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } };
         this.Model.BasicPublish(exchange + ".delay", routingKey, properties, message);
-    }
-    public void CreateExchange(Cluster clusterInfo, string hostName)
-    {
-        var bindType = clusterInfo.BindType;
-        if (string.IsNullOrEmpty(bindType))
-            bindType = "direct";
-        var exchange = clusterInfo.ClusterId;
-        this.Model.ExchangeDeclare(exchange, bindType, true);
-
-        if (clusterInfo.IsUseRpc)
-        {
-            exchange = $"{clusterInfo.ClusterId}.result";
-            var queue = $"{clusterInfo.ClusterId}.{hostName}.result";
-            this.Model.ExchangeDeclare(exchange, "direct", true);
-            //应答队列暂时不做Single Active Consumer
-            this.Model.QueueDeclare(queue, true, false, false);
-            this.Model.QueueBind(queue, exchange, hostName);
-        }
-
-        if (clusterInfo.IsUseDelay)
-        {
-            exchange = clusterInfo.ClusterId + ".delay";
-            bindType = "x-delayed-message";
-            var exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
-            this.Model.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
-        }
     }
     public void Close() => this.Model.Close();
 }

@@ -16,10 +16,6 @@ public class Cluster
     /// </summary>
     public string ClusterName { get; set; }
     /// <summary>
-    /// 绑定类型
-    /// </summary>
-    public string BindType { get; set; }
-    /// <summary>
     /// 连接URL
     /// </summary>
     public string Url { get; set; }
@@ -32,13 +28,13 @@ public class Cluster
     /// </summary>
     public string Password { get; set; }
     /// <summary>
-    /// 是否使用RPC模式
+    /// 绑定类型
     /// </summary>
-    public bool IsUseRpc { get; set; }
+    public string BindType { get; set; }    
     /// <summary>
-    /// 是否使用延时队列
+    /// 是否有状态
     /// </summary>
-    public bool IsUseDelay { get; set; }
+    public bool IsStateful { get; set; }
     /// <summary>
     /// 是否开启日志
     /// </summary>
@@ -109,6 +105,10 @@ public class Binding
     /// 是否应答队列
     /// </summary>
     public bool IsReply { get; set; }
+    /// <summary>
+    /// 是否延时交换机
+    /// </summary>
+    public bool IsDelay { get; set; }
     /// <summary>
     /// 是否启用
     /// </summary>

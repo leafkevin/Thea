@@ -44,16 +44,21 @@ class ResultWaiter
 class ProducerInfo
 {
     public string ClusterId { get; set; }
+    public string Exchange { get; set; }
     public int ConsumerTotalCount { get; set; }
     public RabbitProducer RabbitProducer { get; set; }
+    public bool IsNeedHashRoutingKey { get; set; }
 }
 class ConsumerInfo
 {
     public string ClusterId { get; set; }
     public string ConsumerId { get; set; }
+    public string Exchange { get; set; }
+    public string BindType { get; set; }
     public string RoutingKey { get; set; }
     public string Queue { get; set; }
     public bool IsStateful { get; set; }
+    public bool IsDelay { get; set; }
     public RabbitConsumer RabbitConsumer { get; set; }
 }
 class ConsumerExecutor

@@ -22,7 +22,7 @@ class MessageDrivenService : IMessageDriven
     private readonly TimeSpan cycle = TimeSpan.FromSeconds(30);
     private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
     private readonly EventWaitHandle readyToStart = new EventWaitHandle(false, EventResetMode.AutoReset);
-    private readonly List<string> localClusterIds = new();
+    private readonly List<ClusterInfo> localClusterInfos = new();
     private readonly ConcurrentDictionary<int, RabbitProducer> rabbitProducers = new();
     private readonly List<DeferredRemovedConsumer> deferredRemovedConsumers = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
@@ -34,7 +34,6 @@ class MessageDrivenService : IMessageDriven
     //Key=exchange, cluster.result
     private readonly ConcurrentDictionary<string, RabbitConsumer> replyConsumers = new();
     private readonly ConcurrentDictionary<string, ResultWaiter> messageResults = new();
-    private readonly ConcurrentDictionary<string, ConsumerType> consumerTypes = new();
     private readonly ConcurrentDictionary<string, Func<string, Task<object>>> consumerHandlers = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
@@ -87,15 +86,20 @@ class MessageDrivenService : IMessageDriven
                                 if (!this.producers.TryGetValue(theaMessage.Exchange, out var producerInfo))
                                     throw new Exception($"未知的交换机{theaMessage.Exchange}，请先注册集群和生产者");
 
-                                int routingKey = 0;
-                                if (producerInfo.ConsumerTotalCount > 1)
-                                    routingKey = Math.Abs(HashCode.Combine(theaMessage.RoutingKey)) % producerInfo.ConsumerTotalCount;
                                 var messageBody = message.Type == MessageType.OrgMessage ? theaMessage.Message : theaMessage.ToJson();
-
-                                //延时消息
                                 if (theaMessage.ScheduleTimeUtc.HasValue)
-                                    producerInfo.RabbitProducer.Schedule(theaMessage.Exchange, routingKey.ToString(), theaMessage.ScheduleTimeUtc.Value, messageBody);
-                                else producerInfo.RabbitProducer.Publish(theaMessage.Exchange, routingKey.ToString(), messageBody);
+                                    producerInfo.RabbitProducer.Schedule(theaMessage.Exchange, theaMessage.RoutingKey, theaMessage.ScheduleTimeUtc.Value, messageBody);
+                                else
+                                {
+                                    if (producerInfo.IsNeedHashRoutingKey)
+                                    {
+                                        int routingKey = 0;
+                                        if (producerInfo.ConsumerTotalCount > 1)
+                                            routingKey = Math.Abs(HashCode.Combine(theaMessage.RoutingKey)) % producerInfo.ConsumerTotalCount;
+                                        producerInfo.RabbitProducer.Publish(theaMessage.Exchange, routingKey.ToString(), messageBody);
+                                    }
+                                    else producerInfo.RabbitProducer.Publish(theaMessage.Exchange, theaMessage.RoutingKey, messageBody);
+                                }
                                 break;
                             case MessageType.Logs:
                                 logs.Add(message.Body as ExecLog);
@@ -238,16 +242,26 @@ class MessageDrivenService : IMessageDriven
         return (TResponse)result;
     }
 
-    public void AddProducer(string clusterId, bool isUseRpc)
+    public void AddProducer(string clusterId)
     {
-        this.producers.TryAdd(clusterId, new ProducerInfo { ClusterId = clusterId });
-        if (isUseRpc)
-        {
-            var exchange = clusterId + ".result";
-            this.replyConsumers.TryAdd(exchange, new RabbitConsumer(this, this.serviceProvider));
-        }
-        if (!this.localClusterIds.Contains(clusterId))
-            this.localClusterIds.Add(clusterId);
+        this.producers.TryAdd(clusterId, new ProducerInfo { ClusterId = clusterId, Exchange = clusterId });
+        if (!this.localClusterInfos.Exists(f => f.ClusterId == clusterId))
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId });
+    }
+    public void AddRpcProducer(string clusterId)
+    {
+        var exchange = clusterId + ".result";
+        this.producers.TryAdd(exchange, new ProducerInfo { ClusterId = clusterId, Exchange = exchange });
+        this.replyConsumers.TryAdd(exchange, new RabbitConsumer(this, this.serviceProvider));
+        if (!this.localClusterInfos.Exists(f => f.ClusterId == clusterId))
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId });
+    }
+    public void AddDelayProducer(string clusterId)
+    {
+        var exchange = clusterId + ".delay";
+        this.producers.TryAdd(exchange, new ProducerInfo { ClusterId = clusterId, Exchange = exchange });
+        if (!this.localClusterInfos.Exists(f => f.ClusterId == clusterId))
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId });
     }
     public void AddStatefulConsumer(string clusterId, object target, MethodInfo methodInfo)
     {
@@ -262,22 +276,28 @@ class MessageDrivenService : IMessageDriven
             else result = methodExecutor.Execute(target, parameters);
             return result;
         };
+        //有状态队列，所有队列消费者都相同
         this.consumerHandlers.TryAdd(clusterId, consumerHandler);
+        var queue = $"{clusterId}.queue0";
         var consumerInfo = new ConsumerInfo
         {
             ClusterId = clusterId,
-            ConsumerId = $"{clusterId}.{this.HostName}.worker0",
+            ConsumerId = $"{queue}.{this.HostName}.worker",
+            Exchange = clusterId,
+            BindType = "topic",
             RoutingKey = "0",
-            Queue = $"{clusterId}.queue0",
+            Queue = queue,
             IsStateful = true,
+            IsDelay = false,
             RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
         };
         this.consumers.TryAdd(clusterId, new List<ConsumerInfo> { consumerInfo });
-        this.consumerTypes.TryAdd(clusterId, ConsumerType.StatefulConsumer);
-        if (!this.localClusterIds.Contains(clusterId))
-            this.localClusterIds.Add(clusterId);
+        var localClusterInfo = this.localClusterInfos.Find(f => f.ClusterId == clusterId);
+        if (localClusterInfo == null)
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId, IsStateful = true });
+        else localClusterInfo.IsStateful = true;
     }
-    public void AddSubscriber(string clusterId, string queue, object target, MethodInfo methodInfo)
+    public void AddSubscriber(string clusterId, string queue, object target, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
     {
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
         var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
@@ -290,23 +310,27 @@ class MessageDrivenService : IMessageDriven
             else result = methodExecutor.Execute(target, parameters);
             return result;
         };
-        this.consumerHandlers.TryAdd(clusterId, consumerHandler);
+        //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中
+        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", consumerHandler);
         var consumerInfo = new ConsumerInfo
         {
             ClusterId = clusterId,
             ConsumerId = $"{queue}.worker0",
-            RoutingKey = "#",
+            Exchange = isDelay ? clusterId + ".delay" : clusterId,
+            BindType = isDelay ? "x-delayed-message" : "topic",
+            //数据库可以更改
+            RoutingKey = routingKey,
             Queue = queue,
             IsStateful = false,
+            IsDelay = isDelay,
             RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
         };
         if (!this.consumers.TryGetValue(clusterId, out var consumerInfos))
             this.consumers.TryAdd(clusterId, consumerInfos = new List<ConsumerInfo> { consumerInfo });
         if (!consumerInfos.Exists(f => f.Queue == queue))
             consumerInfos.Add(consumerInfo);
-        this.consumerTypes.TryAdd(clusterId, ConsumerType.Subscriber);
-        if (!this.localClusterIds.Contains(clusterId))
-            this.localClusterIds.Add(clusterId);
+        if (!this.localClusterInfos.Exists(f => f.ClusterId == clusterId))
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId });
     }
     public void Next(TheaMessage message, Exception exception)
     {
@@ -346,23 +370,23 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task Register()
     {
-        (var dbClusters, var dbBindings) = await this.repository.GetClusterInfo(this.localClusterIds);
+        var localClusterIds = this.localClusterInfos.Select(f => f.ClusterId).ToList();
+        (var dbClusters, var dbBindings) = await this.repository.GetClusterInfo(localClusterIds);
         var registerClusters = new List<Cluster>();
         var registerBindings = new List<Binding>();
         var ipAddress = this.GetIpAddress();
 
-        foreach (var clusterId in this.localClusterIds)
+        foreach (var clusterId in localClusterIds)
         {
             var now = DateTime.UtcNow;
             var dbClusterInfo = dbClusters.Find(f => f.ClusterId == clusterId);
-            this.consumerTypes.TryGetValue(clusterId, out var consumerType);
             if (dbClusterInfo == null)
             {
                 registerClusters.Add(dbClusterInfo = new Cluster
                 {
                     ClusterId = clusterId,
                     ClusterName = clusterId,
-                    BindType = consumerType == ConsumerType.StatefulConsumer ? "direct" : "topic",
+                    BindType = "topic",
                     IsEnabled = true,
                     CreatedAt = now,
                     CreatedBy = this.HostName,
@@ -379,21 +403,21 @@ class MessageDrivenService : IMessageDriven
 
             foreach (var localConsumer in localConsumers)
             {
-                var myClusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId && f.Queue == localConsumer.Queue);
                 //判断队列交换机绑定是否存在
-                if (myClusterBindings == null || myClusterBindings.Count == 0)
+                if (!dbBindings.Exists(f => f.ClusterId == clusterId && f.Queue == localConsumer.Queue))
                 {
                     registerBindings.Add(new Binding
                     {
                         BindingId = localConsumer.Queue,
                         ClusterId = clusterId,
-                        BindType = consumerType == ConsumerType.StatefulConsumer ? "direct" : "topic",
+                        BindType = localConsumer.IsDelay ? "x-delayed-message" : localConsumer.BindType,
                         BindingKey = localConsumer.RoutingKey,
-                        Exchange = clusterId,
+                        Exchange = localConsumer.IsDelay ? clusterId + ".delay" : clusterId,
                         Queue = localConsumer.Queue,
                         PrefetchCount = 250,
                         IsSingleActiveConsumer = localConsumer.IsStateful,
                         IsReply = false,
+                        IsDelay = localConsumer.IsDelay,
                         IsEnabled = true,
                         CreatedAt = now,
                         CreatedBy = this.HostName,
@@ -401,6 +425,7 @@ class MessageDrivenService : IMessageDriven
                         UpdatedBy = this.HostName
                     });
                 }
+                dbClusterInfo.IsStateful = localConsumer.IsStateful;
                 //只有有状态队列，才会有应答队列，订阅模式不会有应答队列
                 var replyQueue = $"{clusterId}.{this.HostName}.result";
                 if (this.replyConsumers.TryGetValue(replyQueue, out _)
@@ -418,6 +443,7 @@ class MessageDrivenService : IMessageDriven
                         PrefetchCount = 10,
                         IsSingleActiveConsumer = false,
                         IsReply = true,
+                        IsDelay = false,
                         IsEnabled = true,
                         CreatedAt = now,
                         CreatedBy = this.HostName,
@@ -434,38 +460,56 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task Initialize()
     {
-        (var dbClusters, var dbBindings) = await this.repository.GetClusterInfo(this.localClusterIds);
+        var localClusterIds = this.localClusterInfos.Select(f => f.ClusterId).ToList();
+        (var dbClusters, var dbBindings) = await this.repository.GetClusterInfo(localClusterIds);
         var localClusterInfos = this.clusters.Values.ToList();
         var ipAddress = this.GetIpAddress();
 
         foreach (var localClusterInfo in localClusterInfos)
         {
             var dbClusterInfo = dbClusters.Find(f => f.ClusterId == localClusterInfo.ClusterId);
-            var clusterBindings = dbBindings.FindAll(f => f.ClusterId == localClusterInfo.ClusterId);
-
             //集群信息不存在或是无效，生产者和消费者都不建立
-            if (dbClusterInfo == null || !dbClusterInfo.IsEnabled || string.IsNullOrEmpty(dbClusterInfo.Url))
+            if (dbClusterInfo == null || !dbClusterInfo.IsEnabled
+                || string.IsNullOrEmpty(dbClusterInfo.Url)
+                || string.IsNullOrEmpty(dbClusterInfo.User)
+                || string.IsNullOrEmpty(dbClusterInfo.Password))
                 continue;
 
             var clusterId = localClusterInfo.ClusterId;
             this.clusters[clusterId] = dbClusterInfo;
+        }
 
-            bool isNeedCreateExchange = true;
-            if (this.producers.TryGetValue(clusterId, out var producerInfo))
-            {
-                var totalCount = dbBindings.Count(f => f.ClusterId == clusterId && !f.IsReply);
-                producerInfo.ConsumerTotalCount = totalCount;
-                //相同Url/User/Password只建立一个生产者
-                var hashKey = HashCode.Combine(dbClusterInfo.Url, dbClusterInfo.User, dbClusterInfo.Password);
-                var rabbitProducer = this.rabbitProducers.GetOrAdd(hashKey, f =>
-                    new RabbitProducer().Create($"{this.HostName}.producer", dbClusterInfo));
-                if (producerInfo.RabbitProducer == null)
-                    producerInfo.RabbitProducer = rabbitProducer;
-                //创建Exchange
-                rabbitProducer.CreateExchange(dbClusterInfo, this.HostName);
-                isNeedCreateExchange = false;
-            }
+        foreach (var producerInfo in this.producers.Values)
+        {
+            var dbClusterInfo = dbClusters.Find(f => f.ClusterId == producerInfo.ClusterId);
+            if (dbClusterInfo == null || !dbClusterInfo.IsEnabled
+            || string.IsNullOrEmpty(dbClusterInfo.Url)
+            || string.IsNullOrEmpty(dbClusterInfo.User)
+            || string.IsNullOrEmpty(dbClusterInfo.Password))
+                continue;
 
+            var totalCount = dbBindings.Count(f => f.ClusterId == producerInfo.ClusterId && f.Exchange == producerInfo.Exchange && !f.IsReply);
+            producerInfo.ConsumerTotalCount = totalCount;
+            producerInfo.IsNeedHashRoutingKey = dbClusterInfo.IsStateful;
+            //相同Url/User/Password只建立一个生产者
+            var hashKey = HashCode.Combine(dbClusterInfo.Url, dbClusterInfo.User, dbClusterInfo.Password);
+            var rabbitProducer = this.rabbitProducers.GetOrAdd(hashKey, f =>
+                new RabbitProducer().Create($"{this.HostName}.producer", dbClusterInfo));
+            if (producerInfo.RabbitProducer == null)
+                producerInfo.RabbitProducer = rabbitProducer;
+        }
+
+        foreach (var localClusterInfo in localClusterInfos)
+        {
+            var clusterId = localClusterInfo.ClusterId;
+            var dbClusterInfo = dbClusters.Find(f => f.ClusterId == clusterId);
+            if (dbClusterInfo == null || !dbClusterInfo.IsEnabled
+            || string.IsNullOrEmpty(dbClusterInfo.Url)
+            || string.IsNullOrEmpty(dbClusterInfo.User)
+            || string.IsNullOrEmpty(dbClusterInfo.Password))
+                continue;
+
+            var clusterBindings = dbBindings.FindAll(f => f.ClusterId == clusterId);
             //没有消费者
             if (clusterBindings == null || clusterBindings.Count == 0)
                 continue;
@@ -490,23 +534,23 @@ class MessageDrivenService : IMessageDriven
                 {
                     localConsumerInfo = new ConsumerInfo
                     {
-                        ConsumerId = $"{clusterId}.{this.HostName}.worker{i}",
+                        ConsumerId = $"{dbBindingInfo.Queue}.{this.HostName}.worker",
                         ClusterId = clusterId,
                         RoutingKey = dbBindingInfo.BindingKey,
                         Queue = dbBindingInfo.Queue
                     };
-                    localConsumerInfo.RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, this.consumerHandlers[clusterId]);
+                    var consumerHandlerKey = dbClusterInfo.IsStateful ? clusterId : $"{clusterId}-{dbBindingInfo.Queue}";
+                    localConsumerInfo.RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, this.consumerHandlers[consumerHandlerKey]);
                     localConsumerInfos.Add(localConsumerInfo);
                 }
-                localConsumerInfo.RabbitConsumer.Build(localConsumerInfo.ConsumerId, dbClusterInfo, dbBindingInfo, isNeedCreateExchange);
-                isNeedCreateExchange = false;
+                localConsumerInfo.RabbitConsumer.Build(localConsumerInfo.ConsumerId, dbClusterInfo, dbBindingInfo);
             }
             //应答队列
             var replyQueue = $"{clusterId}.{this.HostName}.result";
             if (this.replyConsumers.TryGetValue(replyQueue, out var replyRabbitConsumer))
             {
                 var replyBinding = clusterBindings.Find(f => f.HostName == this.HostName && f.IsReply && f.IsEnabled);
-                if (replyBinding != null) replyRabbitConsumer.Build(replyQueue, dbClusterInfo, replyBinding, isNeedCreateExchange);
+                if (replyBinding != null) replyRabbitConsumer.Build(replyQueue, dbClusterInfo, replyBinding);
             }
 
             //多余的本地消费者标记为删除，删除队列，一定要从后面往前删除，以免丢失消息
@@ -542,7 +586,9 @@ class MessageDrivenService : IMessageDriven
     {
         foreach (var item in NetworkInterface.GetAllNetworkInterfaces())
         {
-            if (item.NetworkInterfaceType == NetworkInterfaceType.Ethernet && item.OperationalStatus == OperationalStatus.Up)
+            if ((item.NetworkInterfaceType == NetworkInterfaceType.Ethernet
+                || item.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
+                && item.OperationalStatus == OperationalStatus.Up)
             {
                 var properties = item.GetIPProperties();
                 if (properties.GatewayAddresses.Count > 0)
@@ -550,19 +596,18 @@ class MessageDrivenService : IMessageDriven
                     foreach (UnicastIPAddressInformation ip in properties.UnicastAddresses)
                     {
                         if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
-                        {
                             return ip.Address.ToString();
-                        }
                     }
                 }
             }
         }
         return string.Empty;
     }
-    enum ConsumerType
+
+    class ClusterInfo
     {
-        Subscriber,
-        StatefulConsumer
+        public string ClusterId { get; set; }
+        public bool IsStateful { get; set; }
     }
     struct DeferredRemovedConsumer
     {

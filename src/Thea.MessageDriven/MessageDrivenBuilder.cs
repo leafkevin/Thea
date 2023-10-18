@@ -6,40 +6,50 @@ namespace Thea.MessageDriven;
 
 public class MessageDrivenBuilder
 {
-    private readonly MessageDrivenService service;
+    private readonly MessageDrivenService messageDriven;
     private readonly IOrmDbFactory dbFactory;
     private readonly IServiceProvider serviceProvider;
 
     public MessageDrivenBuilder(IServiceProvider serviceProvider)
     {
         this.serviceProvider = serviceProvider;
-        this.service = serviceProvider.GetService<IMessageDriven>() as MessageDrivenService;
+        this.messageDriven = serviceProvider.GetService<IMessageDriven>() as MessageDrivenService;
         this.dbFactory = serviceProvider.GetService<IOrmDbFactory>();
     }
 
-    public MessageDrivenBuilder Create(string dbKey, string hostName)
+    public MessageDrivenBuilder Create(string dbKey, string hostName = null)
     {
-        this.service.DbKey = dbKey;
-        this.service.HostName = hostName;
+        this.messageDriven.DbKey = dbKey;
+        this.messageDriven.HostName = hostName;
         return this;
     }
-    public MessageDrivenBuilder AddProducer(string clusterId, bool isUseRpc = false)
+    public MessageDrivenBuilder AddProducer(string clusterId)
     {
-        this.service.AddProducer(clusterId, isUseRpc);
+        this.messageDriven.AddProducer(clusterId);
+        return this;
+    }
+    public MessageDrivenBuilder AddRpcProducer(string clusterId)
+    {
+        this.messageDriven.AddRpcProducer(clusterId);
+        return this;
+    }
+    public MessageDrivenBuilder AddDelayProducer(string clusterId)
+    {
+        this.messageDriven.AddDelayProducer(clusterId);
         return this;
     }
     public MessageDrivenBuilder AddStatefulConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
     {
         var consumer = serviceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.service.AddStatefulConsumer(clusterId, consumer, methodInfo);
+        this.messageDriven.AddStatefulConsumer(clusterId, consumer, methodInfo);
         return this;
     }
-    public MessageDrivenBuilder AddSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)
+    public MessageDrivenBuilder AddSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
     {
         var consumer = serviceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.service.AddSubscriber(clusterId, queue, consumer, methodInfo);
+        this.messageDriven.AddSubscriber(clusterId, queue, consumer, methodInfo, routingKey, isDelay);
         return this;
     }
     public MessageDrivenBuilder Configure<TOrmProvider>(IModelConfiguration configuration) where TOrmProvider : class, IOrmProvider, new()

@@ -51,18 +51,14 @@ class RabbitConsumer
     {
         this.consumerHandler = consumerHandler;
     }
-    public void Build(string consumerId, Cluster clusterInfo, Binding bindingInfo, bool isNeedCreateExchange)
-        => this.Bind(consumerId, clusterInfo, bindingInfo).Start(isNeedCreateExchange);
-    public void Start(bool isNeedCreateExchange = false)
+    public void Build(string consumerId, Cluster clusterInfo, Binding bindingInfo)
+        => this.Bind(consumerId, clusterInfo, bindingInfo).Start();
+    public void Start()
     {
         if (this.factory == null || !this.isNeedBuiding) return;
         this.connection = this.factory.CreateConnection(this.consumerId);
         this.channel = this.connection.CreateModel();
-
-        if (isNeedCreateExchange)
-            this.CreateExchange();
-        this.CreateQueue();
-
+        this.CreateExchangeQueue();
         this.channel.BasicQos(0, (ushort)this.bindingInfo.PrefetchCount, false);
         this.channel.BasicRecoverOk += (o, e) =>
         {
@@ -135,50 +131,24 @@ class RabbitConsumer
             this.isLogEnabled = clusterInfo.IsLogEnabled;
         return this;
     }
-    private void CreateExchange()
+    private void CreateExchangeQueue()
     {
         if (!this.isNeedBuiding) return;
 
         var bindType = this.bindingInfo.BindType;
         if (string.IsNullOrEmpty(bindType))
-            bindType = "direct";
-        var exchange = this.clusterInfo.ClusterId;
-        this.channel.ExchangeDeclare(exchange, bindType, true);
+            bindType = "topic";
+        var exchange = this.bindingInfo.Exchange;
+        Dictionary<string, object> exchangeArguments = null;
+        if (this.bindingInfo.IsDelay)
+            exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
+        this.channel.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
 
-        if (this.bindingInfo.IsReply)
-        {
-            exchange = $"{this.clusterInfo.ClusterId}.result";
-            var queue = $"{this.clusterInfo.ClusterId}.{this.HostName}.result";
-            this.channel.ExchangeDeclare(exchange, "direct", true);
-            //应答队列暂时不做Single Active Consumer
-            this.channel.QueueDeclare(queue, true, false, false);
-            this.channel.QueueBind(queue, exchange, this.HostName);
-        }
-
-        if (this.clusterInfo.IsUseDelay)
-        {
-            exchange = this.clusterInfo.ClusterId + ".delay";
-            bindType = "x-delayed-message";
-            var exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "direct" } };
-            this.channel.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
-        }
-    }
-    private void CreateQueue()
-    {
-        if (!this.isNeedBuiding) return;
-
-        var exchange = this.clusterInfo.ClusterId;
         IDictionary<string, object> queueArguments = null;
         if (this.bindingInfo.IsSingleActiveConsumer)
             queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
         this.channel.QueueDeclare(this.Queue, true, false, false, queueArguments);
         this.channel.QueueBind(this.Queue, exchange, this.bindingInfo.BindingKey);
-
-        if (this.clusterInfo.IsUseDelay)
-        {
-            exchange = this.clusterInfo.ClusterId + ".delay";
-            this.channel.QueueBind(this.Queue, exchange, this.bindingInfo.BindingKey);
-        }
     }
     private void BindHandler(IModel channel, string queue)
     {
