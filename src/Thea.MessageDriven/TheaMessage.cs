@@ -6,15 +6,9 @@ namespace Thea.MessageDriven;
 public class TheaMessage
 {
     public string MessageId { get; set; }
-    public string HostName { get; set; }
-    public string ClusterId { get; set; }
-    public string Exchange { get; set; }
     public string ReplyExchange { get; set; }
-    public string RoutingKey { get; set; }
-    public string Queue { get; set; }
-    public DateTime? ScheduleTimeUtc { get; set; }
-    //public bool IsGroupMessage { get; set; }
-    public MessageStatus Status { get; set; }
+    public string ReplyRoutingKey { get; set; }
+    public MessageStatus? Status { get; set; }
     public string Message { get; set; }
 }
 public enum MessageStatus
@@ -34,6 +28,9 @@ enum MessageType
 class Message
 {
     public MessageType Type { get; set; }
+    public string Exchange { get; set; }
+    public string RoutingKey { get; set; }
+    public DateTime? ScheduleTimeUtc { get; set; }
     public object Body { get; set; }
 }
 class ResultWaiter

@@ -23,14 +23,14 @@ public class MessageDrivenBuilder
         this.messageDriven.HostName = hostName;
         return this;
     }
-    public MessageDrivenBuilder AddProducer(string clusterId)
+    public MessageDrivenBuilder AddProducer(string clusterId, bool isUseRpc = false)
     {
-        this.messageDriven.AddProducer(clusterId);
+        this.messageDriven.AddProducer(clusterId, isUseRpc);
         return this;
     }
-    public MessageDrivenBuilder AddRpcProducer(string clusterId)
+    public MessageDrivenBuilder AddRpcReplyConsumer(string clusterId)
     {
-        this.messageDriven.AddRpcProducer(clusterId);
+        this.messageDriven.AddRpcReplyConsumer(clusterId);
         return this;
     }
     public MessageDrivenBuilder AddDelayProducer(string clusterId)

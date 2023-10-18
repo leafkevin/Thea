@@ -30,7 +30,7 @@ public class Cluster
     /// <summary>
     /// 绑定类型
     /// </summary>
-    public string BindType { get; set; }    
+    public string BindType { get; set; }
     /// <summary>
     /// 是否有状态
     /// </summary>
@@ -89,10 +89,6 @@ public class Binding
     /// 绑定Key
     /// </summary>
     public string BindingKey { get; set; }
-    /// <summary>
-    /// 主机名称
-    /// </summary>
-    public string HostName { get; set; }
     /// <summary>
     /// 预取消息个数
     /// </summary>

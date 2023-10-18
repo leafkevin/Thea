@@ -31,7 +31,6 @@ CREATE TABLE `mds_binding`
     `Queue` VARCHAR(50) NULL COMMENT '队列',
     `BindType` VARCHAR(50) NULL COMMENT '绑定类型',
     `BindingKey` VARCHAR(100) NULL COMMENT '绑定Key',
-    `HostName` VARCHAR(50) NULL COMMENT '主机名称',
     `IsReply` TINYINT(1) NULL COMMENT '是否应答队列',
     `IsDelay` TINYINT(1) NULL COMMENT '是否延时交换机',
     `PrefetchCount` INT NULL COMMENT '预取消息个数',

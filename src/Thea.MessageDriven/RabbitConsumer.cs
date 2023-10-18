@@ -15,7 +15,7 @@ class RabbitConsumer
 {
     private ConnectionFactory factory;
     private Func<string, Task<object>> consumerHandler;
-    private readonly Action<TheaMessage, Exception> nextHandler;
+    private readonly Action<TheaMessage, MessageStatus> nextHandler;
     private Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly string HostName;
@@ -167,59 +167,59 @@ class RabbitConsumer
             //兼容现非框架队列消息
             if (message.Message == null)
             {
-                message.ClusterId ??= this.clusterInfo.ClusterId;
-                message.RoutingKey ??= this.bindingInfo.BindingKey;
                 message.MessageId ??= ObjectId.NewId();
-                message.HostName ??= this.HostName;
-                message.Exchange ??= this.bindingInfo.Exchange;
                 message.Message = jsonBody;
             }
-            message.Queue = this.Queue;
-            while (iLoop < 3)
+            if (!string.IsNullOrEmpty(message.ReplyExchange) && message.Status.HasValue
+                && message.Status > MessageStatus.WaitForReply)
+                this.nextHandler.Invoke(message, message.Status.Value);
+            else
             {
-                try
+                while (iLoop < 3)
                 {
-                    resp = await this.consumerHandler.Invoke(message.Message);
-                    break;
+                    try
+                    {
+                        resp = await this.consumerHandler.Invoke(message.Message);
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        isSuccess = false;
+                        exception = ex.InnerException ?? ex;
+                    }
+                    iLoop++;
+                    Thread.Sleep(1000);
                 }
-                catch (Exception ex)
+
+                var result = isSuccess ? resp.ToJson() : exception.ToString();
+                var logInfo = new ExecLog
                 {
-                    isSuccess = false;
-                    exception = ex.InnerException ?? ex;
-                }
-                iLoop++;
-                Thread.Sleep(1000);
-            }
-            var result = isSuccess ? resp.ToJson() : exception.ToString();
-            var logInfo = new ExecLog
-            {
-                LogId = ObjectId.NewId(),
-                ClusterId = message.ClusterId,
-                RoutingKey = ea.RoutingKey,
-                Queue = this.Queue,
-                Body = jsonBody,
-                IsSuccess = isSuccess,
-                Result = result,
-                RetryTimes = iLoop,
-                CreatedAt = DateTime.Now,
-                CreatedBy = this.consumerId,
-                UpdatedAt = DateTime.Now,
-                UpdatedBy = this.consumerId
-            };
-            if (this.isLogEnabled || !isSuccess)
-            {
-                this.addLogsHandler.Invoke(logInfo);
-                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
-            }
-            if (message.Status == MessageStatus.WaitForReply)
-            {
-                if (isSuccess)
+                    LogId = ObjectId.NewId(),
+                    ClusterId = this.clusterInfo.ClusterId,
+                    RoutingKey = ea.RoutingKey,
+                    Queue = this.Queue,
+                    Body = jsonBody,
+                    IsSuccess = isSuccess,
+                    Result = result,
+                    RetryTimes = iLoop,
+                    CreatedAt = DateTime.Now,
+                    CreatedBy = this.consumerId,
+                    UpdatedAt = DateTime.Now,
+                    UpdatedBy = this.consumerId
+                };
+                if (this.isLogEnabled || !isSuccess)
                 {
-                    message.Message = resp.ToJson();
-                    message.Status = MessageStatus.SetResult;
+                    this.addLogsHandler.Invoke(logInfo);
+                    if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                 }
-                else message.Status = MessageStatus.SetException;
-                this.nextHandler.Invoke(message, exception);
+                if (!string.IsNullOrEmpty(message.ReplyExchange) && message.Status.HasValue)
+                {
+                    message.Message = result;
+                    MessageStatus nextStatus = default;
+                    if (message.Status.Value == MessageStatus.WaitForReply)
+                        nextStatus = isSuccess ? MessageStatus.SetResult : MessageStatus.SetException;
+                    this.nextHandler.Invoke(message, nextStatus);
+                }
             }
             channel.BasicAck(ea.DeliveryTag, false);
         };

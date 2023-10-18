@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Thea.Json;
 
@@ -6,6 +8,53 @@ namespace Thea;
 
 public static class TheaExtensions
 {
+    private static ConcurrentDictionary<int, Type> namedImplTyps = new();
+    public static IServiceCollection AddSingleton<TService, TImplementation>(this IServiceCollection services, string name)
+        where TService : class
+        where TImplementation : class, TService
+    {
+        services.AddSingleton<TImplementation>();
+        var serverType = typeof(TService);
+        var implType = typeof(TImplementation);
+
+        var hashKey = HashCode.Combine(serverType, name);
+        namedImplTyps.TryAdd(hashKey, implType);
+        return services;
+    }
+    public static IServiceCollection AddScoped<TService, TImplementation>(this IServiceCollection services, string name)
+        where TService : class
+        where TImplementation : class, TService
+    {
+        services.AddScoped<TImplementation>();
+        var serverType = typeof(TService);
+        var implType = typeof(TImplementation);
+
+        var hashKey = HashCode.Combine(serverType, name);
+        namedImplTyps.TryAdd(hashKey, implType);
+        return services;
+    }
+    public static IServiceCollection AddTransient<TService, TImplementation>(this IServiceCollection services, string name)
+       where TService : class
+       where TImplementation : class, TService
+    {
+        services.AddTransient<TImplementation>();
+        var serverType = typeof(TService);
+        var implType = typeof(TImplementation);
+
+        var hashKey = HashCode.Combine(serverType, name);
+        namedImplTyps.TryAdd(hashKey, implType);
+        return services;
+    }
+    public static TService GetService<TService>(this IServiceProvider serviceProvider, string name)
+    {
+        var serverType = typeof(TService);
+        var hashKey = HashCode.Combine(serverType, name);
+
+        if (!namedImplTyps.TryGetValue(hashKey, out var implType))
+            throw new Exception($"没有注册命名为{name}的服务类型:{serverType.FullName}");
+        return (TService)serviceProvider.GetService(implType);
+    }
+
     public static T JsonTo<T>(this object obj)
     {
         if (obj == null) return default;

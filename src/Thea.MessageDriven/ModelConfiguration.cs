@@ -33,7 +33,6 @@ class ModelConfiguration : IModelConfiguration
             f.Member(t => t.Queue).Field(nameof(Binding.Queue)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.BindType).Field(nameof(Binding.BindType)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.BindingKey).Field(nameof(Binding.BindingKey)).NativeDbType(MySqlDbType.VarChar);
-            f.Member(t => t.HostName).Field(nameof(Binding.HostName)).NativeDbType(MySqlDbType.VarChar);
             f.Member(t => t.PrefetchCount).Field(nameof(Binding.PrefetchCount)).NativeDbType(MySqlDbType.Int32);
             f.Member(t => t.IsSingleActiveConsumer).Field(nameof(Binding.IsSingleActiveConsumer)).NativeDbType(MySqlDbType.Bool);
             f.Member(t => t.IsReply).Field(nameof(Binding.IsReply)).NativeDbType(MySqlDbType.Bool);
