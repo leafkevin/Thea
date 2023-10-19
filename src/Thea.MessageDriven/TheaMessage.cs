@@ -58,10 +58,3 @@ class ConsumerInfo
     public bool IsDelay { get; set; }
     public RabbitConsumer RabbitConsumer { get; set; }
 }
-class ConsumerExecutor
-{
-    public string ClusterId { get; set; }
-    public Type ParameterType { get; set; }
-    public Type ReturnType { get; set; }
-    public ObjectMethodExecutor MethodExecutor { get; set; }
-}

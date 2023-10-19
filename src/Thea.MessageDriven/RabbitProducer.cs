@@ -104,7 +104,9 @@ class Channel
         properties.Persistent = true;
         var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
         properties.Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } };
-        this.Model.BasicPublish(exchange + ".delay", routingKey, properties, message);
+        if (!exchange.EndsWith(".delay"))
+            exchange += ".delay";
+        this.Model.BasicPublish(exchange, routingKey, properties, message);
     }
     public void Close() => this.Model.Close();
 }

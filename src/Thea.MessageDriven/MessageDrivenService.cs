@@ -166,7 +166,7 @@ class MessageDrivenService : IMessageDriven
             throw new Exception($"只能选择未来时间");
         if (!exchange.EndsWith(".delay"))
             exchange += ".delay";
-        if (!this.producers.TryGetValue(exchange, out var producerInfo))
+        if (!this.producers.TryGetValue(exchange, out _))
             throw new Exception($"未知的交换机{exchange}，请先注册集群和生产者");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
