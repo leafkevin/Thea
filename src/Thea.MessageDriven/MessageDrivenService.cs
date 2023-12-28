@@ -75,6 +75,7 @@ class MessageDrivenService : IMessageDriven
                     {
                         await this.repository.AddLogs(logs);
                         logs.Clear();
+                        this.lastUpdatedTime = DateTime.UtcNow;
                     }
                     if (this.messageQueue.TryDequeue(out var message))
                     {
