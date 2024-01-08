@@ -196,7 +196,7 @@ class RabbitConsumer
                 {
                     LogId = ObjectId.NewId(),
                     ClusterId = this.clusterInfo.ClusterId,
-                    RoutingKey = ea.RoutingKey,
+                    RoutingKey = this.bindingInfo.BindingKey,
                     Queue = this.Queue,
                     Body = jsonBody,
                     IsSuccess = isSuccess,
