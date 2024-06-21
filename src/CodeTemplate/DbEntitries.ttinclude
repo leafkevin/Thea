@@ -10,7 +10,7 @@ class ColumnInfo
     public string DataType { get; set; }
     public int ArrayDimens { get; set; }
     public string ColumnType { get; set; }
-    public ulong Length { get; set; }
+    public int Length { get; set; }
     public int Scale { get; set; }
     public int Precision { get; set; }
     public bool IsPrimaryKey { get; set; }
@@ -18,6 +18,14 @@ class ColumnInfo
     public bool IsNullable { get; set; }
     public string Description { get; set; }
     public string DefaultValue { get; set; }
+    public int Position { get; set; }    
+}
+class ClassMemberInfo
+{
+    public string MemberType { get; set; }
+    public string DbColumnType { get; set; }
+    public string NativeDbType { get; set; }
+    public int Length { get; set; }
 }
 class DbHelper
 {

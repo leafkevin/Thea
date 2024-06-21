@@ -22,7 +22,7 @@
 <#@ import namespace="Microsoft.VisualStudio.TextTemplating"#>
 <#@ output encoding="utf-8" #>
 <#
-    var connectionString = "Server=.;Database=fengling;Uid=sa;password=Angangyur123456;TrustServerCertificate=true";
+    var connectionString = "Server=127.0.0.1;Database=fengling;Uid=sa;password=SQLserverSA123456;TrustServerCertificate=true";
 	var dbProvider = new SqlServerProvider(connectionString);
     var manager = Manager.Create(Host, GenerationEnvironment);
 
@@ -47,7 +47,7 @@ public class <#=className#>
 {
 <#foreach(ColumnInfo columnInfo in columnList){
 var propertyName = columnInfo.ColumnName;
-var propertyType = dbProvider.MapMemberType(columnInfo);
+var memberInfo = dbProvider.MapMember(columnInfo);
 if(!String.IsNullOrEmpty(columnInfo.Description))
 {#>
     /// <summary>
@@ -56,7 +56,7 @@ if(!String.IsNullOrEmpty(columnInfo.Description))
 <#}#>
 <#if(columnInfo.IsPrimaryKey){#>
 <#}#>
-    public <#=propertyType#> <#=propertyName#> { get; set; }
+    public <#=memberInfo.MemberType#> <#=propertyName#> { get; set; }
 <#}#>
 }
 <#
