@@ -24,9 +24,9 @@
 <#
     var connectionString = "Server=127.0.0.1;Database=fengling;Uid=sa;password=SQLserverSA123456;TrustServerCertificate=true";
     var dbProvider = new SqlServerProvider(connectionString);
-    var tableName = "sys_function";
+    var tableName = "sys_company";
     var removePrefix = "sys_";
-    var separator = '_';    
+    var separator = '_';
     var className = dbProvider.ToClassName(tableName, removePrefix, separator);
     var tableInfo = dbProvider.GetTableInfo(tableName);
     var columnList = dbProvider.GetColumnList(tableName);
