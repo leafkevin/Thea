@@ -351,7 +351,7 @@ class MessageDrivenService : IMessageDriven
                 {
                     lock (this)
                     {
-                        var clusterId = message.ReplyExchange.Substring(0, message.ReplyExchange.Length - 8);
+                        var clusterId = message.ReplyExchange.Substring(0, message.ReplyExchange.Length - 7);
                         if (this.producers.TryGetValue(clusterId, out var clusterProducerInfo))
                         {
                             this.producers.TryAdd(message.ReplyExchange, producerInfo = new ProducerInfo
