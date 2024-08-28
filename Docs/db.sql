@@ -352,7 +352,7 @@ COMMENT ON TABLE "mds_cluster" IS  '集群表，描述消息队列的一个集�
 --DROP TABLE IF EXISTS "mds_binding";
 CREATE TABLE "mds_binding"
 (
-    "bingding_id" VARCHAR(50) NOT NULL,
+    "binding_id" VARCHAR(50) NOT NULL,
     "cluster_id" VARCHAR(50) NULL,
     "exchange" VARCHAR(50) NULL,
     "queue" VARCHAR(50) NULL,
@@ -368,10 +368,10 @@ CREATE TABLE "mds_binding"
     "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_by" VARCHAR(50) NOT NULL,
     "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_mds_binding PRIMARY KEY("bingding_id")
+    CONSTRAINT pk_mds_binding PRIMARY KEY("binding_id")
 );
 
-COMMENT ON COLUMN "mds_binding"."bingding_id" IS '绑定ID';
+COMMENT ON COLUMN "mds_binding"."binding_id" IS '绑定ID';
 COMMENT ON COLUMN "mds_binding"."cluster_id" IS '集群ID';
 COMMENT ON COLUMN "mds_binding"."exchange" IS '信箱';
 COMMENT ON COLUMN "mds_binding"."queue" IS '队列';
