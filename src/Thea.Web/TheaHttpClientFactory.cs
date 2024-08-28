@@ -290,7 +290,7 @@ public class TheaHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFact
 
         // The timer callback should be the only one removing from the active collection. If we can't find
         // our entry in the collection, then this is a bug.
-        bool removed = _activeHandlers.TryRemove(active.Name, out Lazy<ActiveHandlerTrackingEntry>? found);
+        bool removed = _activeHandlers.TryRemove(active.Name, out Lazy<ActiveHandlerTrackingEntry> found);
         Debug.Assert(removed, "Entry not found. We should always be able to remove the entry");
         Debug.Assert(object.ReferenceEquals(active, found!.Value), "Different entry found. The entry should not have been replaced");
 
@@ -369,7 +369,7 @@ public class TheaHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFact
             for (int i = 0; i < initialCount; i++)
             {
                 // Since we're the only one removing from _expired, TryDequeue must always succeed.
-                _expiredHandlers.TryDequeue(out ExpiredHandlerTrackingEntry? entry);
+                _expiredHandlers.TryDequeue(out ExpiredHandlerTrackingEntry entry);
                 Debug.Assert(entry != null, "Entry was null, we should always get an entry back from TryDequeue");
 
                 if (entry.CanDispose)
@@ -418,12 +418,12 @@ public class TheaHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFact
             public static readonly EventId HandlerExpired = new EventId(103, "HandlerExpired");
         }
 
-        private static readonly Action<ILogger, int, Exception?> _cleanupCycleStart = LoggerMessage.Define<int>(
+        private static readonly Action<ILogger, int, Exception> _cleanupCycleStart = LoggerMessage.Define<int>(
             LogLevel.Debug,
             EventIds.CleanupCycleStart,
             "Starting HttpMessageHandler cleanup cycle with {InitialCount} items");
 
-        private static readonly Action<ILogger, double, int, int, Exception?> _cleanupCycleEnd = LoggerMessage.Define<double, int, int>(
+        private static readonly Action<ILogger, double, int, int, Exception> _cleanupCycleEnd = LoggerMessage.Define<double, int, int>(
             LogLevel.Debug,
             EventIds.CleanupCycleEnd,
             "Ending HttpMessageHandler cleanup cycle after {ElapsedMilliseconds}ms - processed: {DisposedCount} items - remaining: {RemainingItems} items");
@@ -433,7 +433,7 @@ public class TheaHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFact
             EventIds.CleanupItemFailed,
             "HttpMessageHandler.Dispose() threw an unhandled exception for client: '{ClientName}'");
 
-        private static readonly Action<ILogger, double, string, Exception?> _handlerExpired = LoggerMessage.Define<double, string>(
+        private static readonly Action<ILogger, double, string, Exception> _handlerExpired = LoggerMessage.Define<double, string>(
             LogLevel.Debug,
             EventIds.HandlerExpired,
             "HttpMessageHandler expired after {HandlerLifetime}ms for client '{ClientName}'");
@@ -634,7 +634,7 @@ public class TheaHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFact
 
         public string Name { get; }
 
-        public IServiceScope? Scope { get; }
+        public IServiceScope Scope { get; }
     }
     #endregion
 }

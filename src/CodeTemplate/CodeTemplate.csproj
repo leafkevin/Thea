@@ -4,7 +4,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <LangVersion>8.0</LangVersion>
+    <LangVersion>10.0</LangVersion>
     <ProjectGuid>{82E8F0F0-484A-4D4D-B61F-A968FAE2F9FD}</ProjectGuid>
     <OutputType>Library</OutputType>
     <RootNamespace>CodeTemplate</RootNamespace>
@@ -58,7 +58,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
-    <None Include="Npgsql\NpgSqlProvider.ttinclude" />
+    <None Include="PostgreSql\PostgreSqlProvider.ttinclude" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -81,18 +81,6 @@
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>ModelConfigurations.cs</LastGenOutput>
     </Content>
-    <Content Include="Npgsql\Entities.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>Entities.cs</LastGenOutput>
-    </Content>
-    <Content Include="Npgsql\Entity.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>Entity.cs</LastGenOutput>
-    </Content>
-    <Content Include="Npgsql\ModelConfiguration.tt">
-      <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>ModelConfiguration.cs</LastGenOutput>
-    </Content>
     <Content Include="Plugins\MySqlConnector.dll" />
     <Content Include="Plugins\MySql\comerr64.dll" />
     <Content Include="Plugins\MySql\gssapi64.dll" />
@@ -103,6 +91,22 @@
     <Content Include="Plugins\MySql\ZstdNet.dll" />
     <Content Include="Plugins\Npgsql.dll" />
     <Content Include="Plugins\System.Data.SqlClient.dll" />
+    <Content Include="PostgreSql\Entities.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Entities.cs</LastGenOutput>
+    </Content>
+    <Content Include="PostgreSql\Entity.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Entity.cs</LastGenOutput>
+    </Content>
+    <Content Include="PostgreSql\ModelConfiguration.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>ModelConfiguration.cs</LastGenOutput>
+    </Content>
+    <Content Include="PostgreSql\ModelConfigurations.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>ModelConfigurations.cs</LastGenOutput>
+    </Content>
     <Content Include="SqlServer\Entities.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>Entities.cs</LastGenOutput>

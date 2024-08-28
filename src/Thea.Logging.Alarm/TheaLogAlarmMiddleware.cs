@@ -29,7 +29,7 @@ public class TheaLogAlarmMiddleware
         if (context.LogEntity != null)
         {
             var logEntityInfo = context.LogEntity;
-            if (logEntityInfo.LogLevel >= LogLevel.Warning)
+            if (logEntityInfo.LogLevel >= (int)LogLevel.Warning)
             {
                 var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.UserId, logEntityInfo.ApiUrl, logEntityInfo.Body);
                 if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))
@@ -72,11 +72,11 @@ public class TheaLogAlarmMiddleware
     private void Build(LogEntity logEntityInfo, AlarmInfo alarmInfo)
     {
         var body = logEntityInfo.Body;
-        if (logEntityInfo.Exception != null)
-            body = logEntityInfo.Exception.Message;
+        if (logEntityInfo.Exception is Exception exception && exception != null)
+            body = exception.Message;
 
         alarmInfo.Header = "Warning Alarm Info";
-        if (logEntityInfo.LogLevel > LogLevel.Warning)
+        if (logEntityInfo.LogLevel > (int)LogLevel.Warning)
             alarmInfo.Header = "Exception Alarm Info";
 
         var logViewUrl = $"{this.logVisitUrl}thealogs-{logEntityInfo.CreatedAt.Date:yyyyMMdd}/{logEntityInfo.Id}";

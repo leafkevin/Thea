@@ -44,7 +44,7 @@ public class TheaLogger : ILogger
                 Id = ObjectId.NewId(),
                 AppId = this.appId,
                 Body = formatter.Invoke(state, exception),
-                LogLevel = logLevel,
+                LogLevel = (int)logLevel,
                 Exception = exception
             };
         }
@@ -53,7 +53,7 @@ public class TheaLogger : ILogger
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
 
-        logEntityInfo.LogTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+        logEntityInfo.LogTime = DateTime.Now;
         if (!string.IsNullOrEmpty(logEntityInfo.Authorization))
             logEntityInfo.Authorization = Encrypt(logEntityInfo.Authorization);
 
@@ -70,15 +70,7 @@ public class TheaLogger : ILogger
         this.processor.Execute(logEntityInfo);
     }
 
-    public bool IsEnabled(LogLevel logLevel)
-    {
-        if (this.name.Contains("Microsoft") && logLevel < this.microsoftLogLevel)
-            return false;
-        if (this.name.Contains("System") && logLevel < this.systemLogLevel)
-            return false;
-
-        return logLevel >= this.logLevel;
-    }
+    public bool IsEnabled(LogLevel logLevel) => logLevel >= this.logLevel;
 
     public IDisposable BeginScope<TState>(TState state)
     {

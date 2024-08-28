@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Thea.Json;
 using Thea.Logging;
-using Thea.Orm;
+using Trolley;
 
 namespace Thea.MessageDriven;
 
@@ -272,6 +272,36 @@ class MessageDrivenService : IMessageDriven
         if (!this.localClusterInfos.Exists(f => f.ClusterId == clusterId))
             this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId });
     }
+    public void AddStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
+    {
+        var parametersType = typeof(TParameters);
+        Func<string, Task<object>> consumerHandler = async message =>
+        {
+            var parameters = (TParameters)TheaJsonSerializer.Deserialize(message, parametersType);
+            await consumer.Invoke(parameters);
+            return null;
+        };
+        //有状态队列，所有队列消费者都相同
+        this.consumerHandlers.TryAdd(clusterId, consumerHandler);
+        var queue = $"{clusterId}.queue0";
+        var consumerInfo = new ConsumerInfo
+        {
+            ClusterId = clusterId,
+            ConsumerId = $"{queue}.{this.HostName}.worker",
+            Exchange = clusterId,
+            BindType = "topic",
+            RoutingKey = "0",
+            Queue = queue,
+            IsStateful = true,
+            IsDelay = false,
+            RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
+        };
+        this.consumers.TryAdd(clusterId, new List<ConsumerInfo> { consumerInfo });
+        var localClusterInfo = this.localClusterInfos.Find(f => f.ClusterId == clusterId);
+        if (localClusterInfo == null)
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId, IsStateful = true });
+        else localClusterInfo.IsStateful = true;
+    }
     public void AddStatefulConsumer(string clusterId, object target, MethodInfo methodInfo)
     {
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
@@ -305,6 +335,37 @@ class MessageDrivenService : IMessageDriven
         if (localClusterInfo == null)
             this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId, IsStateful = true });
         else localClusterInfo.IsStateful = true;
+    }
+    public void AddSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
+    {
+        var parametersType = typeof(TParameters);
+        Func<string, Task<object>> consumerHandler = async message =>
+        {
+            var parameters = (TParameters)TheaJsonSerializer.Deserialize(message, parametersType);
+            await consumer.Invoke(parameters);
+            return null;
+        };
+        //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中
+        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", consumerHandler);
+        var consumerInfo = new ConsumerInfo
+        {
+            ClusterId = clusterId,
+            ConsumerId = $"{queue}.worker0",
+            Exchange = isDelay ? clusterId + ".delay" : clusterId,
+            BindType = isDelay ? "x-delayed-message" : "topic",
+            //数据库可以更改
+            RoutingKey = routingKey,
+            Queue = queue,
+            IsStateful = false,
+            IsDelay = isDelay,
+            RabbitConsumer = new RabbitConsumer(this, this.serviceProvider, consumerHandler)
+        };
+        if (!this.consumers.TryGetValue(clusterId, out var consumerInfos))
+            this.consumers.TryAdd(clusterId, consumerInfos = new List<ConsumerInfo> { consumerInfo });
+        if (!consumerInfos.Exists(f => f.Queue == queue))
+            consumerInfos.Add(consumerInfo);
+        if (!this.localClusterInfos.Exists(f => f.ClusterId == clusterId))
+            this.localClusterInfos.Add(new ClusterInfo { ClusterId = clusterId });
     }
     public void AddSubscriber(string clusterId, string queue, object target, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
     {
@@ -351,7 +412,7 @@ class MessageDrivenService : IMessageDriven
                 {
                     lock (this)
                     {
-                        var clusterId = message.ReplyExchange.Substring(0, message.ReplyExchange.Length - 7);
+                        var clusterId = message.ReplyExchange.Substring(0, message.ReplyExchange.Length - 8);
                         if (this.producers.TryGetValue(clusterId, out var clusterProducerInfo))
                         {
                             this.producers.TryAdd(message.ReplyExchange, producerInfo = new ProducerInfo

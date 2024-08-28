@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<AssemblyName>Trolley</AssemblyName>
+		<PackageId>$(AssemblyName)</PackageId>
+		<Title>$(AssemblyName)</Title>
+		<Description>一款轻量级高性能的ORM，支持模型映射，导航属性，值对象属性，表达式，分页，事务，多种数据库终端支持，支持同步/异步。</Description>
+		<Authors>leaf kevin</Authors>
+		<Copyright>2022 leafkevin</Copyright>
+		<TargetFrameworks>net8.0</TargetFrameworks>
+		<Version>1.0.6</Version>
+		<PackageTags>orm;trolley</PackageTags>
+		<PublishRepositoryUrl>true</PublishRepositoryUrl>
+		<PackageProjectUrl>https://github.com/leafkevin/Trolley</PackageProjectUrl>
+		<RepositoryType>git</RepositoryType>
+		<RepositoryUrl>https://github.com/leafkevin/Trolley</RepositoryUrl>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<DebugSymbols>true</DebugSymbols>
+		<SignAssembly>true</SignAssembly>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<AssemblyOriginatorKeyFile>key.snk</AssemblyOriginatorKeyFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Include="README.md" Pack="true" PackagePath="\" />
+		<Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
+	</ItemGroup>
+</Project>

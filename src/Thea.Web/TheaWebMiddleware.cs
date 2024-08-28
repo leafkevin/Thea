@@ -53,7 +53,7 @@ public class TheaWebMiddleware
     }
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
-        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = LogLevel.Information };
+        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
         if (context.Request.Headers.TryGetValue("TraceId", out StringValues traceIds))
         {
             var traceId = traceIds.ToString();
@@ -66,8 +66,8 @@ public class TheaWebMiddleware
         {
             context.TraceIdentifier = context.TraceIdentifier.Replace(":", "-");
             logEntityInfo.TraceId = context.TraceIdentifier;
-            context.Request.Headers.Add("TraceId", new StringValues(logEntityInfo.TraceId));
-            context.Request.Headers.Add("Sequence", new StringValues(logEntityInfo.Sequence.ToString()));
+            context.Request.Headers.Append("TraceId", new StringValues(logEntityInfo.TraceId));
+            context.Request.Headers.Append("Sequence", new StringValues(logEntityInfo.Sequence.ToString()));
         }
         if (context.Request.Headers.TryGetValue("Tag", out StringValues tag))
             logEntityInfo.Tag = tag.ToString();
@@ -83,21 +83,21 @@ public class TheaWebMiddleware
         context.Response.OnStarting(() =>
         {
             if (!context.Response.Headers.ContainsKey("TraceId"))
-                context.Response.Headers.Add("TraceId", logEntityInfo.TraceId);
+                context.Response.Headers.Append("TraceId", logEntityInfo.TraceId);
             if (!context.Response.Headers.ContainsKey("Tag") && !string.IsNullOrEmpty(logEntityInfo.Tag))
-                context.Response.Headers.Add("Tag", logEntityInfo.Tag);
+                context.Response.Headers.Append("Tag", logEntityInfo.Tag);
 
             return Task.CompletedTask;
         });
         switch (logEntityInfo.ApiType)
         {
-            case ApiType.HttpGet:
-            case ApiType.HttpDelete:
+            case (int)ApiType.HttpGet:
+            case (int)ApiType.HttpDelete:
                 if (context.Request.Query != null && context.Request.Query.Count > 0)
                     logEntityInfo.Parameters = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
                 break;
-            case ApiType.HttpPost:
-            case ApiType.HttpPut:
+            case (int)ApiType.HttpPost:
+            case (int)ApiType.HttpPut:
                 if (context.Request.Query != null && context.Request.Query.Count > 0)
                     logEntityInfo.Parameters = "QueryString: {HttpUtility.UrlDecode(context.Request.QueryString.ToString())} \nBody: ";
                 logEntityInfo.Parameters += await this.ReadBody(context.Request.Body);
@@ -174,7 +174,6 @@ public class TheaWebMiddleware
                 logEntityInfo.UserId = passport.UserId;
                 logEntityInfo.UserName = passport.UserName;
                 logEntityInfo.AppId = this.configuation["AppId"] ?? context.User.FindFirst("client_id")?.Value;
-                logEntityInfo.TenantType = passport.TenantType;
                 logEntityInfo.TenantId = passport.TenantId;
             }
         }
@@ -203,15 +202,15 @@ public class TheaWebMiddleware
         }
         return string.Empty;
     }
-    private ApiType GetApiType(string httpMethod)
+    private int GetApiType(string httpMethod)
     {
         switch (httpMethod.ToUpper())
         {
-            case "GET": return ApiType.HttpGet;
-            case "POST": return ApiType.HttpPost;
-            case "PUT": return ApiType.HttpPut;
-            case "DELETE": return ApiType.HttpDelete;
+            case "GET": return (int)ApiType.HttpGet;
+            case "POST": return (int)ApiType.HttpPost;
+            case "PUT": return (int)ApiType.HttpPut;
+            case "DELETE": return (int)ApiType.HttpDelete;
         }
-        return ApiType.LocalInvoke;
+        return (int)ApiType.LocalInvoke;
     }
 }

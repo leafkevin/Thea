@@ -1,7 +1,7 @@
-﻿using Elasticsearch.Net;
+﻿using Elastic.Clients.Elasticsearch;
+using Elastic.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Nest;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -20,22 +20,34 @@ namespace Thea.Logging
         private readonly ConcurrentQueue<LogEntity> messageQueue = new();
         private readonly List<Func<LoggerHandlerDelegate, LoggerHandlerDelegate>> components = new();
         private readonly IServiceProvider serviceProvider;
-        private readonly IElasticClient client;
-
+        private readonly ElasticsearchClient client;
         private DateTime lastPushedTime = DateTime.Now;
+
         public TheaLoggerProcessor(IServiceProvider serviceProvider)
         {
             this.serviceProvider = serviceProvider;
             var configuration = serviceProvider.GetService<IConfiguration>();
-            var pushUrls = configuration.GetSection("Logging:PushUrls").Get<string[]>();
-            if (pushUrls == null || pushUrls.Length <= 0)
-                throw new ArgumentNullException("In appsettings.json file not found 'Logging:PushUrls' node or is null.");
 
-            var pool = new StaticConnectionPool(pushUrls.Select(f => new Uri(f)));
-            var connectionString = new ConnectionSettings(pool)
-                //启用兼容模式EnableApiVersioningHeader，IsValid将正确返回true
-                .DisableDirectStreaming().EnableApiVersioningHeader();
-            this.client = new ElasticClient(connectionString);
+            var pushUrls = configuration.GetSection("Logging:Elastic:Urls").Get<string[]>();
+            var user = configuration.GetSection("Logging:Elastic:User").Get<string>();
+            var password = configuration.GetSection("Logging:Elastic:Password").Get<string>();
+            var fingerprint = configuration.GetSection("Logging:Elastic:Fingerprint").Get<string>();
+
+            if (pushUrls == null || pushUrls.Length <= 0)
+                throw new ArgumentNullException("In appsettings.json file not found 'Logging:Elastic:Urls' node or is null.");
+            if (string.IsNullOrEmpty(user))
+                throw new ArgumentNullException("In appsettings.json file not found 'Logging:Elastic:User' node or is null.");
+            if (string.IsNullOrEmpty(password))
+                throw new ArgumentNullException("In appsettings.json file not found 'Logging:Elastic:Password' node or is null.");
+            if (string.IsNullOrEmpty(fingerprint))
+                throw new ArgumentNullException("In appsettings.json file not found 'Logging:Elastic:Fingerprint' node or is null.");
+
+            var pool = new StaticNodePool(pushUrls.Select(f => new Uri(f)));
+            var settings = new ElasticsearchClientSettings(new Uri(pushUrls[0]))
+                .CertificateFingerprint(fingerprint)
+                .Authentication(new BasicAuthentication(user, password))
+                .DisableDirectStreaming();
+            this.client = new ElasticsearchClient(settings);
             var batchCount = configuration.GetValue("Logging:PushBatchCount", 100);
 
             this.task = Task.Factory.StartNew(async () =>
@@ -51,7 +63,6 @@ namespace Thea.Logging
                         if (logEntities.Count >= batchCount
                             || DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
                         {
-                            await this.SendToAsync(logEntities);
                             if (this.next != null)
                             {
                                 if (logEntities.Count > 0)
@@ -69,10 +80,11 @@ namespace Thea.Logging
                                             logEntities.Remove(logEntity);
                                         }
                                     }
-                                    logEntities.Clear();
                                 }
                                 else await this.next.Invoke(LoggerHandlerContext.Instance);
                             }
+                            await this.SendToAsync(logEntities);
+                            logEntities.Clear();
                         }
                         if (this.messageQueue.Count <= 0)
                             Thread.Sleep(100);
@@ -130,11 +142,16 @@ namespace Thea.Logging
         {
             if (logs.Count <= 0) return;
             var esIndex = $"thealogs-{DateTime.Now:yyyyMMdd}";
+            foreach (var logEntity in logs)
+            {
+                if (logEntity.Exception == null) continue;
+                logEntity.Exception = logEntity.Exception.ToString();
+            }
             var result = await this.client.IndexManyAsync(logs, esIndex);
-            if (!result.IsValid)
+            if (!result.IsValidResponse)
             {
                 Console.WriteLine(result.DebugInformation);
-                Console.WriteLine(result.ServerError);
+                Console.WriteLine(result.ElasticsearchServerError);
             }
         }
     }

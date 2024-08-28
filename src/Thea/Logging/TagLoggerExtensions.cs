@@ -15,9 +15,8 @@ public static class TagLoggerExtensions
     public static void LogEntity(this ILogger logger, LogEntity logEntityInfo)
     {
         if (logEntityInfo == null) return;
-        logger.Log(logEntityInfo.LogLevel, 0, logEntityInfo, logEntityInfo.Exception, LogEntityFormatter);
+        logger.Log((LogLevel)logEntityInfo.LogLevel, 0, logEntityInfo, logEntityInfo.Exception as Exception, LogEntityFormatter);
     }
-
 
     public static void LogTagDebug(this ILogger logger, EventId eventId, string tag, Exception exception, string message, params object[] args)
         => logger.Log(LogLevel.Debug, eventId, tag, exception, message, args);
@@ -94,8 +93,8 @@ public static class TagLoggerExtensions
         logger.LogEntity(new LogEntity
         {
             Id = ObjectId.NewId(),
-            LogLevel = logLevel,
-            ApiType = ApiType.LocalInvoke,
+            LogLevel = (int)logLevel,
+            ApiType = (int)ApiType.LocalInvoke,
             Tag = tag,
             Body = body,
             Exception = exception,

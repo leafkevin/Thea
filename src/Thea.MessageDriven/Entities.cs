@@ -90,6 +90,10 @@ public class Binding
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
+    /// 主机名称
+    /// </summary>
+    public string HostName { get; set; }
+    /// <summary>
     /// 预取消息个数
     /// </summary>
     public int PrefetchCount { get; set; }
