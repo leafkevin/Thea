@@ -8,7 +8,7 @@ class ModelConfiguration : IModelConfiguration
     {
         builder.Entity<Binding>(f => f.ToTable("mds_binding"))
             .Entity<Cluster>(f => f.ToTable("mds_cluster"))
-            .Entity<ExecLog>(f => f.ToTable("mds_exec_log"))
+            .Entity<ExecLog>(f => f.ToTable("mds_log"))
             .UseAutoMap();
     }
 }
