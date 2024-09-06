@@ -54,7 +54,7 @@ class MessageDrivenService : IMessageDriven
             this.readyToStart.WaitOne();
             if (string.IsNullOrEmpty(this.DbKey))
             {
-                this.logger.LogError("MessageDriven", "未设置dbKey,无法初始化MessageDrivenService对象");
+                this.logger.LogTagError("MessageDriven", "未设置dbKey,无法初始化MessageDrivenService对象");
                 throw new Exception("未设置dbKey,无法初始化MessageDrivenService对象");
             }
             var logs = new List<ExecLog>();
@@ -473,9 +473,9 @@ class MessageDrivenService : IMessageDriven
                     BindType = "topic",
                     IsEnabled = true,
                     CreatedAt = now,
-                    CreatedBy = this.HostName,
+                    CreatedBy = ipAddress,
                     UpdatedAt = now,
-                    UpdatedBy = this.HostName
+                    UpdatedBy = ipAddress
                 });
             }
             this.clusters.TryAdd(clusterId, dbClusterInfo);
@@ -498,15 +498,16 @@ class MessageDrivenService : IMessageDriven
                         BindingKey = localConsumer.RoutingKey,
                         Exchange = localConsumer.IsDelay ? clusterId + ".delay" : clusterId,
                         Queue = localConsumer.Queue,
+                        HostName = this.HostName,
                         PrefetchCount = 250,
                         IsSingleActiveConsumer = localConsumer.IsStateful,
                         IsReply = false,
                         IsDelay = localConsumer.IsDelay,
                         IsEnabled = true,
                         CreatedAt = now,
-                        CreatedBy = this.HostName,
+                        CreatedBy = ipAddress,
                         UpdatedAt = now,
-                        UpdatedBy = this.HostName
+                        UpdatedBy = ipAddress
                     });
                 }
                 dbClusterInfo.IsStateful = localConsumer.IsStateful;
@@ -524,15 +525,16 @@ class MessageDrivenService : IMessageDriven
                         BindingKey = this.HostName,
                         Exchange = replyExchange,
                         Queue = replyQueue,
+                        HostName = this.HostName,
                         PrefetchCount = 10,
                         IsSingleActiveConsumer = false,
                         IsReply = true,
                         IsDelay = false,
                         IsEnabled = true,
                         CreatedAt = now,
-                        CreatedBy = this.HostName,
+                        CreatedBy = ipAddress,
                         UpdatedAt = now,
-                        UpdatedBy = this.HostName
+                        UpdatedBy = ipAddress
                     });
                 }
             }

@@ -1,6 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 using Thea.Json;
 
@@ -8,53 +10,35 @@ namespace Thea;
 
 public static class TheaExtensions
 {
-    private static ConcurrentDictionary<int, Type> namedImplTyps = new();
-    public static IServiceCollection AddSingleton<TService, TImplementation>(this IServiceCollection services, string name)
-        where TService : class
-        where TImplementation : class, TService
+    private static ConcurrentDictionary<Type, Dictionary<object, string>> enumDescriptions = new();
+    public static string ToDescription<TEnum>(this object enumObj) where TEnum : struct, Enum
     {
-        services.AddSingleton<TImplementation>();
-        var serverType = typeof(TService);
-        var implType = typeof(TImplementation);
-
-        var hashKey = HashCode.Combine(serverType, name);
-        namedImplTyps.TryAdd(hashKey, implType);
-        return services;
+        var enumType = typeof(TEnum);
+        object enumValue = null;
+        if (enumObj is TEnum typedValue)
+            enumValue = typedValue;
+        else enumValue = Enum.ToObject(enumType, enumObj);
+        if (!enumDescriptions.TryGetValue(enumType, out var descriptions))
+        {
+            var enumValues = Enum.GetValues(enumType);
+            descriptions = new Dictionary<object, string>();
+            foreach (var value in enumValues)
+            {
+                string description = null;
+                var enumName = Enum.GetName(enumType, value);
+                var fieldInfo = enumType.GetField(enumName);
+                if (fieldInfo != null)
+                {
+                    var descAttr = fieldInfo.GetCustomAttribute<DescriptionAttribute>();
+                    if (descAttr != null)
+                        description = descAttr.Description;
+                }
+                descriptions.Add(value, description ?? enumName);
+            }
+            enumDescriptions.TryAdd(enumType, descriptions);
+        }
+        return descriptions[enumValue];
     }
-    public static IServiceCollection AddScoped<TService, TImplementation>(this IServiceCollection services, string name)
-        where TService : class
-        where TImplementation : class, TService
-    {
-        services.AddScoped<TImplementation>();
-        var serverType = typeof(TService);
-        var implType = typeof(TImplementation);
-
-        var hashKey = HashCode.Combine(serverType, name);
-        namedImplTyps.TryAdd(hashKey, implType);
-        return services;
-    }
-    public static IServiceCollection AddTransient<TService, TImplementation>(this IServiceCollection services, string name)
-       where TService : class
-       where TImplementation : class, TService
-    {
-        services.AddTransient<TImplementation>();
-        var serverType = typeof(TService);
-        var implType = typeof(TImplementation);
-
-        var hashKey = HashCode.Combine(serverType, name);
-        namedImplTyps.TryAdd(hashKey, implType);
-        return services;
-    }
-    public static TService GetService<TService>(this IServiceProvider serviceProvider, string name)
-    {
-        var serverType = typeof(TService);
-        var hashKey = HashCode.Combine(serverType, name);
-
-        if (!namedImplTyps.TryGetValue(hashKey, out var implType))
-            throw new Exception($"没有注册命名为{name}的服务类型:{serverType.FullName}");
-        return (TService)serviceProvider.GetService(implType);
-    }
-
     public static T JsonTo<T>(this object obj)
     {
         if (obj == null) return default;

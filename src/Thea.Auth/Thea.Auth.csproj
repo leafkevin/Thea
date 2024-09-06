@@ -12,12 +12,11 @@
 		<PackageReference Include="Microsoft.AspNetCore.Authorization" Version="8.0.7" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
 		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.0.1" />
-		<PackageReference Include="Npgsql" Version="8.0.3" />
 		<PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.0.1" />
+		<PackageReference Include="Trolley" Version="2.0.6" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\Thea\Thea.csproj" />
-		<ProjectReference Include="..\Trolley\Trolley.csproj" />
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
 </Project>

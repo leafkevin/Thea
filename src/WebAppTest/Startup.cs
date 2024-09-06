@@ -91,7 +91,8 @@ public static class Startup
         app.UseMessageDriven(f =>
         {
             f.Create("default")
-                .AddSubscriber<string>("cache.refresh", "cache.refresh.queue",
+            .AddProducer("cache.refresh")
+            .AddSubscriber<string>("cache.refresh", "cache.refresh.queue",
                 key => { memoryCache.Remove(key); return Task.CompletedTask; });
         });
     }

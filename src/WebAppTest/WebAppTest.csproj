@@ -5,6 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
+		<PackageReference Include="Trolley" Version="2.0.6" />
+		<PackageReference Include="Trolley.PostgreSql" Version="2.0.6" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\Thea.Auth\Thea.Auth.csproj" />
@@ -13,7 +15,5 @@
 		<ProjectReference Include="..\Thea.MessageDriven\Thea.MessageDriven.csproj" />
 		<ProjectReference Include="..\Thea.Web\Thea.Web.csproj" />
 		<ProjectReference Include="..\Thea\Thea.csproj" />
-		<ProjectReference Include="..\Trolley.PostgreSql\Trolley.PostgreSql.csproj" />
-		<ProjectReference Include="..\Trolley\Trolley.csproj" />
 	</ItemGroup>
 </Project>

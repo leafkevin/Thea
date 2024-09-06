@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using Thea;
+using Thea.MessageDriven;
 using Trolley;
 using Trolley.PostgreSql;
 using WebAppTest.Domain.Models;
@@ -13,9 +14,11 @@ namespace WebAppTest.Controllers
     public class HomeController : ControllerBase
     {
         private readonly IOrmDbFactory dbFactory;
-        public HomeController(IOrmDbFactory dbFactory)
+        private readonly IMessageDriven messageDriven;
+        public HomeController(IOrmDbFactory dbFactory, IMessageDriven messageDriven)
         {
             this.dbFactory = dbFactory;
+            this.messageDriven = messageDriven;
         }
 
         [HttpGet]
@@ -44,6 +47,12 @@ namespace WebAppTest.Controllers
                 .Page(request.PageNumber, request.PageSize)
                 .ToPageListAsync();
             return TheaResponse.Succeed(result);
+        }
+        [HttpPost]
+        public async Task<TheaResponse> RemoveCache([FromBody] string cacheKey)
+        {
+            await this.messageDriven.PublishAsync("cache.refresh", "1", cacheKey);
+            return TheaResponse.Succeed("ok");
         }
     }
 }
