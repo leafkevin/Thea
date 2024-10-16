@@ -38,7 +38,7 @@ public class User
     /// <summary>
     /// 性别
     /// </summary>
-    public int Gender { get; set; }
+    public Gender? Gender { get; set; }
     /// <summary>
     /// 生日
     /// </summary>

@@ -12,13 +12,13 @@ namespace Thea.Auth;
 
 public class RoledResourceAuthorizationRequirement : IAuthorizationRequirement { }
 
-public class RoledResourceAuthorizationHandler : AuthorizationHandler<RoledResourceAuthorizationRequirement>
+public class PermissionAuthorizationHandler : AuthorizationHandler<RoledResourceAuthorizationRequirement>
 {
     private readonly IDistributedCache redisCache;
     private readonly HttpContextAccessor contextAccessor;
     private readonly IOrmDbFactory dbFactory;
     private readonly IConfiguration configuration;
-    public RoledResourceAuthorizationHandler(IServiceProvider serviceProvider)
+    public PermissionAuthorizationHandler(IServiceProvider serviceProvider)
     {
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
         this.contextAccessor = serviceProvider.GetService<HttpContextAccessor>();
@@ -39,7 +39,7 @@ public class RoledResourceAuthorizationHandler : AuthorizationHandler<RoledResou
             var actionUrls = await this.redisCache.GetOrCreateAsync($"sys.role.{roleId}", async () =>
             {
                 var repository = this.dbFactory.CreateRepository(dbKey);
-                return await repository.From<RoleResource, Resource>()
+                return await repository.From<Permission, Resource>()
                     .InnerJoin((x, y) => x.ResourceId == y.ResourceId)
                     .Where((x, y) => x.RoleId == roleId && x.IsEnabled && y.IsEnabled)
                     .Select((x, y) => y.ActionUrl)

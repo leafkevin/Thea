@@ -1,5 +1,7 @@
-// Copyright (c) .NET Core Community. All rights reserved.
-// Licensed under the MIT License. See License.txt in the project root for license information.
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+#nullable disable
 
 using System;
 using System.Runtime.CompilerServices;
@@ -7,11 +9,11 @@ using System.Runtime.CompilerServices;
 namespace Thea;
 
 /// <summary>
-/// Provides a common awaitable structure that <see cref="ObjectMethodExecutor.ExecuteAsync" /> can
+/// Provides a common awaitable structure that <see cref="ObjectMethodExecutor.ExecuteAsync"/> can
 /// return, regardless of whether the underlying value is a System.Task, an FSharpAsync, or an
 /// application-defined custom awaitable.
 /// </summary>
-public struct ObjectMethodExecutorAwaitable
+public readonly struct ObjectMethodExecutorAwaitable
 {
     private readonly object _customAwaitable;
     private readonly Func<object, object> _getAwaiterMethod;
@@ -57,11 +59,10 @@ public struct ObjectMethodExecutorAwaitable
     public Awaiter GetAwaiter()
     {
         var customAwaiter = _getAwaiterMethod(_customAwaitable);
-        return new Awaiter(customAwaiter, _isCompletedMethod, _getResultMethod, _onCompletedMethod,
-            _unsafeOnCompletedMethod);
+        return new Awaiter(customAwaiter, _isCompletedMethod, _getResultMethod, _onCompletedMethod, _unsafeOnCompletedMethod);
     }
 
-    public struct Awaiter : ICriticalNotifyCompletion
+    public readonly struct Awaiter : ICriticalNotifyCompletion
     {
         private readonly object _customAwaiter;
         private readonly Func<object, bool> _isCompletedMethod;
@@ -85,10 +86,7 @@ public struct ObjectMethodExecutorAwaitable
 
         public bool IsCompleted => _isCompletedMethod(_customAwaiter);
 
-        public object GetResult()
-        {
-            return _getResultMethod(_customAwaiter);
-        }
+        public object GetResult() => _getResultMethod(_customAwaiter);
 
         public void OnCompleted(Action continuation)
         {

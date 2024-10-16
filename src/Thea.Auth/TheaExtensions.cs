@@ -38,8 +38,7 @@ public static class TheaExtensions
                 };
                 options.SaveToken = true;
             });
-
-        services.AddSingleton<IAuthorizationHandler, RoledResourceAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
     }
     public static IApplicationBuilder UseTheaJwt(this IApplicationBuilder app, IConfiguration configuration)
     {

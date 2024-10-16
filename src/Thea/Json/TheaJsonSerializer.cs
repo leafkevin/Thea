@@ -29,6 +29,7 @@ public class TheaJsonSerializer
         SerializerOptions.Converters.Add(new JsonNullableDoubleConverter());
         SerializerOptions.Converters.Add(new JsonNullableDecimalConverter());
         SerializerOptions.Converters.Add(new JsonNullableDateTimeConverter());
+        SerializerOptions.Converters.Add(new JsonEnumConverter());
     }
     public static string Serialize(object obj) => JsonSerializer.Serialize(obj, SerializerOptions);
     public static string Serialize<T>(T obj) => JsonSerializer.Serialize<T>(obj, SerializerOptions);

@@ -311,8 +311,8 @@ class MessageDrivenService : IMessageDriven
             var parameters = TheaJsonSerializer.Deserialize(message, parametersType);
             object result;
             if (methodExecutor.IsMethodAsync)
-                result = await methodExecutor.ExecuteAsync(target, parameters);
-            else result = methodExecutor.Execute(target, parameters);
+                result = await methodExecutor.ExecuteAsync(target, [parameters]);
+            else result = methodExecutor.Execute(target, [parameters]);
             return result;
         };
         //有状态队列，所有队列消费者都相同
@@ -376,8 +376,8 @@ class MessageDrivenService : IMessageDriven
             var parameters = TheaJsonSerializer.Deserialize(message, parametersType);
             object result;
             if (methodExecutor.IsMethodAsync)
-                result = await methodExecutor.ExecuteAsync(target, parameters);
-            else result = methodExecutor.Execute(target, parameters);
+                result = await methodExecutor.ExecuteAsync(target, [parameters]);
+            else result = methodExecutor.Execute(target, [parameters]);
             return result;
         };
         //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中
@@ -473,9 +473,9 @@ class MessageDrivenService : IMessageDriven
                     BindType = "topic",
                     IsEnabled = true,
                     CreatedAt = now,
-                    CreatedBy = ipAddress,
+                    CreatedBy = this.HostName,
                     UpdatedAt = now,
-                    UpdatedBy = ipAddress
+                    UpdatedBy = this.HostName
                 });
             }
             this.clusters.TryAdd(clusterId, dbClusterInfo);

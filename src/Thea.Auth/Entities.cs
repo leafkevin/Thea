@@ -111,7 +111,7 @@ class Resource
 /// <summary>
 /// 角色资源关联表
 /// </summary>
-class RoleResource
+class Permission
 {
     /// <summary>
     /// 角色ID

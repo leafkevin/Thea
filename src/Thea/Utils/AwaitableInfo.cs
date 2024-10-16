@@ -1,20 +1,28 @@
-// Copyright (c) .NET Core Community. All rights reserved.
-// Licensed under the MIT License. See License.txt in the project root for license information.
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+#nullable enable
 
 using System;
-using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Thea;
 
-internal struct AwaitableInfo
+internal readonly struct AwaitableInfo
 {
+    internal const string RequiresUnreferencedCodeMessage = "Uses unbounded reflection to determine awaitability of types.";
+
+    private const BindingFlags Everything = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance;
+    private static readonly MethodInfo INotifyCompletion_OnCompleted = typeof(INotifyCompletion).GetMethod(nameof(INotifyCompletion.OnCompleted), Everything, new[] { typeof(Action) })!;
+    private static readonly MethodInfo ICriticalNotifyCompletion_UnsafeOnCompleted = typeof(ICriticalNotifyCompletion).GetMethod(nameof(ICriticalNotifyCompletion.UnsafeOnCompleted), Everything, new[] { typeof(Action) })!;
+
     public Type AwaiterType { get; }
     public PropertyInfo AwaiterIsCompletedProperty { get; }
     public MethodInfo AwaiterGetResultMethod { get; }
     public MethodInfo AwaiterOnCompletedMethod { get; }
-    public MethodInfo AwaiterUnsafeOnCompletedMethod { get; }
+    public MethodInfo? AwaiterUnsafeOnCompletedMethod { get; }
     public Type ResultType { get; }
     public MethodInfo GetAwaiterMethod { get; }
 
@@ -23,7 +31,7 @@ internal struct AwaitableInfo
         PropertyInfo awaiterIsCompletedProperty,
         MethodInfo awaiterGetResultMethod,
         MethodInfo awaiterOnCompletedMethod,
-        MethodInfo awaiterUnsafeOnCompletedMethod,
+        MethodInfo? awaiterUnsafeOnCompletedMethod,
         Type resultType,
         MethodInfo getAwaiterMethod)
     {
@@ -36,16 +44,17 @@ internal struct AwaitableInfo
         GetAwaiterMethod = getAwaiterMethod;
     }
 
-    public static bool IsTypeAwaitable(Type type, out AwaitableInfo awaitableInfo)
+    [RequiresUnreferencedCode(RequiresUnreferencedCodeMessage)]
+    public static bool IsTypeAwaitable(
+        Type type,
+        out AwaitableInfo awaitableInfo)
     {
         // Based on Roslyn code: http://source.roslyn.io/#Microsoft.CodeAnalysis.Workspaces/Shared/Extensions/ISymbolExtensions.cs,db4d48ba694b9347
 
         // Awaitable must have method matching "object GetAwaiter()"
-        var getAwaiterMethod = type.GetRuntimeMethods().FirstOrDefault(m =>
-            m.Name.Equals("GetAwaiter", StringComparison.OrdinalIgnoreCase)
-            && m.GetParameters().Length == 0
-            && m.ReturnType != null);
-        if (getAwaiterMethod == null)
+        var getAwaiterMethod = type.GetMethod("GetAwaiter", Everything, Type.EmptyTypes);
+
+        if (getAwaiterMethod is null)
         {
             awaitableInfo = default(AwaitableInfo);
             return false;
@@ -54,19 +63,15 @@ internal struct AwaitableInfo
         var awaiterType = getAwaiterMethod.ReturnType;
 
         // Awaiter must have property matching "bool IsCompleted { get; }"
-        var isCompletedProperty = awaiterType.GetRuntimeProperties().FirstOrDefault(p =>
-            p.Name.Equals("IsCompleted", StringComparison.OrdinalIgnoreCase)
-            && p.PropertyType == typeof(bool)
-            && p.GetMethod != null);
-        if (isCompletedProperty == null)
+        var isCompletedProperty = awaiterType.GetProperty("IsCompleted", Everything, binder: null, returnType: typeof(bool), types: Type.EmptyTypes, modifiers: null);
+        if (isCompletedProperty is null)
         {
             awaitableInfo = default(AwaitableInfo);
             return false;
         }
 
         // Awaiter must implement INotifyCompletion
-        var awaiterInterfaces = awaiterType.GetInterfaces();
-        var implementsINotifyCompletion = awaiterInterfaces.Any(t => t == typeof(INotifyCompletion));
+        var implementsINotifyCompletion = typeof(INotifyCompletion).IsAssignableFrom(awaiterType);
         if (!implementsINotifyCompletion)
         {
             awaitableInfo = default(AwaitableInfo);
@@ -74,41 +79,21 @@ internal struct AwaitableInfo
         }
 
         // INotifyCompletion supplies a method matching "void OnCompleted(Action action)"
-        var iNotifyCompletionMap = awaiterType
-            .GetTypeInfo()
-            .GetRuntimeInterfaceMap(typeof(INotifyCompletion));
-        var onCompletedMethod = iNotifyCompletionMap.InterfaceMethods.Single(m =>
-            m.Name.Equals("OnCompleted", StringComparison.OrdinalIgnoreCase)
-            && m.ReturnType == typeof(void)
-            && m.GetParameters().Length == 1
-            && m.GetParameters()[0].ParameterType == typeof(Action));
+        var onCompletedMethod = INotifyCompletion_OnCompleted;
 
         // Awaiter optionally implements ICriticalNotifyCompletion
-        var implementsICriticalNotifyCompletion =
-            awaiterInterfaces.Any(t => t == typeof(ICriticalNotifyCompletion));
-        MethodInfo unsafeOnCompletedMethod;
+        var implementsICriticalNotifyCompletion = typeof(ICriticalNotifyCompletion).IsAssignableFrom(awaiterType);
+        MethodInfo? unsafeOnCompletedMethod = null;
         if (implementsICriticalNotifyCompletion)
         {
             // ICriticalNotifyCompletion supplies a method matching "void UnsafeOnCompleted(Action action)"
-            var iCriticalNotifyCompletionMap = awaiterType
-                .GetTypeInfo()
-                .GetRuntimeInterfaceMap(typeof(ICriticalNotifyCompletion));
-            unsafeOnCompletedMethod = iCriticalNotifyCompletionMap.InterfaceMethods.Single(m =>
-                m.Name.Equals("UnsafeOnCompleted", StringComparison.OrdinalIgnoreCase)
-                && m.ReturnType == typeof(void)
-                && m.GetParameters().Length == 1
-                && m.GetParameters()[0].ParameterType == typeof(Action));
-        }
-        else
-        {
-            unsafeOnCompletedMethod = null;
+            unsafeOnCompletedMethod = ICriticalNotifyCompletion_UnsafeOnCompleted;
         }
 
         // Awaiter must have method matching "void GetResult" or "T GetResult()"
-        var getResultMethod = awaiterType.GetRuntimeMethods().FirstOrDefault(m =>
-            m.Name.Equals("GetResult")
-            && m.GetParameters().Length == 0);
-        if (getResultMethod == null)
+        var getResultMethod = awaiterType.GetMethod("GetResult", Everything, Type.EmptyTypes);
+
+        if (getResultMethod is null)
         {
             awaitableInfo = default(AwaitableInfo);
             return false;

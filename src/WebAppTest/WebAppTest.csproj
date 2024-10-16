@@ -4,9 +4,9 @@
 		<LangVersion>10.0</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
-		<PackageReference Include="Trolley" Version="2.0.6" />
-		<PackageReference Include="Trolley.PostgreSql" Version="2.0.6" />
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+		<PackageReference Include="Trolley" Version="2.0.7" />
+		<PackageReference Include="Trolley.PostgreSql" Version="2.0.7" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\Thea.Auth\Thea.Auth.csproj" />

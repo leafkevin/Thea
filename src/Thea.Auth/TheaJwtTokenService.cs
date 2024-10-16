@@ -16,7 +16,7 @@ class TheaJwtTokenService : IJwtTokenService
     public TheaJwtTokenService(IOptions<JwtTokenOptions> options)
         => this.options = options.Value;
 
-    public string CreateToken(UserToken userToken, out List<Claim> claims)
+    public string CreateToken(UserToken userToken, out DateTime expires)
     {
         var extraClaims = this.BuildClaims(userToken);
         var rsa = RSA.Create();
@@ -24,10 +24,9 @@ class TheaJwtTokenService : IJwtTokenService
         rsa.ImportPkcs8PrivateKey(privateKeys, out _);
         var securityKey = new RsaSecurityKey(rsa);
         var signingCredentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
-        var expires = DateTime.UtcNow.Add(userToken.LifeTime ?? this.options.LifeTime);
+        expires = DateTime.UtcNow.Add(userToken.LifeTime ?? this.options.LifeTime);
         var securityToken = new JwtSecurityToken(userToken.Issuer ?? this.options.Issuer,
-            userToken.Audience, extraClaims, DateTime.UtcNow, expires, signingCredentials);
-        claims = securityToken.Claims.ToList();
+            userToken.Audience ?? this.options.Audience, extraClaims, DateTime.UtcNow, expires, signingCredentials);
         return new JwtSecurityTokenHandler().WriteToken(securityToken);
     }
     public bool ReadToken(string token, out List<Claim> claims)
