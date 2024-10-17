@@ -10,7 +10,6 @@ namespace Thea.Logging.Alarm;
 
 public class TheaLogAlarmMiddleware
 {
-    private readonly Task task;
     private readonly IAlarmService alarmService;
     private readonly string logVisitUrl;
     private readonly LoggerHandlerDelegate next;

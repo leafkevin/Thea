@@ -1,0 +1,104 @@
+﻿<#@ template debug="true" hostspecific="true" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Data" #>
+<#@ assembly name="System.Data.Linq"#>
+<#@ assembly name="System.Data.Common"#>
+<#@ assembly name="EnvDTE" #>
+<#@ assembly name="System.Xml"#>
+<#@ assembly name="System.Xml.Linq"#>
+<#@ import namespace="System" #>
+<#@ import namespace="System.CodeDom"#>
+<#@ import namespace="System.CodeDom.Compiler"#>
+<#@ import namespace="System.Collections" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.Data"#>
+<#@ import namespace="System.Data.Linq"#>
+<#@ import namespace="System.Data.Linq.Mapping"#>
+<#@ import namespace="System.IO"#>
+<#@ import namespace="System.Linq"#>
+<#@ import namespace="System.Reflection"#>
+<#@ import namespace="System.Text"#>
+<#@ import namespace="System.Xml.Linq"#>
+<#@ import namespace="Microsoft.VisualStudio.TextTemplating"#>
+<#@ output encoding="utf-8" #>
+<#    
+    var connectionString = "Host=172.16.30.194;Username=postgres;Password=123456;Database=yhhis;Maximum Pool Size=20";
+    var dbProvider = new PostgreSqlProvider(connectionString);
+    var manager = Manager.Create(Host, GenerationEnvironment);
+
+    var tableSchema = "public";
+    var tableName = "biz_par_examination";
+    var removePrefixes = new []{"biz_"};
+    var separator = '_';
+    var className = dbProvider.ToClassName(tableName, removePrefixes, separator);
+    var camelClassName = dbProvider.ToCamel(className);
+    var tableInfo = dbProvider.GetTableInfo(tableSchema, tableName);
+    var columnList = dbProvider.GetColumnList(tableSchema, tableName);
+    var keyColumnInfos = columnList.FindAll(f => f.IsPrimaryKey);
+    manager.StartNewFile(className + "Controller.cs");
+#>
+using Microsoft.AspNetCore.Mvc;
+using System.Threading.Tasks;
+using Thea;
+using YhCore.Dtos;
+using YhHis.Domain.Services;
+using YhHis.Dtos;
+
+namespace YhHis.Controllers;
+
+[ApiController]
+[Route("[controller]/[action]")]
+public class <#=className#>Controller : ControllerBase
+{
+    private readonly <#=className#>Service <#=camelClassName#>Service;
+
+    public <#=className#>Controller(<#=className#>Service <#=camelClassName#>Service)
+        => this.<#=camelClassName#>Service = <#=camelClassName#>Service;
+    /// <summary>
+    /// 分页查询
+    /// </summary>
+    /// <param name="request">分页查询请求实体</param>
+    /// <returns></returns>
+    [HttpPost]
+    public async Task<TheaResponse> QueryPage([FromBody] QueryPageRequest request)
+        => await this.<#=camelClassName#>Service.QueryPage(request);
+    /// <summary>
+    /// 获取明细
+    /// </summary>
+    /// <param name="id">主键ID</param>
+    /// <returns></returns>
+    [HttpGet]
+    public async Task<TheaResponse> Detail([FromQuery] string id)
+        => await this.<#=camelClassName#>Service.Get(id);
+    /// <summary>
+    /// 新增
+    /// </summary>
+    /// <param name="request">新增内容实体</param>
+    /// <returns></returns>
+    [HttpPost]
+    public async Task<TheaResponse> Create([FromBody] <#=className#>Dto request)
+        => await this.<#=camelClassName#>Service.Create(request);
+    /// <summary>
+    /// 修改
+    /// </summary>
+    /// <param name="request">修改内容实体</param>
+    /// <returns></returns>
+    [HttpPost]
+    public async Task<TheaResponse> Modify([FromBody] <#=className#>Dto request)
+        => await this.<#=camelClassName#>Service.Modify(request);
+    /// <summary>
+    /// 删除
+    /// </summary>
+    /// <param name="request">主键ID</param>
+    /// <returns></returns>
+    [HttpPost]
+    public async Task<TheaResponse> Delete([FromBody] IdRequest request)
+        => await this.<#=camelClassName#>Service.Delete(request.Id);
+}
+<#
+manager.EndBlock();
+manager.Process(true);
+#>
+<#@ include file="$(ProjectDir)\Manager.ttinclude" once="true"#>
+<#@ include file="$(ProjectDir)\DbEntitries.ttinclude" once="true"#>
+<#@ include file="PostgreSqlProvider.ttinclude" once="true"#>

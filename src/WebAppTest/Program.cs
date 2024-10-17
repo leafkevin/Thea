@@ -20,12 +20,14 @@ builder.Services.AddDomainServices(builder.Configuration);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
+        options.JsonSerializerOptions.Converters.Add(new JsonBooleanConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonIntegerConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonLongConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonFloatConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonDoubleConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonDecimalConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonDateTimeConverter());
+        options.JsonSerializerOptions.Converters.Add(new JsonNullableBooleanConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonNullableIntegerConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonNullableLongConverter());
         options.JsonSerializerOptions.Converters.Add(new JsonNullableFloatConverter());
