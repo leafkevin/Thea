@@ -16,8 +16,13 @@ class ClusterRepository
     public async Task<(List<Cluster>, List<Binding>)> GetClusterInfo(List<string> clusterIds)
     {
         var repository = this.dbFactory.CreateRepository(this.dbKey);
-        var clusters = await repository.QueryAsync<Cluster>(f => clusterIds.Contains(f.ClusterId));
-        var bindings = await repository.QueryAsync<Binding>(f => clusterIds.Contains(f.ClusterId));
+        using var reader = await repository.QueryMultipleAsync(f =>
+        {
+            f.Query<Cluster>(f => clusterIds.Contains(f.ClusterId));
+            f.Query<Binding>(f => clusterIds.Contains(f.ClusterId));
+        });
+        var clusters = await reader.ReadAsync<Cluster>();
+        var bindings = await reader.ReadAsync<Binding>();
         return (clusters, bindings);
     }
     public async Task<int> Register(List<Cluster> clusters)
