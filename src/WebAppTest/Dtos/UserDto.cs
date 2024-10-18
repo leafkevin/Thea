@@ -40,4 +40,5 @@ public class UserDto
     /// 头像
     /// </summary>
     public string AvatarUrl { get; set; }
+    public bool IsEnabled { get; set; }
 }

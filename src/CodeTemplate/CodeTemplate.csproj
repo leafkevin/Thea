@@ -91,6 +91,10 @@
     <Content Include="Plugins\MySql\ZstdNet.dll" />
     <Content Include="Plugins\Npgsql.dll" />
     <Content Include="Plugins\System.Data.SqlClient.dll" />
+    <Content Include="PostgreSql\Controller.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Controller.cs</LastGenOutput>
+    </Content>
     <Content Include="PostgreSql\Entities.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>Entities.cs</LastGenOutput>
@@ -106,6 +110,10 @@
     <Content Include="PostgreSql\ModelConfigurations.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>ModelConfigurations.cs</LastGenOutput>
+    </Content>
+    <Content Include="PostgreSql\Service.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Service.cs</LastGenOutput>
     </Content>
     <Content Include="SqlServer\Entities.tt">
       <Generator>TextTemplatingFileGenerator</Generator>

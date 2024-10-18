@@ -10,6 +10,10 @@ public class JsonBooleanConverter : JsonConverter<bool>
     {
         switch (reader.TokenType)
         {
+            case JsonTokenType.False:
+                return false;
+            case JsonTokenType.True:
+                return true;
             case JsonTokenType.Number:
                 if (reader.TryGetInt32(out var iValue))
                     return iValue != 0;
@@ -32,6 +36,10 @@ public class JsonNullableBooleanConverter : JsonConverter<bool?>
     {
         switch (reader.TokenType)
         {
+            case JsonTokenType.False:
+                return false;
+            case JsonTokenType.True:
+                return true;
             case JsonTokenType.Number:
                 if (reader.TryGetInt32(out var iValue))
                     return iValue != 0;
