@@ -9,8 +9,10 @@ using Thea.Auth;
 using Thea.Cache;
 using Thea.Logging;
 using Thea.MessageDriven;
+using Thea.MessageDriven.MySqlRepository;
 using Thea.Web;
 using Trolley;
+using WebAppTest.Domain.Services;
 
 namespace WebAppTest.Domain;
 
@@ -25,8 +27,8 @@ public static class Startup
         {
             var connString = configuration["ConnectionStrings:default"];
             return new OrmDbFactoryBuilder()
-                .Register(OrmProviderType.PostgreSql, "default", connString, true)
-                .Configure<ModelConfiguration>(OrmProviderType.PostgreSql)
+                .Register(OrmProviderType.MySql, "default", connString, true)
+                .Configure<ModelConfiguration>(OrmProviderType.MySql)
                 .UseInterceptors(df =>
                 {
                     df.OnConnectionCreated += evt =>
@@ -74,6 +76,7 @@ public static class Startup
         services.AddPassport();
         services.AddTheaLogging();
         services.AddMessageDriven();
+        services.AddSingleton<StatefulConsumer>();
 
         //var frontendUrl = configuration["FrontendUrl"];
         //string[] urls = new[] { frontendUrl };
@@ -82,18 +85,16 @@ public static class Startup
     }
     public static void UseDomainServices(this IApplicationBuilder app, IConfiguration configuration)
     {
-        AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-        AppContext.SetSwitch("Npgsql.DisableDateTimeInfinityConversions", true);
-
         app.UseTheaWeb();
         var memoryCache = app.ApplicationServices.GetService<IMemoryCache>();
         //内存缓存更新
         app.UseMessageDriven(f =>
         {
-            f.Create("default")
-            .AddProducer("cache.refresh")
-            .AddSubscriber<string>("cache.refresh", "cache.refresh.queue",
-                key => { memoryCache.Remove(key); return Task.CompletedTask; });
+            f.UseTrolleyRepository("default");
+            f.UseSubscriber<string>("cache.refresh", "cache.refresh.queue",
+                key => { memoryCache.Remove(key); return Task.CompletedTask; })
+            .UseStatefulConsumer<StatefulConsumer>("award.take", f => f.TakeAward)
+            .UseStatefulConsumer<StatefulConsumer>("award.issue", f => f.IssueAward);
         });
     }
 }

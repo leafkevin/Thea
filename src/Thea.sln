@@ -29,6 +29,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.Auth", "Thea.Auth\Thea
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "WebAppTest", "WebAppTest\WebAppTest.csproj", "{7AC2F324-4B6E-4F63-B385-9D28C14135D8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thea.MessageDriven.MySqlRepository", "Thea.MessageDriven.MySqlRepository\Thea.MessageDriven.MySqlRepository.csproj", "{33114FFC-55E9-4632-88CD-38EBF10F2653}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,10 @@ Global
 		{7AC2F324-4B6E-4F63-B385-9D28C14135D8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7AC2F324-4B6E-4F63-B385-9D28C14135D8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7AC2F324-4B6E-4F63-B385-9D28C14135D8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{33114FFC-55E9-4632-88CD-38EBF10F2653}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33114FFC-55E9-4632-88CD-38EBF10F2653}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33114FFC-55E9-4632-88CD-38EBF10F2653}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33114FFC-55E9-4632-88CD-38EBF10F2653}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

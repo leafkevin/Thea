@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Remove="mds.sql" />
+	</ItemGroup>
+	<ItemGroup>
+	  <PackageReference Include="Trolley" Version="2.0.8" />
+	  <PackageReference Include="Trolley.MySqlConnector" Version="2.0.8" />
+	</ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Thea.MessageDriven\Thea.MessageDriven.csproj" />
+	</ItemGroup>
+</Project>

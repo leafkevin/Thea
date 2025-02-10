@@ -5,6 +5,7 @@ using Thea.MessageDriven;
 using Trolley;
 using Trolley.PostgreSql;
 using WebAppTest.Domain.Models;
+using WebAppTest.Domain.Services;
 using WebAppTest.Dtos;
 
 namespace WebAppTest.Controllers
@@ -52,6 +53,12 @@ namespace WebAppTest.Controllers
         public async Task<TheaResponse> RemoveCache([FromBody] string cacheKey)
         {
             await this.messageDriven.PublishAsync("cache.refresh", "1", cacheKey);
+            return TheaResponse.Succeed("ok");
+        }
+        [HttpPost]
+        public async Task<TheaResponse> TakeAward([FromBody] string awardId)
+        {
+            await this.messageDriven.PublishAsync("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
             return TheaResponse.Succeed("ok");
         }
     }

@@ -16,71 +16,9 @@ public class Cluster
     /// </summary>
     public string ClusterName { get; set; }
     /// <summary>
-    /// 连接URL
-    /// </summary>
-    public string Url { get; set; }
-    /// <summary>
-    /// 用户名
-    /// </summary>
-    public string User { get; set; }
-    /// <summary>
-    /// 密码
-    /// </summary>
-    public string Password { get; set; }
-    /// <summary>
-    /// 绑定类型
-    /// </summary>
-    public string BindType { get; set; }
-    /// <summary>
-    /// 是否有状态
-    /// </summary>
-    public bool IsStateful { get; set; }
-    /// <summary>
-    /// 是否开启日志
-    /// </summary>
-    public bool IsLogEnabled { get; set; }
-    /// <summary>
-    /// 是否启用
-    /// </summary>
-    public bool IsEnabled { get; set; }
-    /// <summary>
-    /// 创建人
-    /// </summary>
-    public string CreatedBy { get; set; }
-    /// <summary>
-    /// 创建日期
-    /// </summary>
-    public DateTime CreatedAt { get; set; }
-    /// <summary>
-    /// 最后更新人
-    /// </summary>
-    public string UpdatedBy { get; set; }
-    /// <summary>
-    /// 最后更新日期
-    /// </summary>
-    public DateTime UpdatedAt { get; set; }
-}
-/// <summary>
-/// 队列绑定表，描述消息驱动所有的业务队列与信箱的绑定关系
-/// </summary>
-public class Binding
-{
-    /// <summary>
-    /// 绑定ID
-    /// </summary>
-    public string BindingId { get; set; }
-    /// <summary>
-    /// 集群ID
-    /// </summary>
-    public string ClusterId { get; set; }
-    /// <summary>
     /// 信箱
     /// </summary>
     public string Exchange { get; set; }
-    /// <summary>
-    /// 队列
-    /// </summary>
-    public string Queue { get; set; }
     /// <summary>
     /// 绑定类型
     /// </summary>
@@ -90,41 +28,37 @@ public class Binding
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
-    /// 主机名称
+    /// 队列名字或是队列前缀
     /// </summary>
-    public string HostName { get; set; }
+    public string Queue { get; set; }
+    /// <summary>
+    /// 工作负荷个数，有状态时是队列个数，无状态时是队列的消费者个数，0表示无限制，几个负载几个消费者
+    /// </summary>
+    public int WorkloadTotal { get; set; }
+    /// <summary>
+    /// 是否有状态
+    /// </summary>
+    public bool IsStateful { get; set; }
+    /// <summary>
+    /// 是否单一激活消费者
+    /// </summary>
+    public bool IsSac { get; set; }
+    /// <summary>
+    /// 是否延迟消息
+    /// </summary>
+    public bool IsDelay { get; set; }
     /// <summary>
     /// 预取消息个数
     /// </summary>
     public int PrefetchCount { get; set; }
     /// <summary>
-    /// 是否单一激活消费者
+    /// 是否开启日志
     /// </summary>
-    public bool IsSingleActiveConsumer { get; set; }
-    /// <summary>
-    /// 是否应答队列
-    /// </summary>
-    public bool IsReply { get; set; }
-    /// <summary>
-    /// 是否延时交换机
-    /// </summary>
-    public bool IsDelay { get; set; }
+    public bool IsLogEnabled { get; set; }
     /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
-    /// <summary>
-    /// 创建人
-    /// </summary>
-    public string CreatedBy { get; set; }
-    /// <summary>
-    /// 创建日期
-    /// </summary>
-    public DateTime CreatedAt { get; set; }
-    /// <summary>
-    /// 最后更新人
-    /// </summary>
-    public string UpdatedBy { get; set; }
     /// <summary>
     /// 最后更新日期
     /// </summary>
@@ -167,14 +101,6 @@ public class ExecLog
     /// 重试次数
     /// </summary>
     public int RetryTimes { get; set; }
-    /// <summary>
-    /// 创建人
-    /// </summary>
-    public string CreatedBy { get; set; }
-    /// <summary>
-    /// 创建日期
-    /// </summary>
-    public DateTime CreatedAt { get; set; }
     /// <summary>
     /// 最后更新人
     /// </summary>

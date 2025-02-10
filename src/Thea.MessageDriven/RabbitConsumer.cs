@@ -1,32 +1,40 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
+    private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
+    private readonly MessageDrivenService parent;
     private ConnectionFactory factory;
-    private Func<string, Task<object>> consumerHandler;
-    private readonly Action<TheaMessage, MessageStatus> nextHandler;
     private Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
-    private readonly string HostName;
-    private string consumerId;
-    private volatile bool isNeedBuiding;
     private volatile IConnection connection = null;
     private volatile IModel channel = null;
-    private volatile Cluster clusterInfo;
-    private volatile Binding bindingInfo;
-    private volatile bool isLogEnabled = false;
-    public string Queue { get; set; }
+    private string connectionName;
+    private volatile bool isDeferClose = false;
+
+    public volatile bool IsRunning = false;
+    public volatile bool IsStarted = false;
+
+    public volatile Cluster ClusterInfo;
+    public string ClusterId { get; private set; }
+    public string ConsumerId { get; private set; }
+    public string Url { get; private set; }
+    public string User { get; private set; }
+    public string Password { get; private set; }
+    public string QueueName { get; private set; }
+    public Func<string, Task> ConsumerHandler { get; private set; }
 
     public bool IsAvailable
     {
@@ -39,54 +47,82 @@ class RabbitConsumer
             return true;
         }
     }
-    public RabbitConsumer(MessageDrivenService parent, IServiceProvider serviceProvider)
+    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, Func<string, Task> consumerHandler)
     {
-        this.HostName = parent.HostName;
+        this.parent = parent;
+        this.ClusterId = clusterId;
+        this.ConsumerId = ObjectId.NewId();
+        this.QueueName = queueName;
+        this.connectionName = $"{clusterId}-{parent.NodeId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
-        this.nextHandler = parent.Next;
+        var configuration = serviceProvider.GetService<IConfiguration>();
+        var url = configuration.GetValue<string>("MessageDriven:Url");
+        var user = configuration.GetValue<string>("MessageDriven:User");
+        var password = configuration.GetValue<string>("MessageDriven:Password");
+        this.ConsumerHandler = consumerHandler;
+
+        this.factory = new ConnectionFactory
+        {
+            Uri = new Uri(url),
+            UserName = user,
+            Password = password,
+            AutomaticRecoveryEnabled = true,
+            RequestedHeartbeat = TimeSpan.FromSeconds(10),
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+            ClientProperties = new Dictionary<string, object>()
+            {
+                { "connection_name",  this.connectionName},
+                { "client_api", "Thea.MessageDriven" }
+            }
+        };
     }
-    public RabbitConsumer(MessageDrivenService parent, IServiceProvider serviceProvider, Func<string, Task<object>> consumerHandler)
-        : this(parent, serviceProvider)
-    {
-        this.consumerHandler = consumerHandler;
-    }
-    public void Build(string consumerId, Cluster clusterInfo, Binding bindingInfo)
-        => this.Bind(consumerId, clusterInfo, bindingInfo).Start();
     public void Start()
     {
-        if (this.factory == null || !this.isNeedBuiding) return;
-        this.connection = this.factory.CreateConnection(this.consumerId);
+        if (this.IsRunning || this.IsStarted) return;
+
+        this.connection = this.factory.CreateConnection(this.connectionName);
         this.channel = this.connection.CreateModel();
-        this.CreateExchangeQueue();
-        this.channel.BasicQos(0, (ushort)this.bindingInfo.PrefetchCount, false);
+
+        IDictionary<string, object> queueArguments = null;
+        if (this.ClusterInfo.IsSac) queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
+        this.channel.QueueDeclare(this.QueueName, true, false, false, queueArguments);
+        this.channel.QueueBind(this.QueueName, this.ClusterInfo.Exchange, this.ClusterInfo.BindingKey);
+
+        ushort prefetchCount = 20;
+        this.channel.BasicQos(0, prefetchCount, false);
         this.channel.BasicRecoverOk += (o, e) =>
         {
             var model = o as IModel;
-            model.BasicQos(0, (ushort)this.bindingInfo.PrefetchCount, false);
+            model.BasicQos(0, prefetchCount, false);
         };
-        this.BindHandler(this.channel, this.bindingInfo.Queue);
-        this.isNeedBuiding = false;
+        this.BindHandler(this.channel, this.QueueName);
+        this.IsStarted = true;
     }
     public void RemoveQueue()
     {
         if (this.channel != null)
-            channel.QueueDelete(this.Queue);
+            channel.QueueDelete(this.QueueName);
     }
     public void Shutdown()
+    {
+        this.cancellationSource.Cancel();
+        if (this.IsRunning) this.isDeferClose = true;
+        else this.Close();
+    }
+    private void Close()
     {
         if (this.channel != null)
         {
             channel.Close();
             this.channel = null;
-            this.isNeedBuiding = true;
         }
         if (this.connection != null)
         {
             this.connection.Close();
             this.connection = null;
-            this.isNeedBuiding = true;
         }
+        this.cancellationSource.Dispose();
     }
     public void EnsureAvailable()
     {
@@ -94,92 +130,39 @@ class RabbitConsumer
         this.Shutdown();
         this.Start();
     }
-    private RabbitConsumer Bind(string consumerId, Cluster clusterInfo, Binding bindingInfo)
-    {
-        this.consumerId = consumerId;
-        if (this.isNeedBuiding || this.bindingInfo == null || bindingInfo.BindType != this.bindingInfo.BindType
-            || bindingInfo.BindingKey != this.bindingInfo.BindingKey || bindingInfo.Queue != this.bindingInfo.Queue
-            || bindingInfo.Exchange != this.bindingInfo.Exchange || bindingInfo.IsReply != this.bindingInfo.IsReply
-            || bindingInfo.PrefetchCount != this.bindingInfo.PrefetchCount || bindingInfo.IsSingleActiveConsumer != this.bindingInfo.IsSingleActiveConsumer)
-        {
-            this.Shutdown();
-            this.factory = new ConnectionFactory
-            {
-                Uri = new Uri(clusterInfo.Url),
-                UserName = clusterInfo.User,
-                Password = clusterInfo.Password,
-                AutomaticRecoveryEnabled = true,
-                RequestedHeartbeat = TimeSpan.FromSeconds(10),
-                NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
-                ClientProperties = new Dictionary<string, object>() {
-                    { "connection_name", consumerId },
-                    { "client_api", $"Thea.MessageDriven" }
-                }
-            };
-            this.clusterInfo = clusterInfo;
-            this.isNeedBuiding = true;
-        }
-        if (this.isNeedBuiding || this.bindingInfo == null || bindingInfo.BindType != this.bindingInfo.BindType
-           || bindingInfo.BindingKey != this.bindingInfo.BindingKey || bindingInfo.Queue != this.bindingInfo.Queue
-           || bindingInfo.Exchange != this.bindingInfo.Exchange || bindingInfo.IsReply != this.bindingInfo.IsReply)
-        {
-            this.bindingInfo = bindingInfo;
-            this.Queue = this.bindingInfo.Queue;
-            this.isNeedBuiding = true;
-        }
-        if (clusterInfo != null)
-            this.isLogEnabled = clusterInfo.IsLogEnabled;
-        return this;
-    }
-    private void CreateExchangeQueue()
-    {
-        if (!this.isNeedBuiding) return;
-
-        var bindType = this.bindingInfo.BindType;
-        if (string.IsNullOrEmpty(bindType))
-            bindType = "topic";
-        var exchange = this.bindingInfo.Exchange;
-        Dictionary<string, object> exchangeArguments = null;
-        if (this.bindingInfo.IsDelay)
-            exchangeArguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
-        this.channel.ExchangeDeclare(exchange, bindType, true, false, exchangeArguments);
-
-        IDictionary<string, object> queueArguments = null;
-        if (this.bindingInfo.IsSingleActiveConsumer)
-            queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-        this.channel.QueueDeclare(this.Queue, true, false, false, queueArguments);
-        this.channel.QueueBind(this.Queue, exchange, this.bindingInfo.BindingKey);
-    }
     private void BindHandler(IModel channel, string queue)
     {
         var consumer = new EventingBasicConsumer(channel);
         consumer.Received += async (model, ea) =>
         {
+            //先暂停消费
+            if (this.cancellationSource.IsCancellationRequested)
+                return;
+
             var iLoop = 0;
-            object resp = null;
             Exception exception = null;
             string jsonBody = null;
-            TheaMessage message = null;
+            Message message = null;
             bool isSuccess = true;
 
             jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            message = jsonBody.JsonTo<TheaMessage>();
+            message = jsonBody.JsonTo<Message>();
             //兼容现非框架队列消息
-            if (message.Message == null)
+            if (message.MessageId == null)
             {
-                message.MessageId ??= ObjectId.NewId();
-                message.Message = jsonBody;
+                message.MessageId = ObjectId.NewId();
+                message.Body = jsonBody;
             }
-            if (!string.IsNullOrEmpty(message.ReplyExchange) && message.Status.HasValue
-                && message.Status > MessageStatus.WaitForReply)
-                this.nextHandler.Invoke(message, message.Status.Value);
-            else
+            //内部消息，交给消息总分发处处理
+            string body = null;
+            if (message.Type == MessageType.Message)
             {
+                body = message.Body.ToJson();
                 while (iLoop < 3)
                 {
                     try
                     {
-                        resp = await this.consumerHandler.Invoke(message.Message);
+                        await this.ConsumerHandler.Invoke(body);
                         break;
                     }
                     catch (Exception ex)
@@ -191,37 +174,47 @@ class RabbitConsumer
                     Thread.Sleep(1000);
                 }
 
-                var result = isSuccess ? resp.ToJson() : exception.ToString();
+                var result = isSuccess ? "success" : exception.ToString();
                 var logInfo = new ExecLog
                 {
                     LogId = ObjectId.NewId(),
-                    ClusterId = this.clusterInfo.ClusterId,
-                    RoutingKey = this.bindingInfo.BindingKey,
-                    Queue = this.Queue,
+                    ClusterId = this.ClusterInfo.ClusterId,
+                    RoutingKey = message.RoutingKey,
+                    Queue = this.QueueName,
                     Body = jsonBody,
                     IsSuccess = isSuccess,
                     Result = result,
                     RetryTimes = iLoop,
-                    CreatedAt = DateTime.Now,
-                    CreatedBy = this.consumerId,
                     UpdatedAt = DateTime.Now,
-                    UpdatedBy = this.consumerId
+                    UpdatedBy = this.ConsumerId
                 };
-                if (this.isLogEnabled || !isSuccess)
+                if (this.ClusterInfo.IsLogEnabled || !isSuccess)
                 {
                     this.addLogsHandler.Invoke(logInfo);
                     if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                 }
-                if (!string.IsNullOrEmpty(message.ReplyExchange) && message.Status.HasValue)
+                throw exception;
+            }
+            else
+            {
+                if (message.AppId == this.parent.AppId)
                 {
-                    message.Message = result;
-                    MessageStatus nextStatus = default;
-                    if (message.Status.Value == MessageStatus.WaitForReply)
-                        nextStatus = isSuccess ? MessageStatus.SetResult : MessageStatus.SetException;
-                    this.nextHandler.Invoke(message, nextStatus);
+                    body = message.Body.ToJson();
+                    var waiter = new TaskCompletionSource<bool>();
+                    this.parent.ProcessMessage(new Message
+                    {
+                        MessageId = message.MessageId,
+                        Type = message.Type,
+                        Body = (body, waiter)
+                    });
+                    waiter.Task.Wait();
                 }
             }
             channel.BasicAck(ea.DeliveryTag, false);
+
+            //再延迟停止
+            if (this.isDeferClose)
+                this.Close();
         };
         channel.BasicConsume(queue, false, consumer);
     }

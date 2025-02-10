@@ -1,0 +1,32 @@
+﻿using System;
+using System.Threading.Tasks;
+using Thea;
+using Thea.MessageDriven;
+
+namespace WebAppTest.Domain.Services;
+
+public class StatefulConsumer
+{
+    private readonly IMessageDriven messageDriven;
+    public StatefulConsumer(IMessageDriven messageDriven)
+    {
+        this.messageDriven = messageDriven;
+    }
+    public Task<TheaResponse> TakeAward(AwardInfo awardInfo)
+    {
+        Console.WriteLine($"TakeAward: {awardInfo.ToJson()}");
+        this.messageDriven.PublishAsync("award.take", awardInfo.AwardId, awardInfo.ToJson());
+        return Task.FromResult(TheaResponse.Succeed(awardInfo));
+    }
+    public Task<TheaResponse> IssueAward(AwardInfo awardInfo)
+    {
+        Console.WriteLine($"IssueAward: {awardInfo.ToJson()}");
+        return Task.FromResult(TheaResponse.Succeed(awardInfo));
+    }
+}
+public class AwardInfo
+{
+    public string AwardId { get; set; }
+    public int Quantity { get; set; }
+    public string RecipientId { get; set; }
+}

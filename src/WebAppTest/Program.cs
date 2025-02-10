@@ -1,12 +1,13 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
-using System.Text.Encodings.Web;
-using System.Text.Json.Serialization;
-using System.Text.Json;
 using Thea.Json;
 using WebAppTest.Domain;
+
 
 var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.

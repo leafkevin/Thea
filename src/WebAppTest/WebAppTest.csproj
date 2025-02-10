@@ -4,14 +4,13 @@
 		<LangVersion>10.0</LangVersion>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
-		<PackageReference Include="Trolley" Version="2.0.7" />
-		<PackageReference Include="Trolley.PostgreSql" Version="2.0.7" />
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
 	</ItemGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\Thea.Auth\Thea.Auth.csproj" />
 		<ProjectReference Include="..\Thea.Cache\Thea.Cache.csproj" />
 		<ProjectReference Include="..\Thea.Logging\Thea.Logging.csproj" />
+		<ProjectReference Include="..\Thea.MessageDriven.MySqlRepository\Thea.MessageDriven.MySqlRepository.csproj" />
 		<ProjectReference Include="..\Thea.MessageDriven\Thea.MessageDriven.csproj" />
 		<ProjectReference Include="..\Thea.Web\Thea.Web.csproj" />
 		<ProjectReference Include="..\Thea\Thea.csproj" />

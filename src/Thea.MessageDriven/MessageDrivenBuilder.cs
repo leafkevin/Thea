@@ -1,68 +1,51 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using System;
+﻿using System;
 using System.Threading.Tasks;
-using Trolley;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Thea.MessageDriven;
 
 public class MessageDrivenBuilder
 {
     private readonly MessageDrivenService messageDriven;
-    private readonly IServiceProvider serviceProvider;
+    public IServiceProvider ServiceProvider { get; private set; }
 
     public MessageDrivenBuilder(IServiceProvider serviceProvider)
     {
-        this.serviceProvider = serviceProvider;
+        this.ServiceProvider = serviceProvider;
         this.messageDriven = serviceProvider.GetService<IMessageDriven>() as MessageDrivenService;
     }
-
-    public MessageDrivenBuilder Create(string dbKey, string hostName = null)
+    public MessageDrivenBuilder UseRepository(IMessageDrivenRepository repository)
     {
-        this.messageDriven.DbKey = dbKey;
-        this.messageDriven.HostName = hostName;
-
-        var dbFactory = this.serviceProvider.GetService<IOrmDbFactory>();
-        dbFactory.Configure<ModelConfiguration>(dbKey);
-        dbFactory.Build();
+        this.messageDriven.UseRepository(repository);
         return this;
     }
-    public MessageDrivenBuilder AddProducer(string clusterId, bool isUseRpc = false)
+    public MessageDrivenBuilder UseRepository<TRepository>() where TRepository : IMessageDrivenRepository, new()
     {
-        this.messageDriven.AddProducer(clusterId, isUseRpc);
+        this.messageDriven.UseRepository(new TRepository());
         return this;
     }
-    public MessageDrivenBuilder AddRpcReplyConsumer(string clusterId)
+    public MessageDrivenBuilder UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumerHandler, int iSacCount)
     {
-        this.messageDriven.AddRpcReplyConsumer(clusterId);
+        this.messageDriven.UseStatefulConsumer(clusterId, consumerHandler);
         return this;
     }
-    public MessageDrivenBuilder AddDelayProducer(string clusterId)
+    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
     {
-        this.messageDriven.AddDelayProducer(clusterId);
-        return this;
-    }
-    public MessageDrivenBuilder AddStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumerHandler)
-    {
-        this.messageDriven.AddStatefulConsumer(clusterId, consumerHandler);
-        return this;
-    }
-    public MessageDrivenBuilder AddStatefulConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
-    {
-        var consumer = serviceProvider.GetService<TConsumer>();
+        var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.AddStatefulConsumer(clusterId, consumer, methodInfo);
+        this.messageDriven.UseStatefulConsumer(clusterId, consumer, methodInfo);
         return this;
     }
-    public MessageDrivenBuilder AddSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumerHandler, string routingKey = "#", bool isDelay = false)
+    public MessageDrivenBuilder UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumerHandler, string routingKey = "#", bool isDelay = false)
     {
-        this.messageDriven.AddSubscriber(clusterId, queue, consumerHandler, routingKey, isDelay);
+        this.messageDriven.UseSubscriber(clusterId, queue, consumerHandler, routingKey, isDelay);
         return this;
     }
-    public MessageDrivenBuilder AddSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
+    public MessageDrivenBuilder UseSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
     {
-        var consumer = serviceProvider.GetService<TConsumer>();
+        var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.AddSubscriber(clusterId, queue, consumer, methodInfo, routingKey, isDelay);
+        this.messageDriven.UseSubscriber(clusterId, queue, consumer, methodInfo, routingKey, isDelay);
         return this;
     }
 }
