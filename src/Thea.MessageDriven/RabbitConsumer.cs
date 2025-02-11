@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Thea.Json;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -21,11 +22,13 @@ class RabbitConsumer
     private readonly ILogger<RabbitConsumer> logger;
     private volatile IConnection connection = null;
     private volatile IModel channel = null;
-    private string connectionName;
+    private string connectionId;
     private volatile bool isDeferClose = false;
-
+    private Type messageType;
+    public Func<object, Task> consumerHandler;
     public volatile bool IsRunning = false;
     public volatile bool IsStarted = false;
+
 
     public volatile Cluster ClusterInfo;
     public string ClusterId { get; private set; }
@@ -34,7 +37,6 @@ class RabbitConsumer
     public string User { get; private set; }
     public string Password { get; private set; }
     public string QueueName { get; private set; }
-    public Func<string, Task> ConsumerHandler { get; private set; }
 
     public bool IsAvailable
     {
@@ -47,20 +49,21 @@ class RabbitConsumer
             return true;
         }
     }
-    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, Func<string, Task> consumerHandler)
+    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, Type messageType, Func<object, Task> consumerHandler)
     {
         this.parent = parent;
         this.ClusterId = clusterId;
         this.ConsumerId = ObjectId.NewId();
         this.QueueName = queueName;
-        this.connectionName = $"{clusterId}-{parent.NodeId}";
+        this.connectionId = $"{clusterId}-{queueName}-{parent.NodeId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
-        this.ConsumerHandler = consumerHandler;
+        this.messageType = messageType;
+        this.consumerHandler = consumerHandler;
 
         this.factory = new ConnectionFactory
         {
@@ -72,22 +75,22 @@ class RabbitConsumer
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             ClientProperties = new Dictionary<string, object>()
             {
-                { "connection_name",  this.connectionName},
+                { "connection_name", this.connectionId},
                 { "client_api", "Thea.MessageDriven" }
             }
         };
     }
-    public void Start()
+    public void Start(string bindingKey = null)
     {
         if (this.IsRunning || this.IsStarted) return;
 
-        this.connection = this.factory.CreateConnection(this.connectionName);
+        this.connection = this.factory.CreateConnection(this.connectionId);
         this.channel = this.connection.CreateModel();
 
         IDictionary<string, object> queueArguments = null;
         if (this.ClusterInfo.IsSac) queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
         this.channel.QueueDeclare(this.QueueName, true, false, false, queueArguments);
-        this.channel.QueueBind(this.QueueName, this.ClusterInfo.Exchange, this.ClusterInfo.BindingKey);
+        this.channel.QueueBind(this.QueueName, this.ClusterInfo.Exchange, bindingKey ?? this.ClusterInfo.BindingKey);
 
         ushort prefetchCount = 20;
         this.channel.BasicQos(0, prefetchCount, false);
@@ -141,28 +144,27 @@ class RabbitConsumer
 
             var iLoop = 0;
             Exception exception = null;
-            string jsonBody = null;
-            Message message = null;
             bool isSuccess = true;
 
-            jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            message = jsonBody.JsonTo<Message>();
+            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+            var message = jsonBody.JsonTo<Message>();
             //兼容现非框架队列消息
             if (message.MessageId == null)
             {
                 message.MessageId = ObjectId.NewId();
+                message.Type = MessageType.Message;
                 message.Body = jsonBody;
             }
             //内部消息，交给消息总分发处处理
-            string body = null;
             if (message.Type == MessageType.Message)
             {
-                body = message.Body.ToJson();
                 while (iLoop < 3)
                 {
                     try
                     {
-                        await this.ConsumerHandler.Invoke(body);
+                        var body = message.Body.ToString();
+                        var parameters = TheaJsonSerializer.Deserialize(body, this.messageType);
+                        await this.consumerHandler.Invoke(parameters);
                         break;
                     }
                     catch (Exception ex)
@@ -193,13 +195,14 @@ class RabbitConsumer
                     this.addLogsHandler.Invoke(logInfo);
                     if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                 }
-                throw exception;
+                if (!isSuccess)
+                    throw exception;
             }
             else
             {
                 if (message.AppId == this.parent.AppId)
                 {
-                    body = message.Body.ToJson();
+                    var body = message.Body.ToString();
                     var waiter = new TaskCompletionSource<bool>();
                     this.parent.ProcessMessage(new Message
                     {

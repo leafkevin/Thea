@@ -14,13 +14,13 @@ public class StatefulConsumer
     }
     public Task<TheaResponse> TakeAward(AwardInfo awardInfo)
     {
-        Console.WriteLine($"TakeAward: {awardInfo.ToJson()}");
-        this.messageDriven.PublishAsync("award.take", awardInfo.AwardId, awardInfo.ToJson());
+        Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}");
+        this.messageDriven.PublishAsync("award.issue", awardInfo.AwardId, awardInfo);
         return Task.FromResult(TheaResponse.Succeed(awardInfo));
     }
     public Task<TheaResponse> IssueAward(AwardInfo awardInfo)
     {
-        Console.WriteLine($"IssueAward: {awardInfo.ToJson()}");
+        Console.WriteLine($"IssueAward: 我已领取 {awardInfo.ToJson()}");
         return Task.FromResult(TheaResponse.Succeed(awardInfo));
     }
 }

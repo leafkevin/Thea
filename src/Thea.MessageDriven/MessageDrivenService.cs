@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
 using Thea.Json;
 using Thea.Logging;
 
@@ -30,7 +32,7 @@ class MessageDrivenService : IMessageDriven
 
     private RabbitProducer rabbitProducer;
     private RabbitConsumer heartbeatRabbitConsumer;
-    private readonly ConcurrentDictionary<string, Func<string, Task>> consumerHandlers = new();
+    private readonly ConcurrentDictionary<string, (Type, Delegate)> consumerHandlers = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
 
@@ -91,7 +93,7 @@ class MessageDrivenService : IMessageDriven
                         switch (message.Type)
                         {
                             case MessageType.Message:
-                                var messageBody = message.Body.ToJson();
+                                var messageBody = message.ToJson();
                                 this.rabbitProducer ??= new RabbitProducer(this, this.serviceProvider);
                                 if (message.ScheduleTimeUtc.HasValue)
                                     this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, messageBody);
@@ -184,7 +186,7 @@ class MessageDrivenService : IMessageDriven
             AppId = this.AppId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = message
+            Body = message.ToJson()
         });
     }
     public Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true)
@@ -211,7 +213,7 @@ class MessageDrivenService : IMessageDriven
             Exchange = exchange,
             RoutingKey = routingKey,
             ScheduleTimeUtc = enqueueTimeUtc,
-            Body = message
+            Body = message.ToJson()
         });
     }
     public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, bool isTheaMessage = true)
@@ -223,11 +225,8 @@ class MessageDrivenService : IMessageDriven
     public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
     {
         var parametersType = typeof(TParameters);
-        Func<string, Task> consumerHandler = async message =>
-        {
-            await consumer.Invoke(message.JsonTo<TParameters>());
-        };
-        this.consumerHandlers.TryAdd(clusterId, consumerHandler);
+        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message, message);
+        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
             this.localClusters.Add(new Cluster
@@ -252,14 +251,13 @@ class MessageDrivenService : IMessageDriven
     {
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
         var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
-        Func<string, Task> consumerHandler = async message =>
-        {
-            var parameters = TheaJsonSerializer.Deserialize(message, parametersType);
-            if (methodExecutor.IsMethodAsync)
-                await methodExecutor.ExecuteAsync(target, [parameters]);
-            else methodExecutor.Execute(target, [parameters]);
-        };
-        this.consumerHandlers.TryAdd(clusterId, consumerHandler);
+        Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+            await methodExecutor.ExecuteAsync(target, [message]) : message =>
+            {
+                methodExecutor.Execute(target, [message]);
+                return Task.CompletedTask;
+            };
+        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
             this.localClusters.Add(new Cluster
@@ -282,12 +280,9 @@ class MessageDrivenService : IMessageDriven
     }
     public void UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
     {
-        Func<string, Task> consumerHandler = async message =>
-        {
-            await consumer.Invoke(message.JsonTo<TParameters>());
-        };
         //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中，订阅者是默认是# topic
-        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", consumerHandler);
+        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message, message);
+        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (typeof(TParameters), consumerHandler));
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
             this.localClusters.Add(new Cluster
@@ -313,26 +308,14 @@ class MessageDrivenService : IMessageDriven
     {
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
         var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
-        Func<string, Task> consumerHandler = null;
-        if (methodExecutor.IsMethodAsync)
-        {
-            consumerHandler = async message =>
+        Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+            await methodExecutor.ExecuteAsync(target, [message]) : message =>
             {
-                var parameters = TheaJsonSerializer.Deserialize(message, parametersType);
-                await methodExecutor.ExecuteAsync(target, [parameters]);
-            };
-        }
-        else
-        {
-            consumerHandler = message =>
-            {
-                var parameters = TheaJsonSerializer.Deserialize(message, parametersType);
-                methodExecutor.Execute(target, [parameters]);
+                methodExecutor.Execute(target, [message]);
                 return Task.CompletedTask;
             };
-        }
         //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中
-        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", consumerHandler);
+        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (parametersType, consumerHandler));
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
             this.localClusters.Add(new Cluster
@@ -386,16 +369,19 @@ class MessageDrivenService : IMessageDriven
         rabbitProducer.CreateQueue(queueName, false);
         rabbitProducer.BindQueue("heartbeat", queueName, "#");
 
-        this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, message =>
+        this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, typeof(string), async message =>
         {
+            var waiter = new TaskCompletionSource<bool>();
             this.messageQueue.Enqueue(new Message
             {
                 MessageId = ObjectId.NewId(),
                 Type = MessageType.Heartbeat,
-                Body = message
+                Body = (message, waiter)
             });
-            return Task.CompletedTask;
-        });
+            await waiter.Task;
+        })
+        { ClusterInfo = new Cluster { ClusterId = "heartbeat", Exchange = "heartbeat", BindingKey = "#" } };
+        this.heartbeatRabbitConsumer.Start();
 
         //创建信箱和队列
         foreach (var cluster in this.localClusters)
@@ -415,28 +401,14 @@ class MessageDrivenService : IMessageDriven
     }
     private void SendHeartbeat()
     {
-        var clusterIds = this.localClusters.Select(f => f.ClusterId).ToList();
         var message = new Message
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Heartbeat,
             AppId = this.AppId,
-            Body = this.NodeId.ToJson()
+            Body = this.NodeId
         };
         this.rabbitProducer.Publish("heartbeat", this.NodeId, message.ToJson());
-
-        var availableClusterIds = this.localClusters.FindAll(f => f.IsEnabled).Select(f => f.ClusterId).ToList();
-        var consumerInfos = new Dictionary<string, List<ConsumerInfo>>();
-        foreach (var consumer in this.consumers)
-        {
-            consumerInfos.Add(consumer.Key, consumer.Value.Select(t => new ConsumerInfo
-            {
-                ConsumerId = t.ConsumerId,
-                Queue = t.QueueName,
-                IsRunning = t.IsRunning
-            }).ToList());
-        }
-        this.rabbitProducer.Publish("heartbeat", this.NodeId, this.NodeId.ToJson());
     }
     private async Task StartConsumers()
     {
@@ -446,26 +418,26 @@ class MessageDrivenService : IMessageDriven
         var dbClusters = await this.repository.GetClusters(clusterIds);
         this.lastClusters = this.localClusters;
         //对比本地集群和数据库集群，并更新本地集群配置信息
-        this.localClusters = new();
-        foreach (var cluster in this.localClusters)
+        var newClusters = new List<Cluster>();
+        foreach (var cluster in this.lastClusters)
         {
             var dbCluster = dbClusters.Find(f => f.ClusterId == cluster.ClusterId);
             //数据库或是配置中心的配置信息已删除或是禁用不创建消费者
             if (dbCluster == null || !dbCluster.IsEnabled)
                 continue;
-            this.localClusters.Add(dbCluster);
+            newClusters.Add(dbCluster);
         }
-        //先处理有状态的集群
+        this.localClusters = newClusters;
+
+        int index = 0;
+        var nodeIds = this.nodeInfos.OrderBy(f => f).ToList();
+        var myNodeInfo = nodeIds.Find(f => f == this.NodeId);
+        var nodeCount = nodeIds.Count;
+
+        //先启动有状态集群
         var myClusters = this.localClusters.Where(f => f.IsEnabled && f.IsStateful)
             .OrderBy(f => f.ClusterId).ToList();
-        clusterIds = myClusters.Select(f => f.ClusterId).ToList();
-        //暂时采用第一次的规则，后续再进行优化
-        //第一次初始化，用轮询的方式，按照服务ID排序，从第一个ServiceId开始，分配到满足sacCount个消费者，
-        //依次第二个服务，第三个服务，直到所有服务的消费者都满足sacCount个
-        var nodeIds = this.nodeInfos.OrderBy(f => f).ToList();
-        var myNodeInfo = this.nodeInfos.Find(f => f == this.NodeId);
-        var nodeCount = nodeIds.Count;
-        int index = 0;
+
         for (int i = 0; i < myClusters.Count; i++)
         {
             var myCluster = myClusters[i];
@@ -498,22 +470,20 @@ class MessageDrivenService : IMessageDriven
             {
                 var queueName = $"{myCluster.Queue}.{j}";
                 //SingleActiveConsumer每个节点建立一个消费者，轮询分配到每个节点一个消费者              
-                int existedCount = 0, needCount = 0;
-                List<RabbitConsumer> rabbitConsumers = null;
+                int needCount = 0;
+                if (!this.consumers.TryGetValue(clusterId, out var rabbitConsumers))
+                    this.consumers.TryAdd(clusterId, rabbitConsumers = new());
+                var myRabbitConsumers = rabbitConsumers.FindAll(f => f.QueueName == queueName);
+                var existedCount = myRabbitConsumers.Count;
+
                 for (int k = 0; k < this.sacCount; k++)
                 {
-                    var nodeId = nodeIds[index % nodeCount];
+                    var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.NodeId;
                     if (nodeId == this.NodeId)
                     {
                         needCount++;
-                        if (!this.consumers.TryGetValue(clusterId, out rabbitConsumers))
-                        {
-                            this.consumers.TryAdd(clusterId, rabbitConsumers = new());
-                            index++;
-                            continue;
-                        }
-                        var myRabbitConsumers = rabbitConsumers.FindAll(f => f.QueueName == queueName);
-                        existedCount = myRabbitConsumers.Count;
+                        index++;
+                        continue;
                     }
                     index++;
                 }
@@ -521,7 +491,8 @@ class MessageDrivenService : IMessageDriven
                 {
                     for (int k = 0; k < needCount - existedCount; k++)
                     {
-                        var myRabbitConsumer = new RabbitConsumer(clusterId, queueName, this, this.serviceProvider, this.consumerHandlers[clusterId]) { ClusterInfo = myCluster };
+                        (var parameterType, var handler) = ((Type, Func<object, Task>))this.consumerHandlers[clusterId];
+                        var myRabbitConsumer = new RabbitConsumer(clusterId, queueName, this, this.serviceProvider, parameterType, handler) { ClusterInfo = myCluster };
                         rabbitConsumers.Add(myRabbitConsumer);
                         //不管是第一次还是已经存在了，新增本节点，都直接启动，因为有已经存在的消费者在消费了
                         switch (changeType)
@@ -537,7 +508,8 @@ class MessageDrivenService : IMessageDriven
                                 break;
                             case ChangeType.None:
                             default:
-                                myRabbitConsumer.Start();
+                                var bindingKey = j.ToString();
+                                myRabbitConsumer.Start(bindingKey);
                                 break;
                         }
                     }
@@ -597,7 +569,49 @@ class MessageDrivenService : IMessageDriven
                         }
                     }
                 }
+            }
+        }
+
+        //再启动无状态集群
+        myClusters = this.localClusters.Where(f => f.IsEnabled && !f.IsStateful)
+            .OrderBy(f => f.ClusterId).ToList();
+        for (int i = 0; i < myClusters.Count; i++)
+        {
+            var myCluster = myClusters[i];
+            var clusterId = myCluster.ClusterId;
+            int needCount = 0;
+            if (!this.consumers.TryGetValue(clusterId, out var rabbitConsumers))
+                this.consumers.TryAdd(clusterId, rabbitConsumers = new());
+            var existedCount = rabbitConsumers.Count;
+
+            for (int j = 0; j < myCluster.WorkloadTotal; j++)
+            {
+                var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.NodeId;
+                if (nodeId == this.NodeId)
+                    needCount++;
                 index++;
+            }
+            if (needCount > existedCount)
+            {
+                var handlerKey = $"{clusterId}-{myCluster.Queue}";
+                (var parameterType, var handler) = ((Type, Func<object, Task>))this.consumerHandlers[handlerKey];
+
+                for (int k = 0; k < needCount - existedCount; k++)
+                {
+                    var myRabbitConsumer = new RabbitConsumer(clusterId, myCluster.Queue, this, this.serviceProvider, parameterType, handler) { ClusterInfo = myCluster };
+                    rabbitConsumers.Add(myRabbitConsumer);
+                    myRabbitConsumer.Start();
+                }
+            }
+            else if (needCount < existedCount)
+            {
+                while (rabbitConsumers.Count > needCount)
+                {
+                    var removeIndex = rabbitConsumers.Count - 1;
+                    var myRabbitConsumer = rabbitConsumers[removeIndex];
+                    myRabbitConsumer.Shutdown();
+                    rabbitConsumers.RemoveAt(removeIndex);
+                }
             }
         }
         this.nodeInfos.Clear();

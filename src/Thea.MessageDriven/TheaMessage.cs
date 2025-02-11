@@ -28,6 +28,11 @@ class Message
     public DateTime? ScheduleTimeUtc { get; set; }
     public object Body { get; set; }
 }
+class Message<TBody> : Message
+{
+    public new TBody Body { get; set; }
+}
+
 class ConsumerInfo
 {
     public string ConsumerId { get; set; }

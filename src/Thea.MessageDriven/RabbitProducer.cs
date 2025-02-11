@@ -18,7 +18,7 @@ class RabbitProducer : IDisposable
 
     public RabbitProducer(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 10)
     {
-        var hostName = parent.NodeId;
+        var connectionId = $"producer-{parent.NodeId}";
         this.channelSize = channelSize;
         var configuration = serviceProvider.GetService<IConfiguration>();
         var url = configuration.GetValue<string>("MessageDriven:Url");
@@ -35,11 +35,11 @@ class RabbitProducer : IDisposable
             NetworkRecoveryInterval = TimeSpan.FromSeconds(2),
             ClientProperties = new Dictionary<string, object>()
             {
-                { "connection_name", $"producer-{hostName}" },
+                { "connection_name", connectionId},
                 { "client_api", $"Thea.MessageDriven" }
             }
         };
-        this.connection = this.factory.CreateConnection(hostName);
+        this.connection = this.factory.CreateConnection(connectionId);
         for (int i = 0; i < channelSize; i++)
         {
             var channel = new Channel(this.connection);

@@ -56,7 +56,7 @@ namespace WebAppTest.Controllers
             return TheaResponse.Succeed("ok");
         }
         [HttpPost]
-        public async Task<TheaResponse> TakeAward([FromBody] string awardId)
+        public async Task<TheaResponse> TakeAward(string awardId)
         {
             await this.messageDriven.PublishAsync("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
             return TheaResponse.Succeed("ok");
