@@ -156,8 +156,6 @@ class MessageDrivenService : IMessageDriven
 
     public void Start()
     {
-        if (string.IsNullOrEmpty(this.NodeId))
-            this.NodeId = Dns.GetHostName();
         this.Register().Wait();
         this.readyToStart.Set();
     }
@@ -371,11 +369,11 @@ class MessageDrivenService : IMessageDriven
         //捞取数据库或是配置中心的集群信息        
         var dbClusters = await this.repository.GetClusters(clusterIds);
         var registerClusters = new List<Cluster>();
-        foreach (var dbCluster in dbClusters)
+        foreach (var clusterId in clusterIds)
         {
             if (dbClusters.Exists(f => clusterIds.Contains(f.ClusterId)))
                 continue;
-            var cluster = this.localClusters.Find(f => f.ClusterId == dbCluster.ClusterId);
+            var cluster = this.localClusters.Find(f => f.ClusterId == clusterId);
             registerClusters.Add(cluster);
         }
         //代码中有配置集群信息，但是数据库或是配置中心没有，需要注册，如果需要删除集群配置，需要在代码中要删除
@@ -418,7 +416,13 @@ class MessageDrivenService : IMessageDriven
     private void SendHeartbeat()
     {
         var clusterIds = this.localClusters.Select(f => f.ClusterId).ToList();
-        var message = new Dictionary<string, List<string>> { { this.NodeId, clusterIds } };
+        var message = new Message
+        {
+            MessageId = ObjectId.NewId(),
+            Type = MessageType.Heartbeat,
+            AppId = this.AppId,
+            Body = this.NodeId.ToJson()
+        };
         this.rabbitProducer.Publish("heartbeat", this.NodeId, message.ToJson());
 
         var availableClusterIds = this.localClusters.FindAll(f => f.IsEnabled).Select(f => f.ClusterId).ToList();

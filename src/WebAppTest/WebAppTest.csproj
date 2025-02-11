@@ -2,8 +2,13 @@
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
 		<LangVersion>10.0</LangVersion>
+		<DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
 	</PropertyGroup>
 	<ItemGroup>
+	  <None Remove="Dockerfile" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.21.0" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
 	</ItemGroup>
 	<ItemGroup>
@@ -14,5 +19,8 @@
 		<ProjectReference Include="..\Thea.MessageDriven\Thea.MessageDriven.csproj" />
 		<ProjectReference Include="..\Thea.Web\Thea.Web.csproj" />
 		<ProjectReference Include="..\Thea\Thea.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Remove="..\.dockerignore" />
 	</ItemGroup>
 </Project>

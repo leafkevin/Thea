@@ -44,6 +44,7 @@ class RabbitProducer : IDisposable
         {
             var channel = new Channel(this.connection);
             this.channels.TryAdd(i, channel);
+            this.channelQueue.Add(channel);
         }
     }
     public void CreateExchange(string exchangeName, string bindType, bool isDelay = false)
