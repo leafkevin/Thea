@@ -18,15 +18,15 @@ class MessageDrivenService : IMessageDriven
     private readonly TimeSpan heartbeatCycle;
     private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
     private readonly EventWaitHandle readyToStart = new EventWaitHandle(false, EventResetMode.AutoReset);
-    private List<Cluster> localClusters = new();
-    private List<Cluster> lastClusters = null;
-    //Key=clusterId
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
     private readonly ConcurrentDictionary<string, WaitForStartMessage> waitingStartConsumers = new();
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitingShutdownConsumers = new();
     private readonly ConcurrentDictionary<string, DateTime> nodeHeartbeats = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
+    private bool hasConsumer = false;
+    private List<Cluster> localClusters = new();
+    private List<Cluster> lastClusters = null;
     private RabbitProducer rabbitProducer;
     private RabbitConsumer heartbeatRabbitConsumer;
     private readonly ConcurrentDictionary<string, (Type, Delegate)> consumerHandlers = new();
@@ -64,17 +64,20 @@ class MessageDrivenService : IMessageDriven
             {
                 try
                 {
-                    //每10秒发送一次心跳，根据配置更新本地集群配置信息localClusters，配置中心或是数据库会有更改，比如：临时禁用某个集群
-                    if (DateTime.Now - this.lastInitedTime >= this.heartbeatCycle)
+                    if (this.hasConsumer)
                     {
-                        this.SendHeartbeat();
-                        this.lastInitedTime = DateTime.Now;
-                    }
-                    //经过2个心跳后，根据前面获取的最新配置信息和最新服务器信息，启动本AppId下的所有消费者
-                    if (DateTime.Now - this.lastUpdatedTime > this.heartbeatCycle * 2)
-                    {
-                        await this.StartConsumers();
-                        this.lastUpdatedTime = DateTime.Now;
+                        //每10秒发送一次心跳，根据配置更新本地集群配置信息localClusters，配置中心或是数据库会有更改，比如：临时禁用某个集群
+                        if (DateTime.Now - this.lastInitedTime >= this.heartbeatCycle)
+                        {
+                            this.SendHeartbeat();
+                            this.lastInitedTime = DateTime.Now;
+                        }
+                        //经过2个心跳后，根据前面获取的最新配置信息和最新服务器信息，启动本AppId下的所有消费者
+                        if (DateTime.Now - this.lastUpdatedTime > this.heartbeatCycle * 2)
+                        {
+                            await this.StartConsumers();
+                            this.lastUpdatedTime = DateTime.Now;
+                        }
                     }
                     if ((DateTime.Now - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
                         || logs.Count >= 100)
@@ -218,9 +221,22 @@ class MessageDrivenService : IMessageDriven
         this.Schedule(exchange, routingKey, message, enqueueTimeUtc, isTheaMessage);
         return Task.CompletedTask;
     }
-    public void UseProducer() => this.rabbitProducer = new RabbitProducer(this, this.serviceProvider);
+    public void UseProducer(string clusterId)
+    {
+        if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
+        {
+            this.localClusters.Add(new Cluster
+            {
+                ClusterId = clusterId,
+                ClusterName = clusterId,
+                Exchange = clusterId,
+                IsEnabled = true
+            });
+        }
+    }
     public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
     {
+        this.hasConsumer = true;
         var parametersType = typeof(TParameters);
         Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
         this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
@@ -246,6 +262,7 @@ class MessageDrivenService : IMessageDriven
     }
     public void UseStatefulConsumer(string clusterId, object target, MethodInfo methodInfo)
     {
+        this.hasConsumer = true;
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
         var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
         Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
@@ -277,6 +294,7 @@ class MessageDrivenService : IMessageDriven
     }
     public void UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
     {
+        this.hasConsumer = true;
         //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中，订阅者是默认是# topic
         Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
         this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (typeof(TParameters), consumerHandler));
@@ -303,6 +321,7 @@ class MessageDrivenService : IMessageDriven
     }
     public void UseSubscriber(string clusterId, string queue, object target, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
     {
+        this.hasConsumer = true;
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
         var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
         Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
@@ -361,9 +380,10 @@ class MessageDrivenService : IMessageDriven
             await this.repository.Register(registerClusters);
 
         this.rabbitProducer = new RabbitProducer(this, this.serviceProvider);
+
+        //没有消费者，什么都不做，也不创建
+        if (!this.hasConsumer) return;
         this.rabbitProducer.CreateExchange("heartbeat", "fanout");
-        //this.rabbitProducer.CreateQueue(queueName, false, true);
-        //this.rabbitProducer.BindQueue("heartbeat", queueName, "#");
         var queueName = $"heartbeat.{this.NodeId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true, typeof(string));
         this.heartbeatRabbitConsumer.Start();
@@ -371,7 +391,9 @@ class MessageDrivenService : IMessageDriven
         //创建信箱和队列
         foreach (var cluster in this.localClusters)
         {
-            if (!cluster.IsEnabled) continue;
+            if (!cluster.IsEnabled)
+                continue;
+
             var exchange = cluster.ClusterId;
             rabbitProducer.CreateExchange(exchange, cluster.BindType, cluster.IsDelay);
             if (cluster.IsStateful)
@@ -435,8 +457,9 @@ class MessageDrivenService : IMessageDriven
         if (removedKeys.Count > 0)
             removedKeys.ForEach(f => this.nodeHeartbeats.TryRemove(f, out _));
 
+        if (!this.hasConsumer) return;
+
         int index = 0;
-        Console.WriteLine($"nodeIds: {nodeIds.Count}");
         var myNodeInfo = nodeIds.Find(f => f == this.NodeId);
         var nodeCount = nodeIds.Count;
 

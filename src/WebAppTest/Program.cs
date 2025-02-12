@@ -10,6 +10,7 @@ using WebAppTest.Domain;
 
 
 var builder = WebApplication.CreateBuilder(args);
+
 // Add services to the container.
 builder.Services.AddDomainServices(builder.Configuration);
 
@@ -89,5 +90,5 @@ app.UseAuthorization();
 app.UseDomainServices(builder.Configuration);
 
 app.MapControllers();
-
-app.Run();
+var urls = builder.Configuration["Urls"];
+app.Run(urls);
