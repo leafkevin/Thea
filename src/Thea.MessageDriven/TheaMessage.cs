@@ -27,18 +27,7 @@ class Message
     public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }
     public object Body { get; set; }
-}
-class Message<TBody> : Message
-{
-    public new TBody Body { get; set; }
-}
-
-class ConsumerInfo
-{
-    public string ConsumerId { get; set; }
-    public string Queue { get; set; }
-    public bool IsRunning { get; set; }
-}
+} 
 class WaitForStartMessage
 {
     public int WaitTotal { get; set; }

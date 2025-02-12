@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.Eventing.Reader;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,12 +14,10 @@ class RabbitProducer : IDisposable
     private IConnection connection;
     private ConcurrentDictionary<int, Channel> channels = new();
     private BlockingCollection<Channel> channelQueue = new();
-    private int channelSize = 10;
 
     public RabbitProducer(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 10)
     {
         var connectionId = $"producer-{parent.NodeId}";
-        this.channelSize = channelSize;
         var configuration = serviceProvider.GetService<IConfiguration>();
         var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");
