@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,14 +24,15 @@ class RabbitConsumer
     private volatile IConnection connection = null;
     private volatile IModel channel = null;
     private string connectionId;
-    private volatile bool isDeferClose = false;
+    private bool isHeartbeat = false;
     private Type messageType;
     public Func<object, Task> consumerHandler;
     public volatile bool IsRunning = false;
     public volatile bool IsStarted = false;
+    private volatile bool isDeferClose = false;
 
 
-    public volatile Cluster ClusterInfo;
+    public volatile bool IsLogEnabled;
     public string ClusterId { get; private set; }
     public string ConsumerId { get; private set; }
     public string Url { get; private set; }
@@ -49,7 +51,7 @@ class RabbitConsumer
             return true;
         }
     }
-    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, Type messageType, Func<object, Task> consumerHandler)
+    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isHeartbeat, Type messageType, Func<object, Task> consumerHandler = null)
     {
         this.parent = parent;
         this.ClusterId = clusterId;
@@ -62,6 +64,7 @@ class RabbitConsumer
         var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
+        this.isHeartbeat = isHeartbeat;
         this.messageType = messageType;
         this.consumerHandler = consumerHandler;
 
@@ -80,17 +83,17 @@ class RabbitConsumer
             }
         };
     }
-    public void Start(string bindingKey = null)
+    public void Start()
     {
         if (this.IsRunning || this.IsStarted) return;
 
         this.connection = this.factory.CreateConnection(this.connectionId);
         this.channel = this.connection.CreateModel();
-
-        IDictionary<string, object> queueArguments = null;
-        if (this.ClusterInfo.IsSac) queueArguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-        this.channel.QueueDeclare(this.QueueName, true, false, false, queueArguments);
-        this.channel.QueueBind(this.QueueName, this.ClusterInfo.Exchange, bindingKey ?? this.ClusterInfo.BindingKey);
+        if (this.isHeartbeat)
+        {
+            this.channel.QueueDeclare(this.QueueName, false, true, false);
+            this.channel.QueueBind(this.QueueName, "heartbeat", "#");
+        }
 
         ushort prefetchCount = 20;
         this.channel.BasicQos(0, prefetchCount, false);
@@ -180,7 +183,7 @@ class RabbitConsumer
                 var logInfo = new ExecLog
                 {
                     LogId = ObjectId.NewId(),
-                    ClusterId = this.ClusterInfo.ClusterId,
+                    ClusterId = this.ClusterId,
                     RoutingKey = message.RoutingKey,
                     Queue = this.QueueName,
                     Body = jsonBody,
@@ -190,7 +193,7 @@ class RabbitConsumer
                     UpdatedAt = DateTime.Now,
                     UpdatedBy = this.ConsumerId
                 };
-                if (this.ClusterInfo.IsLogEnabled || !isSuccess)
+                if (this.IsLogEnabled || !isSuccess)
                 {
                     this.addLogsHandler.Invoke(logInfo);
                     if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");

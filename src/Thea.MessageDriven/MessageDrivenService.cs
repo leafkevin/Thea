@@ -15,15 +15,16 @@ namespace Thea.MessageDriven;
 class MessageDrivenService : IMessageDriven
 {
     private readonly Task task;
+    private readonly TimeSpan heartbeatCycle;
     private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
     private readonly EventWaitHandle readyToStart = new EventWaitHandle(false, EventResetMode.AutoReset);
     private List<Cluster> localClusters = new();
     private List<Cluster> lastClusters = null;
-    private List<string> nodeInfos = new();
     //Key=clusterId
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
     private readonly ConcurrentDictionary<string, WaitForStartMessage> waitingStartConsumers = new();
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitingShutdownConsumers = new();
+    private readonly ConcurrentDictionary<string, DateTime> nodeHeartbeats = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
     private RabbitProducer rabbitProducer;
@@ -45,7 +46,7 @@ class MessageDrivenService : IMessageDriven
         this.serviceProvider = serviceProvider;
         this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
-        var heartbeat = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
+        this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
         this.AppId = configuration.GetValue<string>("AppId");
         if (string.IsNullOrEmpty(this.AppId))
         {
@@ -64,13 +65,13 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每10秒发送一次心跳，根据配置更新本地集群配置信息localClusters，配置中心或是数据库会有更改，比如：临时禁用某个集群
-                    if (DateTime.Now - this.lastInitedTime >= heartbeat)
+                    if (DateTime.Now - this.lastInitedTime >= this.heartbeatCycle)
                     {
                         this.SendHeartbeat();
                         this.lastInitedTime = DateTime.Now;
                     }
                     //经过2个心跳后，根据前面获取的最新配置信息和最新服务器信息，启动本AppId下的所有消费者
-                    if (DateTime.Now - this.lastUpdatedTime > heartbeat * 2)
+                    if (DateTime.Now - this.lastUpdatedTime > this.heartbeatCycle * 2)
                     {
                         await this.StartConsumers();
                         this.lastUpdatedTime = DateTime.Now;
@@ -112,8 +113,7 @@ class MessageDrivenService : IMessageDriven
                             case MessageType.Heartbeat:
                                 //统一处理心跳，可防止并发
                                 (var nodeId, waiter) = ((string, TaskCompletionSource<bool>))message.Body;
-                                if (!this.nodeInfos.Exists(f => f == nodeId))
-                                    this.nodeInfos.Add(nodeId);
+                                this.nodeHeartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
                                 waiter.TrySetResult(true);
                                 break;
                             case MessageType.WaitForStart:
@@ -155,6 +155,7 @@ class MessageDrivenService : IMessageDriven
     public void Start()
     {
         this.Register().Wait();
+        this.nodeHeartbeats.TryAdd(this.NodeId, DateTime.Now);
         this.readyToStart.Set();
     }
     public void Shutdown()
@@ -221,7 +222,7 @@ class MessageDrivenService : IMessageDriven
     public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
     {
         var parametersType = typeof(TParameters);
-        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message, message);
+        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
         this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
@@ -277,7 +278,7 @@ class MessageDrivenService : IMessageDriven
     public void UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
     {
         //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中，订阅者是默认是# topic
-        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message, message);
+        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
         this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (typeof(TParameters), consumerHandler));
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
@@ -360,23 +361,11 @@ class MessageDrivenService : IMessageDriven
             await this.repository.Register(registerClusters);
 
         this.rabbitProducer = new RabbitProducer(this, this.serviceProvider);
-        var queueName = "heartbeat.queue";
-        this.rabbitProducer.CreateExchange("heartbeat", "topic");
-        this.rabbitProducer.CreateQueue(queueName, false);
-        this.rabbitProducer.BindQueue("heartbeat", queueName, "#");
-
-        this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, typeof(string), async message =>
-        {
-            var waiter = new TaskCompletionSource<bool>();
-            this.messageQueue.Enqueue(new Message
-            {
-                MessageId = ObjectId.NewId(),
-                Type = MessageType.Heartbeat,
-                Body = (message, waiter)
-            });
-            await waiter.Task;
-        })
-        { ClusterInfo = new Cluster { ClusterId = "heartbeat", Exchange = "heartbeat", BindingKey = "#" } };
+        this.rabbitProducer.CreateExchange("heartbeat", "fanout");
+        //this.rabbitProducer.CreateQueue(queueName, false, true);
+        //this.rabbitProducer.BindQueue("heartbeat", queueName, "#");
+        var queueName = $"heartbeat.{this.NodeId}";
+        this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true, typeof(string));
         this.heartbeatRabbitConsumer.Start();
 
         //创建信箱和队列
@@ -390,14 +379,14 @@ class MessageDrivenService : IMessageDriven
                 for (int i = 0; i < cluster.WorkloadTotal; i++)
                 {
                     queueName = $"{cluster.Queue}.{i}";
-                    this.rabbitProducer.CreateQueue(queueName, cluster.IsSac);
+                    this.rabbitProducer.CreateQueue(queueName, cluster.IsSac, false);
                     this.rabbitProducer.BindQueue(exchange, queueName, i.ToString());
                 }
             }
             else
             {
-                this.rabbitProducer.CreateQueue(cluster.Queue, false);
-                this.rabbitProducer.BindQueue(exchange, queueName, "#");
+                this.rabbitProducer.CreateQueue(cluster.Queue, false, false);
+                this.rabbitProducer.BindQueue(exchange, cluster.Queue, "#");
             }
         }
         this.SendHeartbeat();
@@ -431,9 +420,22 @@ class MessageDrivenService : IMessageDriven
             newClusters.Add(dbCluster);
         }
         this.localClusters = newClusters;
+        var nodeIds = new List<string>();
+        var removedKeys = new List<string>();
+        foreach (var nodeId in this.nodeHeartbeats.Keys)
+        {
+            if (DateTime.Now.Subtract(this.nodeHeartbeats[nodeId]) > this.heartbeatCycle * 1.5)
+            {
+                removedKeys.Add(nodeId);
+                continue;
+            }
+            nodeIds.Add(nodeId);
+        }
+        nodeIds.Sort((x, y) => x.CompareTo(y));
+        if (removedKeys.Count > 0)
+            removedKeys.ForEach(f => this.nodeHeartbeats.TryRemove(f, out _));
 
         int index = 0;
-        var nodeIds = this.nodeInfos.OrderBy(f => f).ToList();
         Console.WriteLine($"nodeIds: {nodeIds.Count}");
         var myNodeInfo = nodeIds.Find(f => f == this.NodeId);
         var nodeCount = nodeIds.Count;
@@ -462,7 +464,7 @@ class MessageDrivenService : IMessageDriven
                     for (int k = oldWorkloadTotal; k < myCluster.WorkloadTotal; k++)
                     {
                         var queueName = $"{myCluster.Queue}.{k}";
-                        this.rabbitProducer.CreateQueue(queueName, true);
+                        this.rabbitProducer.CreateQueue(queueName, true, false);
                         this.rabbitProducer.BindQueue(myCluster.ClusterId, queueName, k.ToString());
                     }
                 }
@@ -496,7 +498,7 @@ class MessageDrivenService : IMessageDriven
                     for (int k = 0; k < needCount - existedCount; k++)
                     {
                         (var parameterType, var handler) = ((Type, Func<object, Task>))this.consumerHandlers[clusterId];
-                        var myRabbitConsumer = new RabbitConsumer(clusterId, queueName, this, this.serviceProvider, parameterType, handler) { ClusterInfo = myCluster };
+                        var myRabbitConsumer = new RabbitConsumer(clusterId, queueName, this, this.serviceProvider, false, parameterType, handler) { IsLogEnabled = myCluster.IsLogEnabled };
                         rabbitConsumers.Add(myRabbitConsumer);
                         //不管是第一次还是已经存在了，新增本节点，都直接启动，因为有已经存在的消费者在消费了
                         switch (changeType)
@@ -513,7 +515,7 @@ class MessageDrivenService : IMessageDriven
                             case ChangeType.None:
                             default:
                                 var bindingKey = j.ToString();
-                                myRabbitConsumer.Start(bindingKey);
+                                myRabbitConsumer.Start();
                                 break;
                         }
                     }
@@ -602,7 +604,7 @@ class MessageDrivenService : IMessageDriven
 
                 for (int k = 0; k < needCount - existedCount; k++)
                 {
-                    var myRabbitConsumer = new RabbitConsumer(clusterId, myCluster.Queue, this, this.serviceProvider, parameterType, handler) { ClusterInfo = myCluster };
+                    var myRabbitConsumer = new RabbitConsumer(clusterId, myCluster.Queue, this, this.serviceProvider, false, parameterType, handler) { IsLogEnabled = myCluster.IsLogEnabled };
                     rabbitConsumers.Add(myRabbitConsumer);
                     myRabbitConsumer.Start();
                 }
@@ -618,6 +620,5 @@ class MessageDrivenService : IMessageDriven
                 }
             }
         }
-        this.nodeInfos.Clear();
     }
 }

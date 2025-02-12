@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.Eventing.Reader;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -53,10 +54,10 @@ class RabbitProducer : IDisposable
         channel.CreateExchange(exchangeName, bindType, isDelay);
         this.channelQueue.Add(channel);
     }
-    public void CreateQueue(string queueName, bool isSac = false)
+    public void CreateQueue(string queueName, bool isSac, bool isHeartbeat)
     {
         var channel = this.channelQueue.Take();
-        channel.CreateQueue(queueName, isSac);
+        channel.CreateQueue(queueName, isSac, isHeartbeat);
         this.channelQueue.Add(channel);
     }
     public void BindQueue(string exchange, string queueName, string bindingKey)
@@ -113,11 +114,12 @@ class Channel
         if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
         this.Model.ExchangeDeclare(exchangeName, bindType, true, false, arguments);
     }
-    public void CreateQueue(string queueName, bool isSac)
+    public void CreateQueue(string queueName, bool isSac, bool isHeartbeat)
     {
         IDictionary<string, object> arguments = null;
         if (isSac) arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-        this.Model.QueueDeclare(queueName, true, false, false, arguments);
+        if (isHeartbeat) this.Model.QueueDeclare(queueName, false, true, false, arguments);
+        else this.Model.QueueDeclare(queueName, true, false, false, arguments);
     }
     public void BindQueue(string exchange, string queueName, string bindingKey)
         => this.Model.QueueBind(queueName, exchange, bindingKey);

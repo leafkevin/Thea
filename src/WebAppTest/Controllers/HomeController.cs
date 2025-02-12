@@ -50,7 +50,7 @@ namespace WebAppTest.Controllers
             return TheaResponse.Succeed(result);
         }
         [HttpPost]
-        public async Task<TheaResponse> RemoveCache([FromBody] string cacheKey)
+        public async Task<TheaResponse> RemoveCache(string cacheKey)
         {
             await this.messageDriven.PublishAsync("cache.refresh", "1", cacheKey);
             return TheaResponse.Succeed("ok");
