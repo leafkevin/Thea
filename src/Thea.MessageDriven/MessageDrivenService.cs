@@ -1,17 +1,13 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using Thea.Json;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -365,9 +361,9 @@ class MessageDrivenService : IMessageDriven
 
         this.rabbitProducer = new RabbitProducer(this, this.serviceProvider);
         var queueName = "heartbeat.queue";
-        rabbitProducer.CreateExchange("heartbeat", "topic");
-        rabbitProducer.CreateQueue(queueName, false);
-        rabbitProducer.BindQueue("heartbeat", queueName, "#");
+        this.rabbitProducer.CreateExchange("heartbeat", "topic");
+        this.rabbitProducer.CreateQueue(queueName, false);
+        this.rabbitProducer.BindQueue("heartbeat", queueName, "#");
 
         this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, typeof(string), async message =>
         {
@@ -387,15 +383,22 @@ class MessageDrivenService : IMessageDriven
         foreach (var cluster in this.localClusters)
         {
             if (!cluster.IsEnabled) continue;
-            rabbitProducer.CreateExchange(cluster.ClusterId, cluster.BindType, cluster.IsDelay);
+            var exchange = cluster.ClusterId;
+            rabbitProducer.CreateExchange(exchange, cluster.BindType, cluster.IsDelay);
             if (cluster.IsStateful)
             {
                 for (int i = 0; i < cluster.WorkloadTotal; i++)
                 {
-                    this.rabbitProducer.CreateQueue($"{cluster.Queue}.{i}", cluster.IsSac);
+                    queueName = $"{cluster.Queue}.{i}";
+                    this.rabbitProducer.CreateQueue(queueName, cluster.IsSac);
+                    this.rabbitProducer.BindQueue(exchange, queueName, i.ToString());
                 }
             }
-            else this.rabbitProducer.CreateQueue(cluster.Queue, false);
+            else
+            {
+                this.rabbitProducer.CreateQueue(cluster.Queue, false);
+                this.rabbitProducer.BindQueue(exchange, queueName, "#");
+            }
         }
         this.SendHeartbeat();
     }
@@ -431,6 +434,7 @@ class MessageDrivenService : IMessageDriven
 
         int index = 0;
         var nodeIds = this.nodeInfos.OrderBy(f => f).ToList();
+        Console.WriteLine($"nodeIds: {nodeIds.Count}");
         var myNodeInfo = nodeIds.Find(f => f == this.NodeId);
         var nodeCount = nodeIds.Count;
 
