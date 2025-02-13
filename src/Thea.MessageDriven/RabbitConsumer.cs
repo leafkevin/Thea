@@ -26,17 +26,13 @@ class RabbitConsumer
     private bool isHeartbeat = false;
     private Type messageType;
     public Func<object, Task> consumerHandler;
+
     public volatile bool IsRunning = false;
     public volatile bool IsStarted = false;
     private volatile bool isDeferClose = false;
-
-
     public volatile bool IsLogEnabled;
     public string ClusterId { get; private set; }
     public string ConsumerId { get; private set; }
-    public string Url { get; private set; }
-    public string User { get; private set; }
-    public string Password { get; private set; }
     public string QueueName { get; private set; }
 
     public bool IsAvailable
@@ -101,7 +97,7 @@ class RabbitConsumer
             var model = o as IModel;
             model.BasicQos(0, prefetchCount, false);
         };
-        this.BindHandler(this.channel, this.QueueName);
+        this.BindHandler(this.channel);
         this.IsStarted = true;
     }
     public void RemoveQueue()
@@ -135,7 +131,7 @@ class RabbitConsumer
         this.Shutdown();
         this.Start();
     }
-    private void BindHandler(IModel channel, string queue)
+    private void BindHandler(IModel channel)
     {
         var consumer = new EventingBasicConsumer(channel);
         consumer.Received += async (model, ea) =>
@@ -167,6 +163,7 @@ class RabbitConsumer
                         var body = message.Body.ToString();
                         var parameters = TheaJsonSerializer.Deserialize(body, this.messageType);
                         await this.consumerHandler.Invoke(parameters);
+                        Console.WriteLine($"消费者消费， RoutingKey: {message.RoutingKey}, Queue: {this.QueueName}");
                         break;
                     }
                     catch (Exception ex)
@@ -221,6 +218,6 @@ class RabbitConsumer
             if (this.isDeferClose)
                 this.Close();
         };
-        channel.BasicConsume(queue, false, consumer);
+        channel.BasicConsume(this.QueueName, false, consumer);
     }
 }

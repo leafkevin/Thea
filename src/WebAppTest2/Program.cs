@@ -31,9 +31,7 @@ if (app.Environment.IsDevelopment())
 app.UseMessageDriven(f =>
 {
     f.UseTrolleyRepository("default")
-    .UseProducer("cache.refresh")
-    .UseProducer("award.take")
-    .UseProducer("award.issue");
+    .UseProducer("cache.refresh", "award.take", "award.issue");
 });
 app.UseAuthorization();
 

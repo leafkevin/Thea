@@ -29,40 +29,40 @@ public static class Startup
             return new OrmDbFactoryBuilder()
                 .Register(OrmProviderType.MySql, "default", connString, true)
                 .Configure<ModelConfiguration>(OrmProviderType.MySql)
-                .UseInterceptors(df =>
-                {
-                    df.OnConnectionCreated += evt =>
-                    {
-                        Interlocked.Increment(ref connTotal);
-                        Console.WriteLine($"{evt.ConnectionId} Created, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connTotal)}");
-                    };
-                    df.OnConnectionOpened += evt =>
-                    {
-                        Interlocked.Increment(ref connOpenTotal);
-                        Console.WriteLine($"{evt.ConnectionId} Opened, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connOpenTotal)}");
-                    };
-                    df.OnConnectionClosed += evt =>
-                    {
-                        Interlocked.Decrement(ref connOpenTotal);
-                        Interlocked.Decrement(ref connTotal);
-                        Console.WriteLine($"{evt.ConnectionId} Closed, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connOpenTotal)}");
-                    };
-                    df.OnCommandExecuting += evt =>
-                    {
-                        Console.WriteLine($"{evt.SqlType} Begin, Sql: {evt.Sql}");
-                    };
-                    df.OnCommandExecuted += evt =>
-                    {
-                        Console.WriteLine($"{evt.SqlType} End, Elapsed: {evt.Elapsed} ms, Sql: {evt.Sql}");
-                    };
-                })
+                //.UseInterceptors(df =>
+                //{
+                //    df.OnConnectionCreated += evt =>
+                //    {
+                //        Interlocked.Increment(ref connTotal);
+                //        Console.WriteLine($"{evt.ConnectionId} Created, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connTotal)}");
+                //    };
+                //    df.OnConnectionOpened += evt =>
+                //    {
+                //        Interlocked.Increment(ref connOpenTotal);
+                //        Console.WriteLine($"{evt.ConnectionId} Opened, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connOpenTotal)}");
+                //    };
+                //    df.OnConnectionClosed += evt =>
+                //    {
+                //        Interlocked.Decrement(ref connOpenTotal);
+                //        Interlocked.Decrement(ref connTotal);
+                //        Console.WriteLine($"{evt.ConnectionId} Closed, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connOpenTotal)}");
+                //    };
+                //    df.OnCommandExecuting += evt =>
+                //    {
+                //        Console.WriteLine($"{evt.SqlType} Begin, Sql: {evt.Sql}");
+                //    };
+                //    df.OnCommandExecuted += evt =>
+                //    {
+                //        Console.WriteLine($"{evt.SqlType} End, Elapsed: {evt.Elapsed} ms, Sql: {evt.Sql}");
+                //    };
+                //})
                 .Build();
         });
         services.AddMemoryCache();
         services.AddRedisCache();
         services.AddTheaWeb();
         services.AddPassport();
-        services.AddTheaLogging();
+        //services.AddTheaLogging();
         services.AddTheaAuthentication(f =>
         {
             f.Issuer = "thea";
@@ -73,8 +73,7 @@ public static class Startup
         });
 
         services.AddTheaWeb();
-        services.AddPassport();
-        services.AddTheaLogging();
+        services.AddPassport(); 
         services.AddMessageDriven();
         services.AddSingleton<StatefulConsumer>();
 

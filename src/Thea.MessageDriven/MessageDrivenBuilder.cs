@@ -24,9 +24,9 @@ public class MessageDrivenBuilder
         this.messageDriven.UseRepository(new TRepository());
         return this;
     }
-    public MessageDrivenBuilder UseProducer(string clusterId)
+    public MessageDrivenBuilder UseProducer(params string[] clusterIds)
     {
-        this.messageDriven.UseProducer(clusterId);
+        this.messageDriven.UseProducer(clusterIds);
         return this;
     }
     public MessageDrivenBuilder UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumerHandler, int iSacCount)
