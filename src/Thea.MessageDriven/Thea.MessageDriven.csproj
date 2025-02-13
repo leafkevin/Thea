@@ -20,6 +20,7 @@
 		<SignAssembly>true</SignAssembly>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
 		<None Remove="mds.sql" />

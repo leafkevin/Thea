@@ -163,7 +163,6 @@ class RabbitConsumer
                         var body = message.Body.ToString();
                         var parameters = TheaJsonSerializer.Deserialize(body, this.messageType);
                         await this.consumerHandler.Invoke(parameters);
-                        Console.WriteLine($"消费者消费， RoutingKey: {message.RoutingKey}, Queue: {this.QueueName}");
                         break;
                     }
                     catch (Exception ex)

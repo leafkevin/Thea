@@ -72,12 +72,16 @@ class MessageDrivenService : IMessageDriven
                             this.SendHeartbeat();
                         this.lastInitedTime = DateTime.Now;
                     }
-                    //经过1.5个心跳后，根据前面获取的最新配置信息和最新服务器信息，启动本AppId下的所有消费者                    
-                    if (DateTime.Now - this.lastUpdatedTime > this.heartbeatCycle * 1.5)
+                    //经过1.5个心跳后，根据前面获取的最新配置信息和最新服务器信息，启动本AppId下的所有消费者
+                    if (this.hasConsumer)
                     {
-                        if (this.hasConsumer) this.StartConsumers();
-                        this.lastUpdatedTime = DateTime.Now;
+                        if (DateTime.Now - this.lastUpdatedTime > this.heartbeatCycle * 1.5)
+                        {
+                            this.StartConsumers();
+                            this.lastUpdatedTime = DateTime.Now;
+                        }
                     }
+
                     if ((DateTime.Now - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
                         || logs.Count >= 100)
                     {
@@ -103,12 +107,11 @@ class MessageDrivenService : IMessageDriven
 
                                     if (cluster.IsStateful)
                                     {
-                                        int routingKey = 0;
+                                        uint routingKey = 0;
                                         if (cluster.WorkloadTotal > 1)
                                         {
-                                            var hashKey = HashCode.Combine(message.RoutingKey);
-                                            routingKey = hashKey % cluster.WorkloadTotal;
-                                            if (routingKey < 0) routingKey += cluster.WorkloadTotal;
+                                            var hashKey = Farmhash.Hash32(message.RoutingKey);
+                                            routingKey = (uint)(hashKey % cluster.WorkloadTotal);
                                             message.RoutingKey = routingKey.ToString();
                                         }
                                         this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
