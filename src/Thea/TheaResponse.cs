@@ -21,7 +21,7 @@ public class TheaResponse : TheaResponse<object>
             Message = message
         };
     }
-    public static TheaResponse Fail(int code, string message, object data = null)
+    public static TheaResponse Fail(int code, string message = null, object data = null)
     {
         return new TheaResponse
         {

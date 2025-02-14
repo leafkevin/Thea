@@ -1,14 +1,13 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Primitives;
-using Microsoft.Net.Http.Headers;
-using System;
+﻿using System;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using System.Web;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using Thea.Logging;
 
 namespace Thea.Web;
@@ -17,12 +16,14 @@ public class TheaWebMiddleware
 {
     private readonly RequestDelegate next;
     private readonly IConfiguration configuation;
+    private readonly IResponseFilter responseFilter;
     private readonly ILogger<TheaWebMiddleware> logger;
 
-    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseFilter responseFilter, ILogger<TheaWebMiddleware> logger)
     {
         this.next = next;
         this.configuation = configuation;
+        this.responseFilter = responseFilter;
         this.logger = logger;
     }
 
@@ -34,7 +35,7 @@ public class TheaWebMiddleware
         using (this.logger.BeginScope(logScope))
         {
             using var memoryStream = new MemoryStream();
-            Exception excepition = null;
+            Exception exception = null;
             try
             {
                 context.Response.Body = memoryStream;
@@ -42,11 +43,30 @@ public class TheaWebMiddleware
             }
             catch (Exception ex)
             {
-                excepition = ex.InnerException ?? ex;
+                exception = ex.InnerException ?? ex;
+                logEntityInfo.Exception = exception;
             }
-            var response = await this.ReadBody(memoryStream);
-            response = this.ProcessCustomResponse(context, response, excepition, logEntityInfo);
+            var response = await this.responseFilter.ProcessRequest(context, memoryStream, exception);
             context.Response.Body = originalStream;
+            if (exception != null)
+            {
+                logEntityInfo.StatusCode = context.Response.StatusCode;
+                logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
+                logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
+            }
+            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
+            if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
+            {
+                logEntityInfo.Authorization = authorization.ToString();
+                if (context.User != null)
+                {
+                    var passport = context.User.ToPassport();
+                    logEntityInfo.UserId = passport.UserId;
+                    logEntityInfo.UserName = passport.UserName;
+                    logEntityInfo.AppId = this.configuation["AppId"];
+                    logEntityInfo.TenantId = passport.TenantId;
+                }
+            }
             await context.Response.WriteAsync(response);
             this.logger.LogEntity(logEntityInfo);
         }
@@ -54,12 +74,12 @@ public class TheaWebMiddleware
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
         var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
-        if (context.Request.Headers.TryGetValue("TraceId", out StringValues traceIds))
+        if (context.Request.Headers.TryGetValue("TraceId", out var traceIds))
         {
             var traceId = traceIds.ToString();
             context.TraceIdentifier = traceId;
             logEntityInfo.TraceId = traceId;
-            if (context.Request.Headers.TryGetValue("Sequence", out StringValues sequence))
+            if (context.Request.Headers.TryGetValue("Sequence", out var sequence))
                 logEntityInfo.Sequence = int.Parse(sequence.ToString());
         }
         else
@@ -69,7 +89,7 @@ public class TheaWebMiddleware
             context.Request.Headers.Append("TraceId", new StringValues(logEntityInfo.TraceId));
             context.Request.Headers.Append("Sequence", new StringValues(logEntityInfo.Sequence.ToString()));
         }
-        if (context.Request.Headers.TryGetValue("Tag", out StringValues tag))
+        if (context.Request.Headers.TryGetValue("Tag", out var tag))
             logEntityInfo.Tag = tag.ToString();
 
         logEntityInfo.Host = GetHost();
@@ -113,73 +133,6 @@ public class TheaWebMiddleware
         var result = await reader.ReadToEndAsync();
         stream.Position = 0;
         return result;
-    }
-    private string ProcessCustomResponse(HttpContext context, string originalResponse, Exception excepition, LogEntity logEntityInfo)
-    {
-        var response = originalResponse;
-        logEntityInfo.StatusCode = context.Response.StatusCode;
-        if (excepition != null && logEntityInfo.StatusCode != 500)
-            logEntityInfo.StatusCode = 500;
-        logEntityInfo.Body = $"Request finished. Status code: {logEntityInfo.StatusCode}";
-        switch (context.Response.StatusCode)
-        {
-            case 401:
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "application/json;charset=utf-8";
-                response = TheaResponse.Fail(logEntityInfo.StatusCode, "未授权，请登陆后重试！").ToJson();
-                break;
-            case 403:
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "application/json;charset=utf-8";
-                response = TheaResponse.Fail(logEntityInfo.StatusCode, "没有权限访问该服务！").ToJson();
-                break;
-            case 404:
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "application/json;charset=utf-8";
-                response = TheaResponse.Fail(logEntityInfo.StatusCode, "未找到服务！").ToJson();
-                break;
-            case 500:
-            case 502:
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "application/json;charset=utf-8";
-                response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.ToString()).ToJson();
-                logEntityInfo.Exception = excepition;
-                logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
-                break;
-        }
-        if (excepition != null)
-        {
-            context.Response.Clear();
-            context.Response.StatusCode = 200;
-            context.Response.ContentType = "application/json;charset=utf-8";
-            context.Response.OnStarting(state =>
-            {
-                var response = (HttpResponse)state;
-                response.Headers[HeaderNames.CacheControl] = "no-cache";
-                response.Headers[HeaderNames.Pragma] = "no-cache";
-                response.Headers[HeaderNames.Expires] = "-1";
-                response.Headers.Remove(HeaderNames.ETag);
-                return Task.CompletedTask;
-            }, context.Response);
-            response = TheaResponse.Fail(logEntityInfo.StatusCode, "服务器内部错误，Detail:" + excepition.Message.ToString()).ToJson();
-            logEntityInfo.Exception = excepition;
-            logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
-        }
-        if (context.Request.Headers.TryGetValue("Authorization", out StringValues authorization))
-        {
-            logEntityInfo.Authorization = authorization.ToString();
-            if (context.User != null)
-            {
-                var passport = context.User.ToPassport();
-                logEntityInfo.UserId = passport.UserId;
-                logEntityInfo.UserName = passport.UserName;
-                logEntityInfo.AppId = this.configuation["AppId"] ?? context.User.FindFirst("client_id")?.Value;
-                logEntityInfo.TenantId = passport.TenantId;
-            }
-        }
-        logEntityInfo.Response = response;
-        logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
-        return response;
     }
     private static string GetHost()
     {

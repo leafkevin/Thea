@@ -1,7 +1,7 @@
-﻿using Microsoft.Extensions.Configuration;
-using StackExchange.Redis;
-using System;
+﻿using System;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using StackExchange.Redis;
 
 namespace Thea.Cache;
 
@@ -111,7 +111,14 @@ public class RedisCache : IDistributedCache
         var result = await database.StringIncrementAsync(key);
         return result;
     }
-    public async Task RemoveCache(string key)
+    public void Remove(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentNullException(key);
+        var database = connectionPool.GetDatabase(this.databaseIndex);
+        database.KeyDelete(key);
+    }
+    public async Task RemoveAsync(string key)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);

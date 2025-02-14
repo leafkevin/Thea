@@ -1,12 +1,12 @@
-﻿using IdentityModel;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using IdentityModel;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Thea.Auth;
 
@@ -49,10 +49,11 @@ class TheaJwtTokenService : IJwtTokenService
         var sessionId = ObjectId.NewId();
         var claims = new List<Claim>()
         {
-            new Claim(JwtClaimTypes.Subject, userToken.UserId),
             new Claim(JwtClaimTypes.SessionId, sessionId)
         };
         //可选数据
+        if (!string.IsNullOrEmpty(userToken.Account))
+            claims.Add(new Claim(JwtClaimTypes.Subject, userToken.UserId));
         if (!string.IsNullOrEmpty(userToken.Account))
             claims.Add(new Claim("acc", userToken.Account));
         if (!string.IsNullOrEmpty(userToken.UserName))

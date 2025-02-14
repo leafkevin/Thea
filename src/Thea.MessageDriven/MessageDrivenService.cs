@@ -69,7 +69,7 @@ class MessageDrivenService : IMessageDriven
                     {
                         await this.Initialize();
                         if (this.hasConsumer)
-                            this.SendHeartbeat();
+                            await this.SendHeartbeat();
                         this.lastInitedTime = DateTime.Now;
                     }
                     //经过1.5个心跳后，根据前面获取的最新配置信息和最新服务器信息，启动本AppId下的所有消费者
@@ -96,7 +96,7 @@ class MessageDrivenService : IMessageDriven
                         switch (message.Type)
                         {
                             case MessageType.Message:
-                                this.rabbitProducer ??= new RabbitProducer(this, this.serviceProvider);
+                                this.rabbitProducer ??= await RabbitProducer.Create(this, this.serviceProvider);
                                 if (message.ScheduleTimeUtc.HasValue)
                                     this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, message.ToJson());
                                 else
@@ -114,9 +114,9 @@ class MessageDrivenService : IMessageDriven
                                             routingKey = (uint)(hashKey % cluster.WorkloadTotal);
                                             message.RoutingKey = routingKey.ToString();
                                         }
-                                        this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
+                                        await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
                                     }
-                                    else this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
+                                    else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
                                 }
                                 break;
                             case MessageType.Heartbeat:
@@ -160,16 +160,16 @@ class MessageDrivenService : IMessageDriven
             }
         }, this.cancellationSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
-    public void Start()
+    public async Task Start()
     {
-        this.Register().Wait();
+        await this.Register();
         this.nodeHeartbeats.TryAdd(this.NodeId, DateTime.Now);
         this.readyToStart.Set();
     }
-    public void Shutdown()
+    public async Task Shutdown()
     {
         this.cancellationSource.Cancel();
-        this.rabbitProducer.Shutdown();
+        await this.rabbitProducer.Shutdown();
         foreach (var rabbitConsumers in this.consumers.Values)
             rabbitConsumers.ForEach(f => f.Shutdown());
         this.consumers.Clear();
@@ -386,14 +386,14 @@ class MessageDrivenService : IMessageDriven
         if (registerClusters.Count > 0)
             await this.repository.Register(registerClusters);
 
-        this.rabbitProducer = new RabbitProducer(this, this.serviceProvider);
+        this.rabbitProducer = await RabbitProducer.Create(this, this.serviceProvider);
 
         //没有消费者，什么都不做，也不创建
         if (!this.hasConsumer) return;
-        this.rabbitProducer.CreateExchange("heartbeat", "fanout");
+        await this.rabbitProducer.CreateExchange("heartbeat", "fanout");
         var queueName = $"heartbeat.{this.NodeId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true, typeof(string));
-        this.heartbeatRabbitConsumer.Start();
+        await this.heartbeatRabbitConsumer.Start();
 
         //创建信箱和队列
         foreach (var cluster in this.localClusters)
@@ -402,25 +402,25 @@ class MessageDrivenService : IMessageDriven
                 continue;
 
             var exchange = cluster.ClusterId;
-            rabbitProducer.CreateExchange(exchange, cluster.BindType, cluster.IsDelay);
+            await rabbitProducer.CreateExchange(exchange, cluster.BindType, cluster.IsDelay);
             Console.WriteLine($"ClusterId: {exchange}, BindType: {cluster.BindType}");
             if (cluster.IsStateful)
             {
                 for (int i = 0; i < cluster.WorkloadTotal; i++)
                 {
                     queueName = $"{cluster.Queue}.{i}";
-                    this.rabbitProducer.CreateQueue(queueName, cluster.IsSac, false);
-                    this.rabbitProducer.BindQueue(exchange, queueName, i.ToString());
+                    await this.rabbitProducer.CreateQueue(queueName, cluster.IsSac, false);
+                    await this.rabbitProducer.BindQueue(exchange, queueName, i.ToString());
                     Console.WriteLine($"ClusterId: {exchange}, BindingKey: {i}, Queue: {queueName}");
                 }
             }
             else
             {
-                this.rabbitProducer.CreateQueue(cluster.Queue, false, false);
-                this.rabbitProducer.BindQueue(exchange, cluster.Queue, "#");
+                await this.rabbitProducer.CreateQueue(cluster.Queue, false, false);
+                await this.rabbitProducer.BindQueue(exchange, cluster.Queue, "#");
             }
         }
-        this.SendHeartbeat();
+        await this.SendHeartbeat();
     }
     private async Task Initialize()
     {
@@ -441,18 +441,17 @@ class MessageDrivenService : IMessageDriven
         }
         this.localClusters = newClusters;
     }
-    private void SendHeartbeat()
+    private async Task SendHeartbeat()
     {
-        var message = new Message
+        await this.rabbitProducer.Publish("heartbeat", this.NodeId, new Message
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Heartbeat,
             AppId = this.AppId,
             Body = this.NodeId
-        };
-        this.rabbitProducer.Publish("heartbeat", this.NodeId, message.ToJson());
+        }.ToJson());
     }
-    private void StartConsumers()
+    private async void StartConsumers()
     {
         var nodeIds = new List<string>();
         var removedKeys = new List<string>();
@@ -498,8 +497,8 @@ class MessageDrivenService : IMessageDriven
                     for (int k = oldWorkloadTotal; k < myCluster.WorkloadTotal; k++)
                     {
                         var queueName = $"{myCluster.Queue}.{k}";
-                        this.rabbitProducer.CreateQueue(queueName, true, false);
-                        this.rabbitProducer.BindQueue(myCluster.ClusterId, queueName, k.ToString());
+                        await this.rabbitProducer.CreateQueue(queueName, true, false);
+                        await this.rabbitProducer.BindQueue(myCluster.ClusterId, queueName, k.ToString());
                     }
                 }
                 if (myCluster.WorkloadTotal < oldCluster.WorkloadTotal)
@@ -549,7 +548,7 @@ class MessageDrivenService : IMessageDriven
                             case ChangeType.None:
                             default:
                                 var bindingKey = j.ToString();
-                                myRabbitConsumer.Start();
+                                await myRabbitConsumer.Start();
                                 break;
                         }
                     }
@@ -570,7 +569,7 @@ class MessageDrivenService : IMessageDriven
                                 Type = MessageType.WaitForStart,
                                 Body = myQueueName
                             };
-                            this.rabbitProducer.Publish(clusterId, routingKey, message.ToJson());
+                            await this.rabbitProducer.Publish(clusterId, routingKey, message.ToJson());
                         }
                     }
                 }
@@ -596,7 +595,7 @@ class MessageDrivenService : IMessageDriven
                                     Type = MessageType.WaitForShutdown,
                                     Body = queueName
                                 };
-                                this.rabbitProducer.Publish(clusterId, routingKey, message.ToJson());
+                                await this.rabbitProducer.Publish(clusterId, routingKey, message.ToJson());
                                 break;
                             case ChangeType.BindingChanged:
                                 // TODO:暂时不处理这两种情况
@@ -640,7 +639,7 @@ class MessageDrivenService : IMessageDriven
                 {
                     var myRabbitConsumer = new RabbitConsumer(clusterId, myCluster.Queue, this, this.serviceProvider, false, parameterType, handler) { IsLogEnabled = myCluster.IsLogEnabled };
                     rabbitConsumers.Add(myRabbitConsumer);
-                    myRabbitConsumer.Start();
+                    await myRabbitConsumer.Start();
                 }
             }
             else if (needCount < existedCount)

@@ -21,7 +21,7 @@ class RabbitConsumer
     private Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
     private volatile IConnection connection = null;
-    private volatile IModel channel = null;
+    private volatile IChannel channel = null;
     private string connectionId;
     private bool isHeartbeat = false;
     private Type messageType;
@@ -78,63 +78,56 @@ class RabbitConsumer
             }
         };
     }
-    public void Start()
+    public async Task Start()
     {
         if (this.IsRunning || this.IsStarted) return;
-
-        this.connection = this.factory.CreateConnection(this.connectionId);
-        this.channel = this.connection.CreateModel();
+        this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
+        this.channel = await this.connection.CreateChannelAsync();
         if (this.isHeartbeat)
         {
-            this.channel.QueueDeclare(this.QueueName, false, true, false);
-            this.channel.QueueBind(this.QueueName, "heartbeat", "#");
+            await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
+            await this.channel.QueueBindAsync(this.QueueName, "heartbeat", "#");
         }
 
         ushort prefetchCount = 20;
-        this.channel.BasicQos(0, prefetchCount, false);
-        this.channel.BasicRecoverOk += (o, e) =>
-        {
-            var model = o as IModel;
-            model.BasicQos(0, prefetchCount, false);
-        };
-        this.BindHandler(this.channel);
+        await this.channel.BasicQosAsync(0, prefetchCount, false);
+        //this.channel.BasicRecoverOk += (o, e) =>
+        //{
+        //    var model = o as IModel;
+        //    model.BasicQos(0, prefetchCount, false);
+        //};
+        await this.BindHandler(this.channel);
         this.IsStarted = true;
     }
-    public void RemoveQueue()
+    public async Task RemoveQueue()
     {
         if (this.channel != null)
-            channel.QueueDelete(this.QueueName);
+            await channel.QueueDeleteAsync(this.QueueName);
     }
-    public void Shutdown()
+    public async void Shutdown()
     {
         this.cancellationSource.Cancel();
         if (this.IsRunning) this.isDeferClose = true;
-        else this.Close();
+        else await this.Close();
     }
-    private void Close()
+    private async Task Close()
     {
         if (this.channel != null)
         {
-            channel.Close();
+            await channel.CloseAsync();
             this.channel = null;
         }
         if (this.connection != null)
         {
-            this.connection.Close();
+            await this.connection.CloseAsync();
             this.connection = null;
         }
         this.cancellationSource.Dispose();
     }
-    public void EnsureAvailable()
+    private async Task BindHandler(IChannel channel)
     {
-        if (this.IsAvailable) return;
-        this.Shutdown();
-        this.Start();
-    }
-    private void BindHandler(IModel channel)
-    {
-        var consumer = new EventingBasicConsumer(channel);
-        consumer.Received += async (model, ea) =>
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (model, ea) =>
         {
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
@@ -211,12 +204,12 @@ class RabbitConsumer
                     waiter.Task.Wait();
                 }
             }
-            channel.BasicAck(ea.DeliveryTag, false);
+            await channel.BasicAckAsync(ea.DeliveryTag, false);
 
             //再延迟停止
             if (this.isDeferClose)
-                this.Close();
+                await this.Close();
         };
-        channel.BasicConsume(this.QueueName, false, consumer);
+        await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
 }
