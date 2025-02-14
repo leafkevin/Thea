@@ -25,13 +25,8 @@ public class DefaultRepository : IMessageDrivenRepository
         var result = new List<Cluster>();
         foreach (var clusterId in clusterIds)
         {
-            var cacheKey = $"mds.cluster.{clusterId}";
-            var myCluster = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
-            {
-                var repository = this.dbFactory.Create(this.dbKey);
-                return await repository.QueryFirstAsync<Cluster>(f => clusterIds.Contains(f.ClusterId));
-            });
-            result.Add(myCluster);
+            var myCluster = await this.GetCluster(clusterId);
+            if (myCluster != null) result.Add(myCluster);
         }
         return result;
     }
@@ -49,5 +44,14 @@ public class DefaultRepository : IMessageDrivenRepository
     {
         var repository = this.dbFactory.CreateRepository(this.dbKey);
         await repository.CreateAsync<ExecLog>(logInfos);
+    }
+    public async Task<Cluster> GetCluster(string clusterId)
+    {
+        var cacheKey = $"mds.cluster.{clusterId}";
+        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        {
+            var repository = this.dbFactory.Create(this.dbKey);
+            return await repository.QueryFirstAsync<Cluster>(f => f.ClusterId == clusterId);
+        });
     }
 }

@@ -12,7 +12,7 @@ namespace Thea.Auth;
 
 public static class TheaExtensions
 {
-    public static void AddTheaAuthentication(this IServiceCollection services, Action<JwtTokenOptions> optionsInitializer)
+    public static void AddTheaAuthentication(this IServiceCollection services, Action<JwtTokenOptions> optionsInitializer, bool isUseRoleResourceAuth = false)
     {
         var tokenOptions = new JwtTokenOptions();
         optionsInitializer?.Invoke(tokenOptions);
@@ -38,12 +38,14 @@ public static class TheaExtensions
                 };
                 options.SaveToken = true;
             });
-        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        if (isUseRoleResourceAuth)
+            services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
     }
-    public static IApplicationBuilder UseTheaJwt(this IApplicationBuilder app, IConfiguration configuration)
+    public static IApplicationBuilder UseRoleResourceAuth(this IApplicationBuilder app, IConfiguration configuration)
     {
         var dbKey = configuration.GetValue<string>("Authorization:DbKey");
         var dbFactory = app.ApplicationServices.GetService<IOrmDbFactory>();
+        if (dbFactory == null) throw new Exception("请先注册Trolley组件");
         dbFactory.Configure<ModelConfiguration>(dbKey);
         dbFactory.Build();
         return app;
