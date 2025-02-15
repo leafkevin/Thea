@@ -5,8 +5,8 @@ namespace Thea.MessageDriven;
 
 public interface IMessageDriven
 {
-    Task Start();
-    Task Shutdown();
+    void Start();
+    void Shutdown();
 
     void Publish<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true);
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true);

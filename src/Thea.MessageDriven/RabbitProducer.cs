@@ -11,9 +11,10 @@ namespace Thea.MessageDriven;
 
 class RabbitProducer : IDisposable
 {
+    private static BasicProperties properties = new BasicProperties { Persistent = true };
     private IConnection connection;
-    private ConcurrentDictionary<int, ProducerChannel> channels;
-    private BlockingCollection<ProducerChannel> channelQueue;
+    private ConcurrentDictionary<int, IChannel> channels;
+    private BlockingCollection<IChannel> channelQueue;
 
     public static async Task<RabbitProducer> Create(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 10)
     {
@@ -38,11 +39,11 @@ class RabbitProducer : IDisposable
             }
         };
         var connection = await factory.CreateConnectionAsync(connectionId);
-        var channels = new ConcurrentDictionary<int, ProducerChannel>();
-        var channelQueue = new BlockingCollection<ProducerChannel>();
+        var channels = new ConcurrentDictionary<int, IChannel>();
+        var channelQueue = new BlockingCollection<IChannel>();
         for (int i = 0; i < channelSize; i++)
         {
-            var channel = await ProducerChannel.Create(connection);
+            var channel = await connection.CreateChannelAsync();
             channels.TryAdd(i, channel);
             channelQueue.Add(channel);
         }
@@ -56,33 +57,44 @@ class RabbitProducer : IDisposable
     public async Task CreateExchange(string exchangeName, string bindType, bool isDelay = false)
     {
         var channel = this.channelQueue.Take();
-        await channel.CreateExchange(exchangeName, bindType, isDelay);
+        Dictionary<string, object> arguments = null;
+        if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
+        await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
         this.channelQueue.Add(channel);
     }
     public async Task CreateQueue(string queueName, bool isSac, bool isHeartbeat)
     {
         var channel = this.channelQueue.Take();
-        await channel.CreateQueue(queueName, isSac, isHeartbeat);
+        IDictionary<string, object> arguments = null;
+        if (isSac) arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
+        if (isHeartbeat) await channel.QueueDeclareAsync(queueName, false, true, false, arguments);
+        else await channel.QueueDeclareAsync(queueName, true, false, false, arguments);
         this.channelQueue.Add(channel);
     }
     public async Task BindQueue(string exchange, string queueName, string bindingKey)
     {
         var channel = this.channelQueue.Take();
-        await channel.BindQueue(exchange, queueName, bindingKey);
+        await channel.QueueBindAsync(queueName, exchange, bindingKey);
         this.channelQueue.Add(channel);
     }
     public async Task Publish(string exchange, string routingKey, string message)
     {
         var channel = this.channelQueue.Take();
         var body = Encoding.UTF8.GetBytes(message);
-        await channel.Publish(exchange, routingKey, body);
+        await channel.BasicPublishAsync(exchange, routingKey, true, properties, body);
         this.channelQueue.Add(channel);
     }
-    public void Schedule(string exchange, string routingKey, DateTime scheduleTimeUtc, string message)
+    public async void Schedule(string exchange, string routingKey, DateTime scheduleTimeUtc, string message)
     {
         var channel = this.channelQueue.Take();
         var body = Encoding.UTF8.GetBytes(message);
-        channel.Schedule(exchange, routingKey, scheduleTimeUtc, body);
+        var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
+        var properties = new BasicProperties
+        {
+            Persistent = true,
+            Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } }
+        };
+        await channel.BasicPublishAsync(exchange, routingKey, true, properties, body);
         this.channelQueue.Add(channel);
     }
     public async Task Shutdown()
@@ -90,7 +102,7 @@ class RabbitProducer : IDisposable
         if (this.channels != null && this.channels.Count > 0)
         {
             foreach (var channel in this.channels.Values)
-                await channel.Close();
+                await channel.CloseAsync();
             this.channels.Clear();
         }
         this.channels = null;
@@ -102,43 +114,4 @@ class RabbitProducer : IDisposable
         this.connection = null;
     }
     public void Dispose() => this.Shutdown().Wait();
-}
-class ProducerChannel
-{
-    private BasicProperties properties;
-    public IChannel Channel { get; private set; }
-    public static async Task<ProducerChannel> Create(IConnection connection)
-    {
-        var channel = await connection.CreateChannelAsync();
-        var properties = new BasicProperties { Persistent = true };
-        return new ProducerChannel() { Channel = channel, properties = properties };
-    }
-    public async Task CreateExchange(string exchangeName, string bindType, bool isDelay)
-    {
-        Dictionary<string, object> arguments = null;
-        if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
-        await this.Channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
-    }
-    public async Task CreateQueue(string queueName, bool isSac, bool isHeartbeat)
-    {
-        IDictionary<string, object> arguments = null;
-        if (isSac) arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-        if (isHeartbeat) await this.Channel.QueueDeclareAsync(queueName, false, true, false, arguments);
-        else await this.Channel.QueueDeclareAsync(queueName, true, false, false, arguments);
-    }
-    public async Task BindQueue(string exchange, string queueName, string bindingKey)
-        => await this.Channel.QueueBindAsync(queueName, exchange, bindingKey);
-    public async Task Publish(string exchange, string routingKey, byte[] message)
-        => await this.Channel.BasicPublishAsync(exchange, routingKey, true, this.properties, message);
-    public void Schedule(string exchange, string routingKey, DateTime scheduleTimeUtc, byte[] message)
-    {
-        var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } }
-        };
-        this.Channel.BasicPublishAsync(exchange, routingKey, true, properties, message);
-    }
-    public async Task Close() => await this.Channel.CloseAsync();
 }

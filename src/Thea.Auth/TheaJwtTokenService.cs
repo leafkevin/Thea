@@ -47,12 +47,9 @@ class TheaJwtTokenService : IJwtTokenService
     protected List<Claim> BuildClaims(UserToken userToken)
     {
         var sessionId = ObjectId.NewId();
-        var claims = new List<Claim>()
-        {
-            new Claim(JwtClaimTypes.SessionId, sessionId)
-        };
+        var claims = new List<Claim>() { new Claim(JwtClaimTypes.SessionId, sessionId) };
         //可选数据
-        if (!string.IsNullOrEmpty(userToken.Account))
+        if (!string.IsNullOrEmpty(userToken.UserId))
             claims.Add(new Claim(JwtClaimTypes.Subject, userToken.UserId));
         if (!string.IsNullOrEmpty(userToken.Account))
             claims.Add(new Claim("acc", userToken.Account));

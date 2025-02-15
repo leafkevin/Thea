@@ -160,16 +160,16 @@ class MessageDrivenService : IMessageDriven
             }
         }, this.cancellationSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
-    public async Task Start()
+    public void Start()
     {
-        await this.Register();
+        this.Register().Wait();
         this.nodeHeartbeats.TryAdd(this.NodeId, DateTime.Now);
         this.readyToStart.Set();
     }
-    public async Task Shutdown()
+    public void Shutdown()
     {
         this.cancellationSource.Cancel();
-        await this.rabbitProducer.Shutdown();
+        this.rabbitProducer.Shutdown().Wait();
         foreach (var rabbitConsumers in this.consumers.Values)
             rabbitConsumers.ForEach(f => f.Shutdown());
         this.consumers.Clear();
