@@ -7,5 +7,5 @@ namespace Thea.Web;
 
 public interface IResponseFilter
 {
-    Task<string> ProcessRequest(HttpContext context, Stream readableStrem, Exception exception);
+    Task<string> ProcessRequest(HttpContext context, Stream readableStream, Exception exception);
 }

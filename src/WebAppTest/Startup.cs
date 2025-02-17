@@ -64,9 +64,9 @@ public static class Startup
         {
             f.UseTrolleyRepository("default");
             f.UseProducer("award.take", true);
-            f.UseSubscriber<string>("cache.refresh", "cache.refresh.queue",
-                key => { memoryCache.Remove(key); return Task.CompletedTask; })
-            .UseStatefulConsumer<StatefulConsumer>("award.take", f => f.TakeAward)
+            //f.UseSubscriber<string>("cache.refresh", "cache.refresh.queue",
+            //    key => { memoryCache.Remove(key); return Task.CompletedTask; })
+            f.UseStatefulConsumer<StatefulConsumer>("award.take", f => f.TakeAward)
             .UseStatefulConsumer<StatefulConsumer>("award.issue", f => f.IssueAward);
         });
     }

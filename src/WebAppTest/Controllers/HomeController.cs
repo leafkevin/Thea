@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System;
 using System.Threading.Tasks;
 using Thea;
 using Thea.MessageDriven;
@@ -58,8 +59,9 @@ namespace WebAppTest.Controllers
         [HttpPost]
         public async Task<TheaResponse> TakeAward(string awardId)
         {
-            await this.messageDriven.PublishAsync("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
-            return TheaResponse.Succeed("ok");
+            var result = await this.messageDriven.RequestAsync("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
+            Console.WriteLine($"rpc.result:{result}");
+            return TheaResponse.Succeed(result);
         }
     }
 }

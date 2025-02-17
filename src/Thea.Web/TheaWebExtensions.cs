@@ -29,6 +29,7 @@ public static class TheaWebExtensions
         services.AddTransient<HttpMessageHandlerBuilder, TheaHttpMessageHandlerBuilder>();
         services.AddTransient<ProxyHttpMessageHandlerBuilder>();
         services.AddTransient<TheaHttpMessageHandler>();
+        services.AddSingleton<IResponseFilter, DefaultResponseFilter>();
         return services;
     }
     public static IApplicationBuilder UseTheaWeb(this IApplicationBuilder app)

@@ -21,17 +21,16 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
     private readonly ConcurrentDictionary<string, WaitForStartMessage> waitingStartConsumers = new();
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitingShutdownConsumers = new();
-    private readonly ConcurrentDictionary<string, (Type, Delegate)> consumerHandlers = new();
+    private readonly ConcurrentDictionary<string, MethodInfo> consumerHandlers = new();
     private readonly ConcurrentDictionary<string, DateTime> nodeHeartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
     private bool hasConsumer = false;
     private bool isUseRpc = false;
-    private List<string> rpcClusterIds = new();
     private List<Cluster> localClusters = new();
     private List<Cluster> lastClusters = null;
-    private RabbitProducer rabbitProducer;
+    internal RabbitProducer rabbitProducer;
     private RabbitConsumer heartbeatRabbitConsumer;
     private RabbitConsumer resultRabbitConsumer;
 
@@ -43,6 +42,7 @@ class MessageDrivenService : IMessageDriven
     private DateTime lastUpdatedTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
     private int sacCount = 3;
+    internal List<string> RpcClusterIds { get; private set; } = new();
     public string AppId { get; private set; }
     public string NodeId { get; private set; }
 
@@ -211,13 +211,13 @@ class MessageDrivenService : IMessageDriven
             throw new Exception($"未知的交换机{exchange}，请先注册集群:{exchange}，使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
-        if (!this.rpcClusterIds.Contains(exchange))
+        if (!this.RpcClusterIds.Contains(exchange))
             throw new Exception($"当前集群{exchange}并没有配置RPC模式，考虑调用方法：UseProducer(clusterId, true)");
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
             AppId = this.AppId,
-            Type = MessageType.RpcMessage,
+            Type = MessageType.Message,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -233,13 +233,13 @@ class MessageDrivenService : IMessageDriven
             throw new Exception($"未知的交换机{exchange}，请先注册集群:{exchange}，使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
-        if (!this.rpcClusterIds.Contains(exchange))
+        if (!this.RpcClusterIds.Contains(exchange))
             throw new Exception($"当前集群{exchange}并没有配置RPC模式，考虑调用方法：UseProducer(clusterId, true)");
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
             AppId = this.AppId,
-            Type = MessageType.RpcMessage,
+            Type = MessageType.Message,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -307,26 +307,51 @@ class MessageDrivenService : IMessageDriven
         if (isUseRpc)
         {
             this.isUseRpc = true;
-            if (!this.rpcClusterIds.Contains(clusterId))
-                this.rpcClusterIds.Add(clusterId);
+            if (!this.RpcClusterIds.Contains(clusterId))
+                this.RpcClusterIds.Add(clusterId);
         }
     }
-    public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
-    {
-        this.hasConsumer = true;
-        var parametersType = typeof(TParameters);
-        if (this.isUseRpc && this.rpcClusterIds.Contains(clusterId))
-        {
-            Func<TParameters, Task<object>> consumerHandler = message => (Task<object>)consumer.DynamicInvoke(message);
-            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
-        }
-        else
-        {
-            Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
-            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
-        }
+    //public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
+    //{
+    //    this.hasConsumer = true;
+    //    var parametersType = typeof(TParameters);
+    //    if (this.isUseRpc && this.RpcClusterIds.Contains(clusterId))
+    //    {        
+    //        Func<TParameters, Task<object>> consumerHandler = message => (Task<object>)consumer.DynamicInvoke(message);
+    //        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+    //    }
+    //    else
+    //    {
+    //        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
+    //        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+    //    }
 
-        if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
+    //    if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
+    //    {
+    //        this.localClusters.Add(new Cluster
+    //        {
+    //            ClusterId = clusterId,
+    //            ClusterName = clusterId,
+    //            Exchange = clusterId,
+    //            IsStateful = true,
+    //            BindType = "topic",
+    //            IsSac = true,
+    //            IsDelay = false,
+    //            Queue = $"{clusterId}.queue",
+    //            PrefetchCount = 250,
+    //            WorkloadTotal = 2,
+    //            IsEnabled = true,
+    //            IsLogEnabled = false,
+    //            UpdatedAt = DateTime.Now
+    //        });
+    //    }
+    //}
+    public void UseStatefulConsumer(string clusterId, MethodInfo methodInfo)
+    {
+        this.hasConsumer = true;
+        this.consumerHandlers.TryAdd(clusterId, methodInfo);
+        var myCluster = this.localClusters.Find(f => f.ClusterId == clusterId);
+        if (myCluster == null)
         {
             this.localClusters.Add(new Cluster
             {
@@ -344,90 +369,51 @@ class MessageDrivenService : IMessageDriven
                 IsLogEnabled = false,
                 UpdatedAt = DateTime.Now
             });
-        }
-    }
-    public void UseStatefulConsumer(string clusterId, object target, MethodInfo methodInfo)
-    {
-        this.hasConsumer = true;
-        var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
-        var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
-        if (this.isUseRpc && this.rpcClusterIds.Contains(clusterId))
-        {
-            Func<object, Task<object>> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-            await methodExecutor.ExecuteAsync(target, [message]) : message => Task.FromResult(methodExecutor.Execute(target, [message]));
-            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
         }
         else
         {
-            Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-            await methodExecutor.ExecuteAsync(target, [message]) : message =>
-            {
-                methodExecutor.Execute(target, [message]);
-                return Task.CompletedTask;
-            };
-            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
-        }
-        if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
-        {
-            this.localClusters.Add(new Cluster
-            {
-                ClusterId = clusterId,
-                ClusterName = clusterId,
-                Exchange = clusterId,
-                IsStateful = true,
-                BindType = "topic",
-                IsSac = true,
-                IsDelay = false,
-                Queue = $"{clusterId}.queue",
-                PrefetchCount = 250,
-                WorkloadTotal = 2,
-                IsEnabled = true,
-                IsLogEnabled = false,
-                UpdatedAt = DateTime.Now
-            });
+            myCluster.IsStateful = true;
+            myCluster.BindType = "topic";
+            myCluster.IsSac = true;
+            myCluster.Queue = $"{clusterId}.queue";
+            myCluster.PrefetchCount = 250;
+            myCluster.WorkloadTotal = 2;
         }
     }
-    public void UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
+    //public void UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
+    //{
+    //    this.hasConsumer = true;
+    //    //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中，订阅者是默认是# topic
+    //    Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
+    //    this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (typeof(TParameters), consumerHandler));
+    //    if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
+    //    {
+    //        this.localClusters.Add(new Cluster
+    //        {
+    //            ClusterId = clusterId,
+    //            ClusterName = clusterId,
+    //            Exchange = clusterId,
+    //            IsStateful = false,
+    //            BindType = isDelay ? "x-delayed-message" : "topic",
+    //            BindingKey = routingKey,
+    //            IsSac = false,
+    //            IsDelay = isDelay,
+    //            Queue = queue,
+    //            PrefetchCount = 5,
+    //            WorkloadTotal = 2,
+    //            IsEnabled = true,
+    //            IsLogEnabled = false,
+    //            UpdatedAt = DateTime.Now
+    //        });
+    //    }
+    //}
+    public void UseSubscriber(string clusterId, string queue, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
     {
         this.hasConsumer = true;
-        //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中，订阅者是默认是# topic
-        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
-        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (typeof(TParameters), consumerHandler));
-        if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
-        {
-            this.localClusters.Add(new Cluster
-            {
-                ClusterId = clusterId,
-                ClusterName = clusterId,
-                Exchange = clusterId,
-                IsStateful = false,
-                BindType = isDelay ? "x-delayed-message" : "topic",
-                BindingKey = routingKey,
-                IsSac = false,
-                IsDelay = isDelay,
-                Queue = queue,
-                PrefetchCount = 5,
-                WorkloadTotal = 2,
-                IsEnabled = true,
-                IsLogEnabled = false,
-                UpdatedAt = DateTime.Now
-            });
-        }
-    }
-    public void UseSubscriber(string clusterId, string queue, object target, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
-    {
-        this.hasConsumer = true;
-        var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
-        var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
-        Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-            await methodExecutor.ExecuteAsync(target, [message]) : message =>
-            {
-                methodExecutor.Execute(target, [message]);
-                return Task.CompletedTask;
-            };
+        this.consumerHandlers.TryAdd(clusterId, methodInfo);
         //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中
-        this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (parametersType, consumerHandler));
-        if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
+        var myCluster = this.localClusters.Find(f => f.ClusterId == clusterId);
+        if (myCluster == null)
         {
             this.localClusters.Add(new Cluster
             {
@@ -446,6 +432,13 @@ class MessageDrivenService : IMessageDriven
                 IsLogEnabled = false,
                 UpdatedAt = DateTime.Now
             });
+        }
+        else
+        {
+            myCluster.BindType = isDelay ? "x-delayed-message" : "topic";
+            myCluster.Queue = queue;
+            myCluster.PrefetchCount = 5;
+            myCluster.WorkloadTotal = 2;
         }
     }
 
@@ -480,21 +473,15 @@ class MessageDrivenService : IMessageDriven
         if (!this.hasConsumer) return;
         await this.rabbitProducer.CreateExchange("heartbeat", "topic");
         var queueName = $"heartbeat.{this.NodeId}";
-        this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true, typeof(string));
+        this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true);
         await this.heartbeatRabbitConsumer.Start("heartbeat", "#");
         if (this.isUseRpc)
         {
-            queueName = $"rpcResult.{this.NodeId}";
-            await this.rabbitProducer.CreateExchange("rpc", "topic");
-            this.resultRabbitConsumer = new RabbitConsumer("rpc", queueName, this, this.serviceProvider, true, typeof(string), orgMessage =>
-            {
-                var json = orgMessage as string;
-                var message = json.JsonTo<Message<string>>();
-                if (this.rpcWaiters.TryRemove(message.MessageId, out var rpcWaiter))
-                    rpcWaiter.Waiter.TrySetResult(message.Body);
-                return Task.CompletedTask;
-            });
-            await this.resultRabbitConsumer.Start("rpcResult", this.NodeId);
+            var exchange = "rpc.result";
+            queueName = $"rpc.result.{this.NodeId}";
+            await this.rabbitProducer.CreateExchange(exchange, "topic");
+            this.resultRabbitConsumer = new RabbitConsumer(exchange, queueName, this, this.serviceProvider, true);
+            await this.resultRabbitConsumer.Start(exchange, this.NodeId);
         }
 
         //创建信箱和队列
@@ -632,8 +619,8 @@ class MessageDrivenService : IMessageDriven
                 {
                     for (int k = 0; k < needCount - existedCount; k++)
                     {
-                        (var parameterType, var handler) = ((Type, Func<object, Task>))this.consumerHandlers[clusterId];
-                        var myRabbitConsumer = new RabbitConsumer(clusterId, queueName, this, this.serviceProvider, false, parameterType, handler) { IsLogEnabled = myCluster.IsLogEnabled };
+                        var methodInfo = this.consumerHandlers[clusterId];
+                        var myRabbitConsumer = new RabbitConsumer(clusterId, queueName, this, this.serviceProvider, false, methodInfo) { IsLogEnabled = myCluster.IsLogEnabled };
                         rabbitConsumers.Add(myRabbitConsumer);
                         //不管是第一次还是已经存在了，新增本节点，都直接启动，因为有已经存在的消费者在消费了
                         switch (changeType)
@@ -735,11 +722,11 @@ class MessageDrivenService : IMessageDriven
             if (needCount > existedCount)
             {
                 var handlerKey = $"{clusterId}-{myCluster.Queue}";
-                (var parameterType, var handler) = ((Type, Func<object, Task>))this.consumerHandlers[handlerKey];
+                var methodInfo = this.consumerHandlers[handlerKey];
 
                 for (int k = 0; k < needCount - existedCount; k++)
                 {
-                    var myRabbitConsumer = new RabbitConsumer(clusterId, myCluster.Queue, this, this.serviceProvider, false, parameterType, handler) { IsLogEnabled = myCluster.IsLogEnabled };
+                    var myRabbitConsumer = new RabbitConsumer(clusterId, myCluster.Queue, this, this.serviceProvider, false, methodInfo) { IsLogEnabled = myCluster.IsLogEnabled };
                     rabbitConsumers.Add(myRabbitConsumer);
                     await myRabbitConsumer.Start();
                 }
@@ -755,5 +742,10 @@ class MessageDrivenService : IMessageDriven
                 }
             }
         }
+    }
+    internal void Next(string messageId, string result)
+    {
+        if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
+            rpcWaiter.Waiter.TrySetResult(result);
     }
 }

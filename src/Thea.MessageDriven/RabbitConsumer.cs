@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,8 +26,9 @@ class RabbitConsumer
     private volatile IChannel channel = null;
     private string connectionId;
     private bool isExclusive = false;
+    private bool isRpc = false;
     private Type messageType;
-    public Func<object, Task> consumerHandler;
+    private Delegate consumerHandler;
 
     public volatile bool IsRunning = false;
     public volatile bool IsStarted = false;
@@ -35,18 +38,7 @@ class RabbitConsumer
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
 
-    public bool IsAvailable
-    {
-        get
-        {
-            if (this.connection == null) return false;
-            if (!this.connection.IsOpen) return false;
-            if (this.channel != null && this.channel.IsClosed)
-                return false;
-            return true;
-        }
-    }
-    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isExclusive, Type messageType, Func<object, Task> consumerHandler = null)
+    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isExclusive, MethodInfo consumerInvoker = null)
     {
         this.parent = parent;
         this.ClusterId = clusterId;
@@ -60,8 +52,26 @@ class RabbitConsumer
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
         this.isExclusive = isExclusive;
-        this.messageType = messageType;
-        this.consumerHandler = consumerHandler;
+        this.isRpc = parent.RpcClusterIds.Contains(clusterId);
+        if (consumerInvoker != null)
+        {
+            var targetType = consumerInvoker.DeclaringType;
+            var target = serviceProvider.GetService(targetType);
+            var methodExecutor = ObjectMethodExecutor.Create(consumerInvoker, targetType.GetTypeInfo());
+            this.messageType = consumerInvoker.GetParameters().FirstOrDefault().ParameterType;
+            if (this.isRpc)
+            {
+                Func<object, Task<object>> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+                    await methodExecutor.ExecuteAsync(target, [message]) : message => Task.FromResult(methodExecutor.Execute(target, [message]));
+                this.consumerHandler = consumerHandler;
+            }
+            else
+            {
+                Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+                    await methodExecutor.ExecuteAsync(target, [message]) : message => { methodExecutor.Execute(target, [message]); return Task.CompletedTask; };
+                this.consumerHandler = consumerHandler;
+            }
+        }
 
         this.factory = new ConnectionFactory
         {
@@ -152,7 +162,7 @@ class RabbitConsumer
             Exception exception = null;
             bool isSuccess = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            var message = jsonBody.JsonTo<Message>();
+            var message = jsonBody.JsonTo<Message<string>>();
             //兼容现非框架队列消息
             if (message.MessageId == null)
             {
@@ -168,9 +178,25 @@ class RabbitConsumer
                     {
                         try
                         {
-                            var body = message.Body.ToString();
-                            var parameters = TheaJsonSerializer.Deserialize(body, this.messageType);
-                            await this.consumerHandler.Invoke(parameters);
+                            var parameters = TheaJsonSerializer.Deserialize(message.Body, this.messageType);
+                            if (this.isRpc)
+                            {
+                                var handler = (Func<object, Task<object>>)this.consumerHandler;
+                                var rpcResult = await handler.Invoke(parameters);
+                                var rpcMessage = new Message
+                                {
+                                    MessageId = message.MessageId,
+                                    Type = MessageType.RpcMessage,
+                                    AppId = this.parent.AppId,
+                                    Body = rpcResult.ToJson()
+                                };
+                                await this.parent.rabbitProducer.Publish("rpc.result", this.parent.NodeId, rpcMessage.ToJson());
+                            }
+                            else
+                            {
+                                var handler = (Func<object, Task>)this.consumerHandler;
+                                await handler.Invoke(parameters);
+                            }
                             break;
                         }
                         catch (Exception ex)
@@ -204,7 +230,7 @@ class RabbitConsumer
                     if (!isSuccess) throw exception;
                     break;
                 case MessageType.RpcMessage:
-                    await this.consumerHandler.Invoke(message.Body.ToString());
+                    this.parent.Next(message.MessageId, message.Body);
                     break;
                 default:
                     if (message.AppId == this.parent.AppId)
