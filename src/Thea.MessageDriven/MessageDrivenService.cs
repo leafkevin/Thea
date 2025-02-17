@@ -21,15 +21,20 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
     private readonly ConcurrentDictionary<string, WaitForStartMessage> waitingStartConsumers = new();
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitingShutdownConsumers = new();
+    private readonly ConcurrentDictionary<string, (Type, Delegate)> consumerHandlers = new();
     private readonly ConcurrentDictionary<string, DateTime> nodeHeartbeats = new();
+    private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
     private bool hasConsumer = false;
+    private bool isUseRpc = false;
+    private List<string> rpcClusterIds = new();
     private List<Cluster> localClusters = new();
     private List<Cluster> lastClusters = null;
     private RabbitProducer rabbitProducer;
     private RabbitConsumer heartbeatRabbitConsumer;
-    private readonly ConcurrentDictionary<string, (Type, Delegate)> consumerHandlers = new();
+    private RabbitConsumer resultRabbitConsumer;
+
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
 
@@ -96,9 +101,9 @@ class MessageDrivenService : IMessageDriven
                         switch (message.Type)
                         {
                             case MessageType.Message:
-                                this.rabbitProducer ??= await RabbitProducer.Create(this, this.serviceProvider);
+                                var theaMessage = new { message.MessageId, message.Type, message.AppId, message.Body };
                                 if (message.ScheduleTimeUtc.HasValue)
-                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, message.ToJson());
+                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, theaMessage.ToJson());
                                 else
                                 {
                                     var cluster = this.localClusters.Find(f => f.ClusterId == message.Exchange);
@@ -114,9 +119,9 @@ class MessageDrivenService : IMessageDriven
                                             routingKey = (uint)(hashKey % cluster.WorkloadTotal);
                                             message.RoutingKey = routingKey.ToString();
                                         }
-                                        await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
+                                        await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
                                     }
-                                    else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
+                                    else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
                                 }
                                 break;
                             case MessageType.Heartbeat:
@@ -178,7 +183,7 @@ class MessageDrivenService : IMessageDriven
             this.task.Wait();
         this.cancellationSource.Dispose();
     }
-    public void Publish<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true)
+    public void Publish<TMessage>(string exchange, string routingKey, TMessage message)
     {
         if (!this.localClusters.Exists(f => f.ClusterId == exchange))
             throw new Exception($"未知的交换机{exchange}，请先注册集群:{exchange}，使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
@@ -189,17 +194,62 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             AppId = this.AppId,
+            Type = MessageType.Message,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
         });
     }
-    public Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, bool isTheaMessage = true)
+    public Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message)
     {
-        this.Publish(exchange, routingKey, message, isTheaMessage);
+        this.Publish(exchange, routingKey, message);
         return Task.CompletedTask;
     }
-    public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, bool isTheaMessage = true)
+    public string Request<TMessage>(string exchange, string routingKey, TMessage message)
+    {
+        if (!this.localClusters.Exists(f => f.ClusterId == exchange))
+            throw new Exception($"未知的交换机{exchange}，请先注册集群:{exchange}，使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
+        if (message == null)
+            throw new ArgumentNullException(nameof(message));
+        if (!this.rpcClusterIds.Contains(exchange))
+            throw new Exception($"当前集群{exchange}并没有配置RPC模式，考虑调用方法：UseProducer(clusterId, true)");
+        var theaMessage = new Message
+        {
+            MessageId = ObjectId.NewId(),
+            AppId = this.AppId,
+            Type = MessageType.RpcMessage,
+            Exchange = exchange,
+            RoutingKey = routingKey,
+            Body = message.ToJson()
+        };
+        var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId };
+        this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
+        this.messageQueue.Enqueue(theaMessage);
+        return rpcWaiter.Waiter.Task.Result;
+    }
+    public async Task<string> RequestAsync<TMessage>(string exchange, string routingKey, TMessage message)
+    {
+        if (!this.localClusters.Exists(f => f.ClusterId == exchange))
+            throw new Exception($"未知的交换机{exchange}，请先注册集群:{exchange}，使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
+        if (message == null)
+            throw new ArgumentNullException(nameof(message));
+        if (!this.rpcClusterIds.Contains(exchange))
+            throw new Exception($"当前集群{exchange}并没有配置RPC模式，考虑调用方法：UseProducer(clusterId, true)");
+        var theaMessage = new Message
+        {
+            MessageId = ObjectId.NewId(),
+            AppId = this.AppId,
+            Type = MessageType.RpcMessage,
+            Exchange = exchange,
+            RoutingKey = routingKey,
+            Body = message.ToJson()
+        };
+        var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId };
+        this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
+        this.messageQueue.Enqueue(theaMessage);
+        return await rpcWaiter.Waiter.Task;
+    }
+    public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc)
     {
         if (enqueueTimeUtc < DateTime.UtcNow)
             throw new Exception($"只能选择未来时间");
@@ -215,15 +265,16 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             AppId = this.AppId,
+            Type = MessageType.Message,
             Exchange = exchange,
             RoutingKey = routingKey,
             ScheduleTimeUtc = enqueueTimeUtc,
             Body = message.ToJson()
         });
     }
-    public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, bool isTheaMessage = true)
+    public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc)
     {
-        this.Schedule(exchange, routingKey, message, enqueueTimeUtc, isTheaMessage);
+        this.Schedule(exchange, routingKey, message, enqueueTimeUtc);
         return Task.CompletedTask;
     }
     public void UseProducer(params string[] clusterIds)
@@ -239,6 +290,25 @@ class MessageDrivenService : IMessageDriven
                 Exchange = clusterId,
                 IsEnabled = true
             });
+        }
+    }
+    public void UseProducer(string clusterId, bool isUseRpc)
+    {
+        if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
+        {
+            this.localClusters.Add(new Cluster
+            {
+                ClusterId = clusterId,
+                ClusterName = clusterId,
+                Exchange = clusterId,
+                IsEnabled = true
+            });
+        }
+        if (isUseRpc)
+        {
+            this.isUseRpc = true;
+            if (!this.rpcClusterIds.Contains(clusterId))
+                this.rpcClusterIds.Add(clusterId);
         }
     }
     public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
@@ -390,10 +460,24 @@ class MessageDrivenService : IMessageDriven
 
         //没有消费者，什么都不做，也不创建
         if (!this.hasConsumer) return;
-        await this.rabbitProducer.CreateExchange("heartbeat", "fanout");
+        await this.rabbitProducer.CreateExchange("heartbeat", "topic");
         var queueName = $"heartbeat.{this.NodeId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true, typeof(string));
-        await this.heartbeatRabbitConsumer.Start();
+        await this.heartbeatRabbitConsumer.Start("heartbeat", "#");
+        if (this.isUseRpc)
+        {
+            queueName = $"rpcResult.{this.NodeId}";
+            await this.rabbitProducer.CreateExchange("rpc", "topic");
+            this.resultRabbitConsumer = new RabbitConsumer("rpc", queueName, this, this.serviceProvider, true, typeof(string), orgMessage =>
+            {
+                var json = orgMessage as string;
+                var message = json.JsonTo<Message<string>>();
+                if (this.rpcWaiters.TryRemove(message.MessageId, out var rpcWaiter))
+                    rpcWaiter.Waiter.TrySetResult(message.Body);
+                return Task.CompletedTask;
+            });
+            await this.resultRabbitConsumer.Start("rpcResult", this.NodeId);
+        }
 
         //创建信箱和队列
         foreach (var cluster in this.localClusters)

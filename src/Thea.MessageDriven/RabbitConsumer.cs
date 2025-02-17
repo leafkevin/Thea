@@ -23,7 +23,7 @@ class RabbitConsumer
     private volatile IConnection connection = null;
     private volatile IChannel channel = null;
     private string connectionId;
-    private bool isHeartbeat = false;
+    private bool isExclusive = false;
     private Type messageType;
     public Func<object, Task> consumerHandler;
 
@@ -46,7 +46,7 @@ class RabbitConsumer
             return true;
         }
     }
-    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isHeartbeat, Type messageType, Func<object, Task> consumerHandler = null)
+    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isExclusive, Type messageType, Func<object, Task> consumerHandler = null)
     {
         this.parent = parent;
         this.ClusterId = clusterId;
@@ -59,7 +59,7 @@ class RabbitConsumer
         var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
-        this.isHeartbeat = isHeartbeat;
+        this.isExclusive = isExclusive;
         this.messageType = messageType;
         this.consumerHandler = consumerHandler;
 
@@ -83,10 +83,25 @@ class RabbitConsumer
         if (this.IsRunning || this.IsStarted) return;
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
-        if (this.isHeartbeat)
+        ushort prefetchCount = 20;
+        await this.channel.BasicQosAsync(0, prefetchCount, false);
+        //this.channel.BasicRecoverOk += (o, e) =>
+        //{
+        //    var model = o as IModel;
+        //    model.BasicQos(0, prefetchCount, false);
+        //};
+        await this.BindHandler(this.channel);
+        this.IsStarted = true;
+    }
+    public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
+    {
+        if (this.IsRunning || this.IsStarted) return;
+        this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
+        this.channel = await this.connection.CreateChannelAsync();
+        if (this.isExclusive)
         {
             await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
-            await this.channel.QueueBindAsync(this.QueueName, "heartbeat", "#");
+            await this.channel.QueueBindAsync(this.QueueName, exclusiveExchange, exclusiveBindingKey);
         }
 
         ushort prefetchCount = 20;
@@ -136,7 +151,6 @@ class RabbitConsumer
             var iLoop = 0;
             Exception exception = null;
             bool isSuccess = true;
-
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message>();
             //兼容现非框架队列消息
@@ -147,62 +161,65 @@ class RabbitConsumer
                 message.Body = jsonBody;
             }
             //内部消息，交给消息总分发处处理
-            if (message.Type == MessageType.Message)
+            switch (message.Type)
             {
-                while (iLoop < 3)
-                {
-                    try
+                case MessageType.Message:
+                    while (iLoop < 3)
+                    {
+                        try
+                        {
+                            var body = message.Body.ToString();
+                            var parameters = TheaJsonSerializer.Deserialize(body, this.messageType);
+                            await this.consumerHandler.Invoke(parameters);
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            isSuccess = false;
+                            exception = ex.InnerException ?? ex;
+                        }
+                        iLoop++;
+                        Thread.Sleep(1000);
+                    }
+
+                    var result = isSuccess ? "success" : exception.ToString();
+                    var logInfo = new ExecLog
+                    {
+                        LogId = ObjectId.NewId(),
+                        ClusterId = this.ClusterId,
+                        RoutingKey = ea.RoutingKey,
+                        Queue = this.QueueName,
+                        Body = jsonBody,
+                        IsSuccess = isSuccess,
+                        Result = result,
+                        RetryTimes = iLoop,
+                        UpdatedAt = DateTime.Now,
+                        UpdatedBy = this.ConsumerId
+                    };
+                    if (this.IsLogEnabled || !isSuccess)
+                    {
+                        this.addLogsHandler.Invoke(logInfo);
+                        if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
+                    }
+                    if (!isSuccess) throw exception;
+                    break;
+                case MessageType.RpcMessage:
+                    await this.consumerHandler.Invoke(message.Body.ToString());
+                    break;
+                default:
+                    if (message.AppId == this.parent.AppId)
                     {
                         var body = message.Body.ToString();
-                        var parameters = TheaJsonSerializer.Deserialize(body, this.messageType);
-                        await this.consumerHandler.Invoke(parameters);
-                        break;
+                        var waiter = new TaskCompletionSource<bool>();
+                        this.parent.ProcessMessage(new Message
+                        {
+                            MessageId = message.MessageId,
+                            Type = message.Type,
+                            Body = (body, waiter)
+                        });
+                        waiter.Task.Wait();
                     }
-                    catch (Exception ex)
-                    {
-                        isSuccess = false;
-                        exception = ex.InnerException ?? ex;
-                    }
-                    iLoop++;
-                    Thread.Sleep(1000);
-                }
-
-                var result = isSuccess ? "success" : exception.ToString();
-                var logInfo = new ExecLog
-                {
-                    LogId = ObjectId.NewId(),
-                    ClusterId = this.ClusterId,
-                    RoutingKey = message.RoutingKey,
-                    Queue = this.QueueName,
-                    Body = jsonBody,
-                    IsSuccess = isSuccess,
-                    Result = result,
-                    RetryTimes = iLoop,
-                    UpdatedAt = DateTime.Now,
-                    UpdatedBy = this.ConsumerId
-                };
-                if (this.IsLogEnabled || !isSuccess)
-                {
-                    this.addLogsHandler.Invoke(logInfo);
-                    if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
-                }
-                if (!isSuccess)
-                    throw exception;
-            }
-            else
-            {
-                if (message.AppId == this.parent.AppId)
-                {
-                    var body = message.Body.ToString();
-                    var waiter = new TaskCompletionSource<bool>();
-                    this.parent.ProcessMessage(new Message
-                    {
-                        MessageId = message.MessageId,
-                        Type = message.Type,
-                        Body = (body, waiter)
-                    });
-                    waiter.Task.Wait();
-                }
+                    break;
             }
             await channel.BasicAckAsync(ea.DeliveryTag, false);
 
