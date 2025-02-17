@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Caching.Memory;
+using Thea.Cache;
 using Thea.MessageDriven;
 using Thea.MessageDriven.MySqlRepository;
 using Trolley;
@@ -14,6 +14,7 @@ builder.Services.AddSingleton(f =>
         .Build();
 });
 builder.Services.AddMessageDriven();
+builder.Services.AddRedisCache();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -31,7 +32,8 @@ if (app.Environment.IsDevelopment())
 app.UseMessageDriven(f =>
 {
     f.UseTrolleyRepository("default")
-    .UseProducer("cache.refresh", "award.take", "award.issue");
+    .UseProducer("cache.refresh", "award.take", "award.issue")
+    .UseProducer("award.take", true);
 });
 app.UseAuthorization();
 
