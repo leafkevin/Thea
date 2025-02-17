@@ -29,6 +29,11 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(clusterIds);
         return this;
     }
+    public MessageDrivenBuilder UseProducer(string clusterId, bool isUseRpc)
+    {
+        this.messageDriven.UseProducer(clusterId, isUseRpc);
+        return this;
+    }
     public MessageDrivenBuilder UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumerHandler, int iSacCount)
     {
         this.messageDriven.UseStatefulConsumer(clusterId, consumerHandler);

@@ -315,8 +315,17 @@ class MessageDrivenService : IMessageDriven
     {
         this.hasConsumer = true;
         var parametersType = typeof(TParameters);
-        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
-        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+        if (this.isUseRpc && this.rpcClusterIds.Contains(clusterId))
+        {
+            Func<TParameters, Task<object>> consumerHandler = message => (Task<object>)consumer.DynamicInvoke(message);
+            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+        }
+        else
+        {
+            Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
+            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+        }
+
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
             this.localClusters.Add(new Cluster
@@ -342,13 +351,22 @@ class MessageDrivenService : IMessageDriven
         this.hasConsumer = true;
         var parametersType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
         var methodExecutor = ObjectMethodExecutor.Create(methodInfo, target.GetType().GetTypeInfo());
-        Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+        if (this.isUseRpc && this.rpcClusterIds.Contains(clusterId))
+        {
+            Func<object, Task<object>> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+            await methodExecutor.ExecuteAsync(target, [message]) : message => Task.FromResult(methodExecutor.Execute(target, [message]));
+            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+        }
+        else
+        {
+            Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
             await methodExecutor.ExecuteAsync(target, [message]) : message =>
             {
                 methodExecutor.Execute(target, [message]);
                 return Task.CompletedTask;
             };
-        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+            this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
+        }
         if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
         {
             this.localClusters.Add(new Cluster

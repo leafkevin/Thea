@@ -29,33 +29,6 @@ public static class Startup
             return new OrmDbFactoryBuilder()
                 .Register(OrmProviderType.MySql, "default", connString, true)
                 .Configure<ModelConfiguration>(OrmProviderType.MySql)
-                //.UseInterceptors(df =>
-                //{
-                //    df.OnConnectionCreated += evt =>
-                //    {
-                //        Interlocked.Increment(ref connTotal);
-                //        Console.WriteLine($"{evt.ConnectionId} Created, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connTotal)}");
-                //    };
-                //    df.OnConnectionOpened += evt =>
-                //    {
-                //        Interlocked.Increment(ref connOpenTotal);
-                //        Console.WriteLine($"{evt.ConnectionId} Opened, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connOpenTotal)}");
-                //    };
-                //    df.OnConnectionClosed += evt =>
-                //    {
-                //        Interlocked.Decrement(ref connOpenTotal);
-                //        Interlocked.Decrement(ref connTotal);
-                //        Console.WriteLine($"{evt.ConnectionId} Closed, ConnectionString:{evt.ConnectionString}, Total:{Volatile.Read(ref connOpenTotal)}");
-                //    };
-                //    df.OnCommandExecuting += evt =>
-                //    {
-                //        Console.WriteLine($"{evt.SqlType} Begin, Sql: {evt.Sql}");
-                //    };
-                //    df.OnCommandExecuted += evt =>
-                //    {
-                //        Console.WriteLine($"{evt.SqlType} End, Elapsed: {evt.Elapsed} ms, Sql: {evt.Sql}");
-                //    };
-                //})
                 .Build();
         });
         services.AddMemoryCache();
@@ -73,7 +46,7 @@ public static class Startup
         });
 
         services.AddTheaWeb();
-        services.AddPassport(); 
+        services.AddPassport();
         services.AddMessageDriven();
         services.AddSingleton<StatefulConsumer>();
 
@@ -90,6 +63,7 @@ public static class Startup
         app.UseMessageDriven(f =>
         {
             f.UseTrolleyRepository("default");
+            f.UseProducer("award.take", true);
             f.UseSubscriber<string>("cache.refresh", "cache.refresh.queue",
                 key => { memoryCache.Remove(key); return Task.CompletedTask; })
             .UseStatefulConsumer<StatefulConsumer>("award.take", f => f.TakeAward)

@@ -18,11 +18,12 @@ public class HomeController : ControllerBase
     [HttpPost]
     public async Task<TheaResponse> PublishMessages()
     {
-        for (int i = 1; i < 100000000; i++)
+        for (int i = 1; i < 10; i++)
         {
             var message = $"message-{i}";
-            await this.messageDriven.PublishAsync("cache.refresh", "1", message);
-            await this.messageDriven.PublishAsync("award.take", "1", new { AwardId = message, Quantity = i % 5 });
+            //await this.messageDriven.PublishAsync("cache.refresh", "1", message);
+            var jsonResult = await this.messageDriven.RequestAsync("award.take", "1", new { AwardId = message, Quantity = i % 5 });
+            Console.WriteLine($"Rpc Result: {jsonResult}");
             Thread.Sleep(20);
         }
 
