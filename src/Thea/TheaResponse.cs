@@ -1,15 +1,13 @@
 ﻿namespace Thea;
 
-public class TheaResponse<T>
+public class TheaResponse
 {
+    private static readonly TheaResponse _success = new TheaResponse { IsSuccess = true };
     public bool IsSuccess { get; set; } = true;
     public int Code { get; set; }
     public string Message { get; set; }
-    public T Data { get; set; }
-}
-public class TheaResponse : TheaResponse<object>
-{
-    private static readonly TheaResponse _success = new TheaResponse { IsSuccess = true };
+    public object Data { get; set; }
+
     public static TheaResponse Success => _success;
     public static TheaResponse Succeed(object result, int code = 0, string message = null)
     {
@@ -32,4 +30,7 @@ public class TheaResponse : TheaResponse<object>
         };
     }
 }
-
+public class TheaResponse<TResult> : TheaResponse
+{
+    public new TResult Data { get; set; }
+}

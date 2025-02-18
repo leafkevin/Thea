@@ -70,6 +70,7 @@ public class RedisCache : IDistributedCache
         if (!this.TryGet<T>(key, out var result))
         {
             result = cacheGetter.Invoke();
+            if (result == null) return default;
             this.Set(key, result, lifetimeMinutes);
         }
         return result;
@@ -92,6 +93,7 @@ public class RedisCache : IDistributedCache
         if (redisValue.IsNull)
         {
             var value = await cacheGetter.Invoke();
+            if (value == null) return value;
             await this.SetAsync(key, value, lifetimeMinutes);
             return value;
         }

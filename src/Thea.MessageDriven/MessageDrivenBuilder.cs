@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Thea.MessageDriven;
@@ -34,11 +33,6 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(clusterId, isUseRpc);
         return this;
     }
-    //public MessageDrivenBuilder UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumerHandler, int iSacCount)
-    //{
-    //    this.messageDriven.UseStatefulConsumer(clusterId, consumerHandler);
-    //    return this;
-    //}
     public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
@@ -46,11 +40,6 @@ public class MessageDrivenBuilder
         this.messageDriven.UseStatefulConsumer(clusterId, methodInfo);
         return this;
     }
-    //public MessageDrivenBuilder UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumerHandler, string routingKey = "#", bool isDelay = false)
-    //{
-    //    this.messageDriven.UseSubscriber(clusterId, queue, consumerHandler, routingKey, isDelay);
-    //    return this;
-    //}
     public MessageDrivenBuilder UseSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();

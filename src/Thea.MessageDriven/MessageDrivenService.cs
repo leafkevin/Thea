@@ -319,41 +319,6 @@ class MessageDrivenService : IMessageDriven
                 this.RpcClusterIds.Add(clusterId);
         }
     }
-    //public void UseStatefulConsumer<TParameters>(string clusterId, Func<TParameters, Task> consumer)
-    //{
-    //    this.hasConsumer = true;
-    //    var parametersType = typeof(TParameters);
-    //    if (this.isUseRpc && this.RpcClusterIds.Contains(clusterId))
-    //    {        
-    //        Func<TParameters, Task<object>> consumerHandler = message => (Task<object>)consumer.DynamicInvoke(message);
-    //        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
-    //    }
-    //    else
-    //    {
-    //        Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
-    //        this.consumerHandlers.TryAdd(clusterId, (parametersType, consumerHandler));
-    //    }
-
-    //    if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
-    //    {
-    //        this.localClusters.Add(new Cluster
-    //        {
-    //            ClusterId = clusterId,
-    //            ClusterName = clusterId,
-    //            Exchange = clusterId,
-    //            IsStateful = true,
-    //            BindType = "topic",
-    //            IsSac = true,
-    //            IsDelay = false,
-    //            Queue = $"{clusterId}.queue",
-    //            PrefetchCount = 250,
-    //            WorkloadTotal = 2,
-    //            IsEnabled = true,
-    //            IsLogEnabled = false,
-    //            UpdatedAt = DateTime.Now
-    //        });
-    //    }
-    //}
     public void UseStatefulConsumer(string clusterId, MethodInfo methodInfo)
     {
         this.hasConsumer = true;
@@ -388,33 +353,6 @@ class MessageDrivenService : IMessageDriven
             myCluster.WorkloadTotal = 2;
         }
     }
-    //public void UseSubscriber<TParameters>(string clusterId, string queue, Func<TParameters, Task> consumer, string routingKey = "#", bool isDelay = false)
-    //{
-    //    this.hasConsumer = true;
-    //    //无状态队列，不同的队列不同的消费者，根据不同的routingKey路由到不同的队列中，订阅者是默认是# topic
-    //    Func<object, Task> consumerHandler = message => (Task)consumer.DynamicInvoke(message);
-    //    this.consumerHandlers.TryAdd($"{clusterId}-{queue}", (typeof(TParameters), consumerHandler));
-    //    if (!this.localClusters.Exists(f => f.ClusterId == clusterId))
-    //    {
-    //        this.localClusters.Add(new Cluster
-    //        {
-    //            ClusterId = clusterId,
-    //            ClusterName = clusterId,
-    //            Exchange = clusterId,
-    //            IsStateful = false,
-    //            BindType = isDelay ? "x-delayed-message" : "topic",
-    //            BindingKey = routingKey,
-    //            IsSac = false,
-    //            IsDelay = isDelay,
-    //            Queue = queue,
-    //            PrefetchCount = 5,
-    //            WorkloadTotal = 2,
-    //            IsEnabled = true,
-    //            IsLogEnabled = false,
-    //            UpdatedAt = DateTime.Now
-    //        });
-    //    }
-    //}
     public void UseSubscriber(string clusterId, string queue, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
     {
         this.hasConsumer = true;
@@ -458,6 +396,11 @@ class MessageDrivenService : IMessageDriven
         Body = logInfo
     });
     internal void ProcessMessage(Message message) => this.messageQueue.Enqueue(message);
+    internal void Next(string messageId, string result)
+    {
+        if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
+            rpcWaiter.Waiter.TrySetResult(result);
+    }
     private async Task Register()
     {
         var clusterIds = this.localClusters.Select(f => f.ClusterId).ToList();
@@ -750,11 +693,5 @@ class MessageDrivenService : IMessageDriven
                 }
             }
         }
-    }
-    internal void Next(string messageId, string result)
-    {
-        if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
-            rpcWaiter.Waiter.TrySetResult(result);
-        Console.WriteLine($"Next: {messageId}, {result}");
     }
 }
