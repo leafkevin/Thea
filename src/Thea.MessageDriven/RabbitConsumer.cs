@@ -44,7 +44,7 @@ class RabbitConsumer
         this.ClusterId = clusterId;
         this.ConsumerId = ObjectId.NewId();
         this.QueueName = queueName;
-        this.connectionId = $"{clusterId}-{queueName}-{parent.NodeId}";
+        this.connectionId = queueName;
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -171,77 +171,81 @@ class RabbitConsumer
                 message.Body = jsonBody;
             }
             //内部消息，交给消息总分发处处理
+            string result = "success";
             switch (message.Type)
             {
                 case MessageType.Message:
-                    while (iLoop < 3)
-                    {
-                        try
-                        {
-                            var parameters = TheaJsonSerializer.Deserialize(message.Body, this.messageType);
-                            if (this.isRpc)
-                            {
-                                var handler = (Func<object, Task<object>>)this.consumerHandler;
-                                var rpcResult = await handler.Invoke(parameters);
-                                var rpcMessage = new Message
-                                {
-                                    MessageId = message.MessageId,
-                                    Type = MessageType.RpcMessage,
-                                    AppId = this.parent.AppId,
-                                    Body = rpcResult.ToJson()
-                                };
-                                await this.parent.rabbitProducer.Publish("rpc.result", this.parent.NodeId, rpcMessage.ToJson());
-                            }
-                            else
-                            {
-                                var handler = (Func<object, Task>)this.consumerHandler;
-                                await handler.Invoke(parameters);
-                            }
-                            break;
-                        }
-                        catch (Exception ex)
-                        {
-                            isSuccess = false;
-                            exception = ex.InnerException ?? ex;
-                        }
-                        iLoop++;
-                        Thread.Sleep(1000);
-                    }
-
-                    var result = isSuccess ? "success" : exception.ToString();
-                    var logInfo = new ExecLog
-                    {
-                        LogId = ObjectId.NewId(),
-                        ClusterId = this.ClusterId,
-                        RoutingKey = ea.RoutingKey,
-                        Queue = this.QueueName,
-                        Body = jsonBody,
-                        IsSuccess = isSuccess,
-                        Result = result,
-                        RetryTimes = iLoop,
-                        UpdatedAt = DateTime.Now,
-                        UpdatedBy = this.ConsumerId
-                    };
-                    if (this.IsLogEnabled || !isSuccess)
-                    {
-                        this.addLogsHandler.Invoke(logInfo);
-                        if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
-                    }
-                    if (!isSuccess) throw exception;
-                    break;
                 case MessageType.RpcMessage:
+                    {
+                        while (iLoop < 3)
+                        {
+                            try
+                            {
+                                var parameters = TheaJsonSerializer.Deserialize(message.Body, this.messageType);
+                                if (message.Type == MessageType.RpcMessage)
+                                {
+                                    var typedHandler = (Func<object, Task<object>>)this.consumerHandler;
+                                    var rpcResult = await typedHandler.Invoke(parameters);
+                                    var rpcMessage = new Message
+                                    {
+                                        MessageId = message.MessageId,
+                                        Type = MessageType.RpcResponse,
+                                        AppId = this.parent.AppId,
+                                        Body = rpcResult.ToJson()
+                                    };
+                                    result += ", " + rpcResult.ToJson();
+                                    await this.parent.rabbitProducer.Publish("rpc.result", message.RoutingKey, rpcMessage.ToJson());
+                                    break;
+                                }
+                                else
+                                {
+                                    var typedHandler = (Func<object, Task>)this.consumerHandler;
+                                    await typedHandler.Invoke(parameters);
+                                }
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                isSuccess = false;
+                                exception = ex.InnerException ?? ex;
+                            }
+                            iLoop++;
+                            Thread.Sleep(1000);
+                        }
+                        if (!isSuccess) result = exception.ToString();
+                        var logInfo = new ExecLog
+                        {
+                            LogId = ObjectId.NewId(),
+                            ClusterId = this.ClusterId,
+                            RoutingKey = ea.RoutingKey,
+                            Queue = this.QueueName,
+                            Body = jsonBody,
+                            IsSuccess = isSuccess,
+                            Result = result,
+                            RetryTimes = iLoop,
+                            UpdatedAt = DateTime.Now,
+                            UpdatedBy = this.ConsumerId
+                        };
+                        if (this.IsLogEnabled || !isSuccess)
+                        {
+                            this.addLogsHandler.Invoke(logInfo);
+                            if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
+                        }
+                        if (!isSuccess) throw exception;
+                    }
+                    break;
+                case MessageType.RpcResponse:
                     this.parent.Next(message.MessageId, message.Body);
                     break;
                 default:
                     if (message.AppId == this.parent.AppId)
                     {
-                        var body = message.Body.ToString();
                         var waiter = new TaskCompletionSource<bool>();
                         this.parent.ProcessMessage(new Message
                         {
                             MessageId = message.MessageId,
                             Type = message.Type,
-                            Body = (body, waiter)
+                            Body = (message.Body, waiter)
                         });
                         waiter.Task.Wait();
                     }

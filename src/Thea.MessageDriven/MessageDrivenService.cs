@@ -101,7 +101,15 @@ class MessageDrivenService : IMessageDriven
                         switch (message.Type)
                         {
                             case MessageType.Message:
-                                var theaMessage = new { message.MessageId, message.Type, message.AppId, message.Body };
+                            case MessageType.RpcMessage:
+                                var theaMessage = new
+                                {
+                                    message.MessageId,
+                                    message.Type,
+                                    message.AppId,
+                                    RoutingKey = message.Type == MessageType.RpcMessage ? this.NodeId : message.RoutingKey,
+                                    message.Body
+                                };
                                 if (message.ScheduleTimeUtc.HasValue)
                                     this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, theaMessage.ToJson());
                                 else
@@ -117,13 +125,13 @@ class MessageDrivenService : IMessageDriven
                                         {
                                             var hashKey = Farmhash.Hash32(message.RoutingKey);
                                             routingKey = (uint)(hashKey % cluster.WorkloadTotal);
-                                            message.RoutingKey = routingKey.ToString();
                                         }
-                                        await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
+                                        await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), theaMessage.ToJson());
                                     }
                                     else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
                                 }
                                 break;
+
                             case MessageType.Heartbeat:
                                 //统一处理心跳，可防止并发
                                 (var nodeId, waiter) = ((string, TaskCompletionSource<bool>))message.Body;
@@ -217,7 +225,7 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             AppId = this.AppId,
-            Type = MessageType.Message,
+            Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -239,7 +247,7 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             AppId = this.AppId,
-            Type = MessageType.Message,
+            Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -468,21 +476,21 @@ class MessageDrivenService : IMessageDriven
             await this.repository.Register(registerClusters);
 
         this.rabbitProducer = await RabbitProducer.Create(this, this.serviceProvider);
+        if (this.isUseRpc)
+        {
+            var exchange = "rpc.result";
+            var rpcQueueName = $"rpc.result.{this.NodeId}";
+            await this.rabbitProducer.CreateExchange(exchange, "topic");
+            this.resultRabbitConsumer = new RabbitConsumer(exchange, rpcQueueName, this, this.serviceProvider, true);
+            await this.resultRabbitConsumer.Start(exchange, this.NodeId);
+        }
 
         //没有消费者，什么都不做，也不创建
         if (!this.hasConsumer) return;
         await this.rabbitProducer.CreateExchange("heartbeat", "topic");
-        var queueName = $"heartbeat.{this.NodeId}";
+        var queueName = $"heartbeat.queue.{this.NodeId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer("heartbeat", queueName, this, this.serviceProvider, true);
         await this.heartbeatRabbitConsumer.Start("heartbeat", "#");
-        if (this.isUseRpc)
-        {
-            var exchange = "rpc.result";
-            queueName = $"rpc.result.{this.NodeId}";
-            await this.rabbitProducer.CreateExchange(exchange, "topic");
-            this.resultRabbitConsumer = new RabbitConsumer(exchange, queueName, this, this.serviceProvider, true);
-            await this.resultRabbitConsumer.Start(exchange, this.NodeId);
-        }
 
         //创建信箱和队列
         foreach (var cluster in this.localClusters)
@@ -747,5 +755,6 @@ class MessageDrivenService : IMessageDriven
     {
         if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
             rpcWaiter.Waiter.TrySetResult(result);
+        Console.WriteLine($"Next: {messageId}, {result}");
     }
 }

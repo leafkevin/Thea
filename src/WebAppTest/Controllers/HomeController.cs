@@ -61,7 +61,7 @@ namespace WebAppTest.Controllers
         {
             var result = await this.messageDriven.RequestAsync("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
             Console.WriteLine($"rpc.result:{result}");
-            return TheaResponse.Succeed(result);
+            return TheaResponse.Succeed(result.JsonTo<AwardInfo>());
         }
     }
 }

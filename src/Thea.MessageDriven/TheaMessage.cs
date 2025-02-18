@@ -8,6 +8,7 @@ enum MessageType
 {
     Message,
     RpcMessage,
+    RpcResponse,
     Heartbeat,
     WaitForStart,
     WaitForShutdown,
@@ -35,6 +36,7 @@ class Message<TBody>
     public string MessageId { get; set; }
     public string AppId { get; set; }
     public MessageType Type { get; set; }
+    public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }
     public TBody Body { get; set; }
 }
