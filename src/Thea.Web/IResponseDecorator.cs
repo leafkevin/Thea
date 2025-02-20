@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace Thea.Web;
 
-public interface IResponseFilter
+public interface IResponseDecorator
 {
     Task<string> ProcessRequest(HttpContext context, Stream readableStream, Exception exception);
 }

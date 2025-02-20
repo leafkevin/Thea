@@ -1,11 +1,11 @@
-﻿using IdentityModel;
+﻿using System;
+using System.Security.Cryptography;
+using Duende.IdentityModel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using System;
-using System.Security.Cryptography;
 using Trolley;
 
 namespace Thea.Auth;

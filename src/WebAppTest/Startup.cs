@@ -1,13 +1,10 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using System;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Thea.Auth;
 using Thea.Cache;
-using Thea.Logging;
 using Thea.MessageDriven;
 using Thea.MessageDriven.MySqlRepository;
 using Thea.Web;
@@ -18,9 +15,6 @@ namespace WebAppTest.Domain;
 
 public static class Startup
 {
-    private static int connTotal = 0;
-    private static int connOpenTotal = 0;
-
     public static void AddDomainServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton(f =>

@@ -6,9 +6,9 @@ using Microsoft.Net.Http.Headers;
 
 namespace Thea.Web;
 
-class DefaultResponseFilter : IResponseFilter
+class DefaultResponseDecorator : IResponseDecorator
 {
-    public async Task<string> ProcessRequest(HttpContext context, Stream readableStrem, Exception exception)
+    public async Task<string> ProcessRequest(HttpContext context, Stream readableStream, Exception exception)
     {
         string jsonResponse = null;
         TheaResponse response = null;
@@ -46,7 +46,7 @@ class DefaultResponseFilter : IResponseFilter
                 response = TheaResponse.Fail(statusCode, "网关错误！");
                 break;
             case 200:
-                jsonResponse = await this.ReadBody(readableStrem);
+                jsonResponse = await this.ReadBody(readableStream);
                 if (!string.IsNullOrEmpty(jsonResponse))
                     response = jsonResponse.JsonTo<TheaResponse>();
                 else response = TheaResponse.Success;

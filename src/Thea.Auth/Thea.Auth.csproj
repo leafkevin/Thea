@@ -22,11 +22,11 @@
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 	</PropertyGroup>
 	<ItemGroup>
+		<PackageReference Include="Duende.IdentityModel" Version="7.0.0" />
 		<PackageReference Include="Microsoft.SourceLink.GitLab" Version="8.0.0">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="IdentityModel" Version="7.0.0" />
 		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.13" />
 		<PackageReference Include="Microsoft.AspNetCore.Authorization" Version="8.0.13" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="9.0.2" />

@@ -57,20 +57,13 @@ public sealed class TheaHttpMessageHandler : DelegatingHandler
         {
             if (TheaLogScope.Current != null)
             {
-                TheaLogScope.Current.State.Sequence++;
-
                 request.Headers.Add("TraceId", TheaLogScope.Current.State.TraceId);
-                request.Headers.Add("Sequence", TheaLogScope.Current.State.Sequence.ToString());
                 if (!string.IsNullOrEmpty(TheaLogScope.Current.State.Tag))
                     request.Headers.Add("Tag", TheaLogScope.Current.State.Tag);
             }
             else
             {
-                request.Headers.Add("TraceId", context.TraceIdentifier.Replace(":", "-"));
-                int sequence = 2;
-                if (context.Request.Headers.TryGetValue("Sequence", out var sequences))
-                    sequence = int.Parse(sequences.ToString()) + 1;
-                request.Headers.Add("Sequence", sequence.ToString());
+                request.Headers.Add("TraceId", context.TraceIdentifier);
                 if (context.Request.Headers.TryGetValue("Tag", out var tag))
                     request.Headers.Add("Tag", tag.ToString());
             }

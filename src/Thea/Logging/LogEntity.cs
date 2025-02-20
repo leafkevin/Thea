@@ -6,14 +6,12 @@ public class LogEntity
 {
     public string Id { get; set; }
     public string TraceId { get; set; }
-    public int Sequence { get; set; } = 1;
+    public string AppId { get; set; }
     public int LogLevel { get; set; }
     public int ApiType { get; set; }
     public string ApiUrl { get; set; }
     public string ClientIp { get; set; }
     public string Host { get; set; }
-    public string Source { get; set; }
-    public string AppId { get; set; }
     public string Parameters { get; set; }
 
     public string UserId { get; set; }

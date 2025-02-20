@@ -59,7 +59,7 @@ public static class TheaHttpExtensions
             return null;
         if (context.Request.Headers.TryGetValue("TraceId", out var traceId))
             return traceId.ToString();
-        return context.TraceIdentifier.Replace(":", "-");
+        return context.TraceIdentifier;
     }
     public static string GetClientIp(this HttpContext context)
     {

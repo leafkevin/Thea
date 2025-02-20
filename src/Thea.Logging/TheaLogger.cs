@@ -15,8 +15,7 @@ public class TheaLogger : ILogger
     private readonly string name;
     private readonly string appId;
     private readonly LogLevel logLevel;
-    private readonly LogLevel microsoftLogLevel;
-    private readonly LogLevel systemLogLevel;
+    private readonly LogLevel aspnetLogLevel;
     private readonly ILoggerProcessor processor;
 
     public TheaLogger(string name, IConfiguration configuration, ILoggerProcessor processor)
@@ -24,8 +23,7 @@ public class TheaLogger : ILogger
         if (name == null) throw new ArgumentNullException(nameof(name));
         this.appId = configuration["AppId"];
         this.logLevel = configuration.GetValue("Logging:LogLevel:Default", LogLevel.Information);
-        this.systemLogLevel = configuration.GetValue("Logging:LogLevel:System", LogLevel.Error);
-        this.microsoftLogLevel = configuration.GetValue("Logging:LogLevel:Microsoft", LogLevel.Error);
+        this.aspnetLogLevel = configuration.GetValue("Logging:LogLevel:Microsoft.AspNetCore", LogLevel.Error);
         if (appId == null) throw new ArgumentNullException(nameof(appId));
         this.name = name;
         this.processor = processor;
@@ -63,14 +61,16 @@ public class TheaLogger : ILogger
                 logEntityInfo.TraceId = TheaLogScope.Current.State.TraceId;
             if (string.IsNullOrEmpty(logEntityInfo.Tag))
                 logEntityInfo.Tag = TheaLogScope.Current.State.Tag;
-
-            logEntityInfo.Sequence = TheaLogScope.Current.State.Sequence;
-            TheaLogScope.Current.State.Sequence++;
         }
         this.processor.Execute(logEntityInfo);
     }
 
-    public bool IsEnabled(LogLevel logLevel) => logLevel >= this.logLevel;
+    public bool IsEnabled(LogLevel logLevel)
+    {
+        if (this.name.Contains("Microsoft.AspNetCore") && logLevel < this.aspnetLogLevel)
+            return false;
+        return logLevel >= this.logLevel;
+    }
 
     public IDisposable BeginScope<TState>(TState state)
     {

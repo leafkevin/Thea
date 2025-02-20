@@ -5,7 +5,6 @@ using System.Threading;
 
 namespace Thea;
 
-[Serializable]
 public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertible
 {
     // private static fields
@@ -17,6 +16,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     private readonly int _a;
     private readonly int _b;
     private readonly int _c;
+
     public static string NewId() => GenerateNewId().ToString();
     // constructors
     /// <summary>
@@ -26,14 +26,9 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     public ObjectId(byte[] bytes)
     {
         if (bytes == null)
-        {
             throw new ArgumentNullException("bytes");
-        }
         if (bytes.Length != 12)
-        {
             throw new ArgumentException("Byte array must be 12 bytes long", "bytes");
-        }
-
         FromByteArray(bytes, 0, out _a, out _b, out _c);
     }
 
@@ -42,47 +37,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// </summary>
     /// <param name="bytes">The bytes.</param>
     /// <param name="index">The index into the byte array where the ObjectId starts.</param>
-    internal ObjectId(byte[] bytes, int index)
-    {
-        FromByteArray(bytes, index, out _a, out _b, out _c);
-    }
-
-    ///// <summary>
-    ///// Initializes a new instance of the ObjectId class.
-    ///// </summary>
-    ///// <param name="timestamp">The timestamp (expressed as a DateTime).</param>
-    ///// <param name="machine">The machine hash.</param>
-    ///// <param name="pid">The PID.</param>
-    ///// <param name="increment">The increment.</param>
-    //[Obsolete("This constructor will be removed in a later release.")]
-    //public ObjectId(DateTime timestamp, int machine, short pid, int increment)
-    //    : this(GetTimestampFromDateTime(timestamp), machine, pid, increment)
-    //{
-    //}
-
-    ///// <summary>
-    ///// Initializes a new instance of the ObjectId class.
-    ///// </summary>
-    ///// <param name="timestamp">The timestamp.</param>
-    ///// <param name="machine">The machine hash.</param>
-    ///// <param name="pid">The PID.</param>
-    ///// <param name="increment">The increment.</param>
-    //[Obsolete("This constructor will be removed in a later release.")]
-    //public ObjectId(int timestamp, int machine, short pid, int increment)
-    //{
-    //    if ((machine & 0xff000000) != 0)
-    //    {
-    //        throw new ArgumentOutOfRangeException("machine", "The machine value must be between 0 and 16777215 (it must fit in 3 bytes).");
-    //    }
-    //    if ((increment & 0xff000000) != 0)
-    //    {
-    //        throw new ArgumentOutOfRangeException("increment", "The increment value must be between 0 and 16777215 (it must fit in 3 bytes).");
-    //    }
-
-    //    _a = timestamp;
-    //    _b = (machine << 8) | (((int)pid >> 8) & 0xff);
-    //    _c = ((int)pid << 24) | increment;
-    //}
+    internal ObjectId(byte[] bytes, int index) => FromByteArray(bytes, index, out _a, out _b, out _c);
 
     /// <summary>
     /// Initializes a new instance of the ObjectId class.
@@ -91,9 +46,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     public ObjectId(string value)
     {
         if (value == null)
-        {
             throw new ArgumentNullException("value");
-        }
 
         var bytes = ParseHexString(value);
         FromByteArray(bytes, 0, out _a, out _b, out _c);
@@ -110,54 +63,18 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <summary>
     /// Gets an instance of ObjectId where the value is empty.
     /// </summary>
-    public static ObjectId Empty
-    {
-        get { return __emptyInstance; }
-    }
+    public static ObjectId Empty => __emptyInstance;
 
     // public properties
     /// <summary>
     /// Gets the timestamp.
     /// </summary>
-    public int Timestamp
-    {
-        get { return _a; }
-    }
-
-    ///// <summary>
-    ///// Gets the machine.
-    ///// </summary>
-    //[Obsolete("This property will be removed in a later release.")]
-    //public int Machine
-    //{
-    //    get { return (_b >> 8) & 0xffffff; }
-    //}
-
-    ///// <summary>
-    ///// Gets the PID.
-    ///// </summary>
-    //[Obsolete("This property will be removed in a later release.")]
-    //public short Pid
-    //{
-    //    get { return (short)(((_b << 8) & 0xff00) | ((_c >> 24) & 0x00ff)); }
-    //}
-
-    ///// <summary>
-    ///// Gets the increment.
-    ///// </summary>
-    //[Obsolete("This property will be removed in a later release.")]
-    //public int Increment
-    //{
-    //    get { return _c & 0xffffff; }
-    //}
+    public int Timestamp => _a;
 
     /// <summary>
     /// Gets the creation time (derived from the timestamp).
     /// </summary>
-    public DateTime CreationTime
-    {
-        get { return UnixEpoch.AddSeconds((uint)Timestamp); }
-    }
+    public DateTime CreationTime => __unixEpoch.AddSeconds((uint)Timestamp);
 
     // public operators
     /// <summary>
@@ -166,10 +83,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <param name="lhs">The first ObjectId.</param>
     /// <param name="rhs">The other ObjectId</param>
     /// <returns>True if the first ObjectId is less than the second ObjectId.</returns>
-    public static bool operator <(ObjectId lhs, ObjectId rhs)
-    {
-        return lhs.CompareTo(rhs) < 0;
-    }
+    public static bool operator <(ObjectId lhs, ObjectId rhs) => lhs.CompareTo(rhs) < 0;
 
     /// <summary>
     /// Compares two ObjectIds.
@@ -177,10 +91,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <param name="lhs">The first ObjectId.</param>
     /// <param name="rhs">The other ObjectId</param>
     /// <returns>True if the first ObjectId is less than or equal to the second ObjectId.</returns>
-    public static bool operator <=(ObjectId lhs, ObjectId rhs)
-    {
-        return lhs.CompareTo(rhs) <= 0;
-    }
+    public static bool operator <=(ObjectId lhs, ObjectId rhs) => lhs.CompareTo(rhs) <= 0;
 
     /// <summary>
     /// Compares two ObjectIds.
@@ -188,10 +99,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <param name="lhs">The first ObjectId.</param>
     /// <param name="rhs">The other ObjectId.</param>
     /// <returns>True if the two ObjectIds are equal.</returns>
-    public static bool operator ==(ObjectId lhs, ObjectId rhs)
-    {
-        return lhs.Equals(rhs);
-    }
+    public static bool operator ==(ObjectId lhs, ObjectId rhs) => lhs.Equals(rhs);
 
     /// <summary>
     /// Compares two ObjectIds.
@@ -199,10 +107,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <param name="lhs">The first ObjectId.</param>
     /// <param name="rhs">The other ObjectId.</param>
     /// <returns>True if the two ObjectIds are not equal.</returns>
-    public static bool operator !=(ObjectId lhs, ObjectId rhs)
-    {
-        return !(lhs == rhs);
-    }
+    public static bool operator !=(ObjectId lhs, ObjectId rhs) => !(lhs == rhs);
 
     /// <summary>
     /// Compares two ObjectIds.
@@ -210,10 +115,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <param name="lhs">The first ObjectId.</param>
     /// <param name="rhs">The other ObjectId</param>
     /// <returns>True if the first ObjectId is greather than or equal to the second ObjectId.</returns>
-    public static bool operator >=(ObjectId lhs, ObjectId rhs)
-    {
-        return lhs.CompareTo(rhs) >= 0;
-    }
+    public static bool operator >=(ObjectId lhs, ObjectId rhs) => lhs.CompareTo(rhs) >= 0;
 
     /// <summary>
     /// Compares two ObjectIds.
@@ -221,30 +123,21 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     /// <param name="lhs">The first ObjectId.</param>
     /// <param name="rhs">The other ObjectId</param>
     /// <returns>True if the first ObjectId is greather than the second ObjectId.</returns>
-    public static bool operator >(ObjectId lhs, ObjectId rhs)
-    {
-        return lhs.CompareTo(rhs) > 0;
-    }
+    public static bool operator >(ObjectId lhs, ObjectId rhs) => lhs.CompareTo(rhs) > 0;
 
     // public static methods
     /// <summary>
     /// Generates a new ObjectId with a unique value.
     /// </summary>
     /// <returns>An ObjectId.</returns>
-    public static ObjectId GenerateNewId()
-    {
-        return GenerateNewId(GetTimestampFromDateTime(DateTime.UtcNow));
-    }
+    public static ObjectId GenerateNewId() => GenerateNewId(GetTimestampFromDateTime(DateTime.UtcNow));
 
     /// <summary>
     /// Generates a new ObjectId with a unique value (with the timestamp component based on a given DateTime).
     /// </summary>
     /// <param name="timestamp">The timestamp component (expressed as a DateTime).</param>
     /// <returns>An ObjectId.</returns>
-    public static ObjectId GenerateNewId(DateTime timestamp)
-    {
-        return GenerateNewId(GetTimestampFromDateTime(timestamp));
-    }
+    public static ObjectId GenerateNewId(DateTime timestamp) => GenerateNewId(GetTimestampFromDateTime(timestamp));
 
     /// <summary>
     /// Generates a new ObjectId with a unique value (with the given timestamp).
@@ -257,42 +150,6 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
         return Create(timestamp, __random, increment);
     }
 
-    ///// <summary>
-    ///// Packs the components of an ObjectId into a byte array.
-    ///// </summary>
-    ///// <param name="timestamp">The timestamp.</param>
-    ///// <param name="machine">The machine hash.</param>
-    ///// <param name="pid">The PID.</param>
-    ///// <param name="increment">The increment.</param>
-    ///// <returns>A byte array.</returns>
-    //[Obsolete("This method will be removed in a later release.")]
-    //public static byte[] Pack(int timestamp, int machine, short pid, int increment)
-    //{
-    //    if ((machine & 0xff000000) != 0)
-    //    {
-    //        throw new ArgumentOutOfRangeException("machine", "The machine value must be between 0 and 16777215 (it must fit in 3 bytes).");
-    //    }
-    //    if ((increment & 0xff000000) != 0)
-    //    {
-    //        throw new ArgumentOutOfRangeException("increment", "The increment value must be between 0 and 16777215 (it must fit in 3 bytes).");
-    //    }
-
-    //    byte[] bytes = new byte[12];
-    //    bytes[0] = (byte)(timestamp >> 24);
-    //    bytes[1] = (byte)(timestamp >> 16);
-    //    bytes[2] = (byte)(timestamp >> 8);
-    //    bytes[3] = (byte)(timestamp);
-    //    bytes[4] = (byte)(machine >> 16);
-    //    bytes[5] = (byte)(machine >> 8);
-    //    bytes[6] = (byte)(machine);
-    //    bytes[7] = (byte)(pid >> 8);
-    //    bytes[8] = (byte)(pid);
-    //    bytes[9] = (byte)(increment >> 16);
-    //    bytes[10] = (byte)(increment >> 8);
-    //    bytes[11] = (byte)(increment);
-    //    return bytes;
-    //}
-
     /// <summary>
     /// Parses a string and creates a new ObjectId.
     /// </summary>
@@ -301,15 +158,11 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     public static ObjectId Parse(string s)
     {
         if (s == null)
-        {
             throw new ArgumentNullException("s");
-        }
 
         ObjectId objectId;
         if (TryParse(s, out objectId))
-        {
             return objectId;
-        }
         else
         {
             var message = string.Format("'{0}' is not a valid 24 digit hex string.", s);
@@ -340,32 +193,6 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
         return false;
     }
 
-    ///// <summary>
-    ///// Unpacks a byte array into the components of an ObjectId.
-    ///// </summary>
-    ///// <param name="bytes">A byte array.</param>
-    ///// <param name="timestamp">The timestamp.</param>
-    ///// <param name="machine">The machine hash.</param>
-    ///// <param name="pid">The PID.</param>
-    ///// <param name="increment">The increment.</param>
-    //[Obsolete("This method will be removed in a later release.")]
-    //public static void Unpack(byte[] bytes, out int timestamp, out int machine, out short pid, out int increment)
-    //{
-    //    if (bytes == null)
-    //    {
-    //        throw new ArgumentNullException("bytes");
-    //    }
-    //    if (bytes.Length != 12)
-    //    {
-    //        throw new ArgumentOutOfRangeException("bytes", "Byte array must be 12 bytes long.");
-    //    }
-
-    //    timestamp = (bytes[0] << 24) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3];
-    //    machine = (bytes[4] << 16) + (bytes[5] << 8) + bytes[6];
-    //    pid = (short)((bytes[7] << 8) + bytes[8]);
-    //    increment = (bytes[9] << 16) + (bytes[10] << 8) + bytes[11];
-    //}
-
     // internal static methods
     internal static long CalculateRandomValue()
     {
@@ -385,13 +212,9 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     private static ObjectId Create(int timestamp, long random, int increment)
     {
         if (random < 0 || random > 0xffffffffff)
-        {
             throw new ArgumentOutOfRangeException(nameof(random), "The random value must be between 0 and 1099511627775 (it must fit in 5 bytes).");
-        }
         if (increment < 0 || increment > 0xffffff)
-        {
             throw new ArgumentOutOfRangeException(nameof(increment), "The increment value must be between 0 and 16777215 (it must fit in 3 bytes).");
-        }
 
         var a = timestamp;
         var b = (int)(random >> 8); // first 4 bytes of random
@@ -444,11 +267,9 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
 
     private static int GetTimestampFromDateTime(DateTime timestamp)
     {
-        var secondsSinceEpoch = (long)Math.Floor((ToUniversalTime(timestamp) - UnixEpoch).TotalSeconds);
+        var secondsSinceEpoch = (long)Math.Floor((ToUniversalTime(timestamp) - __unixEpoch).TotalSeconds);
         if (secondsSinceEpoch < uint.MinValue || secondsSinceEpoch > uint.MaxValue)
-        {
             throw new ArgumentOutOfRangeException("timestamp");
-        }
         return (int)(uint)secondsSinceEpoch;
     }
 
@@ -495,13 +316,8 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     public override bool Equals(object obj)
     {
         if (obj is ObjectId)
-        {
             return Equals((ObjectId)obj);
-        }
-        else
-        {
-            return false;
-        }
+        else return false;
     }
 
     /// <summary>
@@ -536,13 +352,9 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     public void ToByteArray(byte[] destination, int offset)
     {
         if (destination == null)
-        {
             throw new ArgumentNullException("destination");
-        }
         if (offset + 12 > destination.Length)
-        {
             throw new ArgumentException("Not enough room in destination buffer.", "offset");
-        }
 
         destination[offset + 0] = (byte)(_a >> 24);
         destination[offset + 1] = (byte)(_a >> 16);
@@ -593,70 +405,19 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     }
 
     // explicit IConvertible implementation
-    TypeCode IConvertible.GetTypeCode()
-    {
-        return TypeCode.Object;
-    }
-
-    bool IConvertible.ToBoolean(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    byte IConvertible.ToByte(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    char IConvertible.ToChar(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    DateTime IConvertible.ToDateTime(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    decimal IConvertible.ToDecimal(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    double IConvertible.ToDouble(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    short IConvertible.ToInt16(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    int IConvertible.ToInt32(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    long IConvertible.ToInt64(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    sbyte IConvertible.ToSByte(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    float IConvertible.ToSingle(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    string IConvertible.ToString(IFormatProvider provider)
-    {
-        return ToString();
-    }
+    TypeCode IConvertible.GetTypeCode() => TypeCode.Object;
+    bool IConvertible.ToBoolean(IFormatProvider provider) => throw new InvalidCastException();
+    byte IConvertible.ToByte(IFormatProvider provider) => throw new InvalidCastException();
+    char IConvertible.ToChar(IFormatProvider provider) => throw new InvalidCastException();
+    DateTime IConvertible.ToDateTime(IFormatProvider provider) => throw new InvalidCastException();
+    decimal IConvertible.ToDecimal(IFormatProvider provider) => throw new InvalidCastException();
+    double IConvertible.ToDouble(IFormatProvider provider) => throw new InvalidCastException();
+    short IConvertible.ToInt16(IFormatProvider provider) => throw new InvalidCastException();
+    int IConvertible.ToInt32(IFormatProvider provider) => throw new InvalidCastException();
+    long IConvertible.ToInt64(IFormatProvider provider) => throw new InvalidCastException();
+    sbyte IConvertible.ToSByte(IFormatProvider provider) => throw new InvalidCastException();
+    float IConvertible.ToSingle(IFormatProvider provider) => throw new InvalidCastException();
+    string IConvertible.ToString(IFormatProvider provider) => ToString();
 
     object IConvertible.ToType(Type conversionType, IFormatProvider provider)
     {
@@ -666,78 +427,34 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
                 return ((IConvertible)this).ToString(provider);
             case TypeCode.Object:
                 if (conversionType == typeof(object) || conversionType == typeof(ObjectId))
-                {
                     return this;
-                }
-                //if (conversionType == typeof(BsonObjectId))
-                //{
-                //    return new BsonObjectId(this);
-                //}
-                //if (conversionType == typeof(BsonString))
-                //{
-                //    return new BsonString(((IConvertible)this).ToString(provider));
-                //}
                 break;
         }
-
         throw new InvalidCastException();
     }
 
-    ushort IConvertible.ToUInt16(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    uint IConvertible.ToUInt32(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
-
-    ulong IConvertible.ToUInt64(IFormatProvider provider)
-    {
-        throw new InvalidCastException();
-    }
+    ushort IConvertible.ToUInt16(IFormatProvider provider) => throw new InvalidCastException();
+    uint IConvertible.ToUInt32(IFormatProvider provider) => throw new InvalidCastException();
+    ulong IConvertible.ToUInt64(IFormatProvider provider) => throw new InvalidCastException();
 
 
-
-
-    /// <summary>
-    /// Parses a hex string into its equivalent byte array.
-    /// </summary>
-    /// <param name="s">The hex string to parse.</param>
-    /// <returns>The byte equivalent of the hex string.</returns>
+    //------------------------------------------------
     public static byte[] ParseHexString(string s)
     {
         if (s == null)
-        {
             throw new ArgumentNullException(nameof(s));
-        }
-
         byte[] bytes;
         if (!TryParseHexString(s, out bytes))
-        {
             throw new FormatException("String should contain only hexadecimal digits.");
-        }
-
         return bytes;
     }
-    /// <summary>
-    /// Tries to parse a hex string to a byte array.
-    /// </summary>
-    /// <param name="s">The hex string.</param>
-    /// <param name="bytes">A byte array.</param>
-    /// <returns>True if the hex string was successfully parsed.</returns>
     public static bool TryParseHexString(string s, out byte[] bytes)
     {
         bytes = null;
-
         if (s == null)
-        {
             return false;
-        }
 
         var buffer = new byte[(s.Length + 1) / 2];
-
         var i = 0;
         var j = 0;
 
@@ -746,9 +463,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
             // if s has an odd length assume an implied leading "0"
             int y;
             if (!TryParseHexChar(s[i++], out y))
-            {
                 return false;
-            }
             buffer[j++] = (byte)y;
         }
 
@@ -756,20 +471,15 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
         {
             int x, y;
             if (!TryParseHexChar(s[i++], out x))
-            {
                 return false;
-            }
             if (!TryParseHexChar(s[i++], out y))
-            {
                 return false;
-            }
             buffer[j++] = (byte)((x << 4) | y);
         }
 
         bytes = buffer;
         return true;
     }
-    // private static methods
     private static bool TryParseHexChar(char c, out int value)
     {
         if (c >= '0' && c <= '9')
@@ -777,55 +487,28 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
             value = c - '0';
             return true;
         }
-
         if (c >= 'a' && c <= 'f')
         {
             value = 10 + (c - 'a');
             return true;
         }
-
         if (c >= 'A' && c <= 'F')
         {
             value = 10 + (c - 'A');
             return true;
         }
-
         value = 0;
         return false;
     }
-    /// <summary>
-    /// Gets the Unix Epoch for BSON DateTimes (1970-01-01).
-    /// </summary>
-    public static DateTime UnixEpoch { get { return __unixEpoch; } }
-    private static readonly DateTime __unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    /// <summary>
-    /// Converts a DateTime to UTC (with special handling for MinValue and MaxValue).
-    /// </summary>
-    /// <param name="dateTime">A DateTime.</param>
-    /// <returns>The DateTime in UTC.</returns>
-    public static DateTime ToUniversalTime(DateTime dateTime)
+    private static DateTime __unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    private static DateTime ToUniversalTime(DateTime dateTime)
     {
         if (dateTime == DateTime.MinValue)
-        {
             return DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
-        }
         else if (dateTime == DateTime.MaxValue)
-        {
             return DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
-        }
-        else
-        {
-            return dateTime.ToUniversalTime();
-        }
+        else return dateTime.ToUniversalTime();
     }
-    /// <summary>
-    /// Converts a value to a hex character.
-    /// </summary>
-    /// <param name="value">The value (assumed to be between 0 and 15).</param>
-    /// <returns>The hex character.</returns>
-    public static char ToHexChar(int value)
-    {
-        return (char)(value + (value < 10 ? '0' : 'a' - 10));
-    }
+    private static char ToHexChar(int value) => (char)(value + (value < 10 ? '0' : 'a' - 10));
 }

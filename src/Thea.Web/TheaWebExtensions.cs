@@ -23,13 +23,13 @@ public static class TheaWebExtensions
     }
     public static IServiceCollection AddTheaWeb(this IServiceCollection services)
     {
-        services.AddHttpContextAccessor();
         services.AddHttpClient();
+        services.AddHttpContextAccessor();
         services.AddTransient<IHttpClientFactory, TheaHttpClientFactory>();
         services.AddTransient<HttpMessageHandlerBuilder, TheaHttpMessageHandlerBuilder>();
         services.AddTransient<ProxyHttpMessageHandlerBuilder>();
         services.AddTransient<TheaHttpMessageHandler>();
-        services.AddSingleton<IResponseFilter, DefaultResponseFilter>();
+        services.AddSingleton<IResponseDecorator, DefaultResponseDecorator>();
         return services;
     }
     public static IApplicationBuilder UseTheaWeb(this IApplicationBuilder app)

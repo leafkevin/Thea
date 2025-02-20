@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -14,16 +15,19 @@ namespace Thea.Web;
 
 public class TheaWebMiddleware
 {
+    private readonly string appId;
     private readonly RequestDelegate next;
-    private readonly IConfiguration configuation;
-    private readonly IResponseFilter responseFilter;
+    private readonly IResponseDecorator responseDecorator;
     private readonly ILogger<TheaWebMiddleware> logger;
 
-    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseFilter responseFilter, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
     {
+        this.appId = configuation.GetValue<string>("AppId");
+        if (string.IsNullOrEmpty(this.appId))
+            throw new ArgumentNullException("AppId is required in configuration.");
+
         this.next = next;
-        this.configuation = configuation;
-        this.responseFilter = responseFilter;
+        this.responseDecorator = responseDecorator;
         this.logger = logger;
     }
 
@@ -31,7 +35,7 @@ public class TheaWebMiddleware
     {
         var originalStream = context.Response.Body;
         var logEntityInfo = await this.CreateLogEntity(context);
-        var logScope = new TheaLogState { TraceId = logEntityInfo.TraceId, Sequence = logEntityInfo.Sequence, Tag = logEntityInfo.Tag };
+        var logScope = new TheaLogState { TraceId = logEntityInfo.TraceId, Tag = logEntityInfo.Tag };
         using (this.logger.BeginScope(logScope))
         {
             using var memoryStream = new MemoryStream();
@@ -46,7 +50,7 @@ public class TheaWebMiddleware
                 exception = ex.InnerException ?? ex;
                 logEntityInfo.Exception = exception;
             }
-            var response = await this.responseFilter.ProcessRequest(context, memoryStream, exception);
+            var response = await this.responseDecorator.ProcessRequest(context, memoryStream, exception);
             context.Response.Body = originalStream;
             if (exception != null)
             {
@@ -63,7 +67,6 @@ public class TheaWebMiddleware
                     var passport = context.User.ToPassport();
                     logEntityInfo.UserId = passport.UserId;
                     logEntityInfo.UserName = passport.UserName;
-                    logEntityInfo.AppId = this.configuation["AppId"];
                     logEntityInfo.TenantId = passport.TenantId;
                 }
             }
@@ -73,21 +76,18 @@ public class TheaWebMiddleware
     }
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
-        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
+        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), AppId = this.appId, LogLevel = (int)LogLevel.Information };
         if (context.Request.Headers.TryGetValue("TraceId", out var traceIds))
         {
             var traceId = traceIds.ToString();
             context.TraceIdentifier = traceId;
             logEntityInfo.TraceId = traceId;
-            if (context.Request.Headers.TryGetValue("Sequence", out var sequence))
-                logEntityInfo.Sequence = int.Parse(sequence.ToString());
         }
         else
         {
-            context.TraceIdentifier = context.TraceIdentifier.Replace(":", "-");
-            logEntityInfo.TraceId = context.TraceIdentifier;
-            context.Request.Headers.Append("TraceId", new StringValues(logEntityInfo.TraceId));
-            context.Request.Headers.Append("Sequence", new StringValues(logEntityInfo.Sequence.ToString()));
+            logEntityInfo.TraceId = ObjectId.NewId();
+            context.TraceIdentifier = logEntityInfo.TraceId;
+            context.Request.Headers.TryAdd("TraceId", new StringValues(logEntityInfo.TraceId));
         }
         if (context.Request.Headers.TryGetValue("Tag", out var tag))
             logEntityInfo.Tag = tag.ToString();
@@ -106,7 +106,6 @@ public class TheaWebMiddleware
                 context.Response.Headers.Append("TraceId", logEntityInfo.TraceId);
             if (!context.Response.Headers.ContainsKey("Tag") && !string.IsNullOrEmpty(logEntityInfo.Tag))
                 context.Response.Headers.Append("Tag", logEntityInfo.Tag);
-
             return Task.CompletedTask;
         });
         switch (logEntityInfo.ApiType)
@@ -146,9 +145,7 @@ public class TheaWebMiddleware
                     foreach (var ip in properties.UnicastAddresses)
                     {
                         if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
-                        {
                             return ip.Address.ToString();
-                        }
                     }
                 }
             }

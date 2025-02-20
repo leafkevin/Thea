@@ -45,7 +45,6 @@ public class TheaLogScope : IDisposable
 
             if (state.Tag != parentScope.State.Tag)
             {
-                state.Sequence = parentScope.State.Sequence + 1;
                 newScope = new TheaLogScope();
                 newScope.State = state;
                 newScope.Parent = parentScope;
@@ -58,7 +57,6 @@ public class TheaLogScope : IDisposable
             if (string.IsNullOrEmpty(state.TraceId))
                 throw new ArgumentNullException("TraceId");
 
-            state.Sequence = 1;
             newScope = new TheaLogScope { State = state };
             current.Value = newScope;
         }
