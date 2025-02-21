@@ -5,8 +5,7 @@ namespace Thea.MessageDriven;
 
 public interface IMessageDrivenRepository
 {
-    Task<List<Queue>> GetQueues(List<string> queueIds, List<string> exchangeIds);
-    Task<List<Exchange>> GetExchanges(List<string> exchangeIds);
-    Task Register(List<Queue> queues, List<Exchange> exchanges);
+    Task<(List<Queue>, List<Binding>)> GetConfigInfo();
+    Task Register(List<Queue> queues, List<Binding> bindings);
     Task WriteLogs(List<ExecLog> logInfos);
 }

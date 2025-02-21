@@ -112,7 +112,7 @@ class RabbitConsumer
         //    var model = o as IModel;
         //    model.BasicQos(0, prefetchCount, false);
         //};
-        await this.BindHandler(this.channel);
+        await this.BindHandler();
         this.IsStarted = true;
     }
     public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
@@ -133,7 +133,7 @@ class RabbitConsumer
         //    var model = o as IModel;
         //    model.BasicQos(0, prefetchCount, false);
         //};
-        await this.BindHandler(this.channel);
+        await this.BindHandler();
         this.IsStarted = true;
     }
     public async Task RemoveQueue()
@@ -161,127 +161,182 @@ class RabbitConsumer
         }
         this.cancellationSource.Dispose();
     }
-    private async Task BindHandler(IChannel channel)
+    private async Task BindHandler()
     {
         var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (model, ea) =>
+        if (this.isExclusive)
         {
-            //先暂停消费
-            if (this.cancellationSource.IsCancellationRequested)
-                return;
+            //心跳队列和rpc结果队列
+            consumer.ReceivedAsync += async (model, ea) =>
+            {
+                //先暂停消费
+                if (this.cancellationSource.IsCancellationRequested)
+                    return;
 
-            var iLoop = 0;
-            Exception exception = null;
-            bool isSuccess = true;
-            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            var message = jsonBody.JsonTo<Message<string>>();
-            //兼容现非框架队列消息
-            if (message.MessageId == null)
-            {
-                message.MessageId = ObjectId.NewId();
-                message.Type = MessageType.Message;
-                message.Body = jsonBody;
-            }
-            //内部消息，交给消息总分发处处理
-            string result = "success";
-            switch (message.Type)
-            {
-                case MessageType.Message:
-                case MessageType.RpcMessage:
-                    {
-                        while (iLoop < 3)
+                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+                var message = jsonBody.JsonTo<Message<string>>();
+                //兼容现非框架队列消息
+                if (message.MessageId == null)
+                {
+                    message.MessageId = ObjectId.NewId();
+                    message.Type = MessageType.Message;
+                    message.Body = jsonBody;
+                }
+                //内部消息，交给消息总分发处处理
+                TaskCompletionSource<bool> waiter = null;
+                switch (message.Type)
+                {
+                    case MessageType.RpcResponse:
+                        this.parent.Next(message.MessageId, message.Body);
+                        break;
+
+                    case MessageType.WaitForStart:
+                        if (message.AppId == this.parent.AppId)
                         {
-                            try
+                            //让主分发处理器累加计算消息完成的队列个数
+                            (var queueId, var queueName) = message.Body.JsonTo<(string, string)>();
+                            waiter = new TaskCompletionSource<bool>();
+                            this.parent.ProcessMessage(new Message
                             {
-                                (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
-                                var parameters = TheaJsonSerializer.Deserialize(message.Body, parameterType);
-                                if (message.Type == MessageType.RpcMessage)
+                                MessageId = message.MessageId,
+                                Type = message.Type,
+                                Body = (queueId, queueName, waiter)
+                            });
+                            waiter.Task.Wait();
+                        }
+                        break;
+                    case MessageType.WaitForShutdown:
+                        if (message.AppId == this.parent.AppId)
+                        {
+                            waiter = new TaskCompletionSource<bool>();
+                            this.parent.ProcessMessage(new Message
+                            {
+                                MessageId = message.MessageId,
+                                Type = message.Type,
+                                Body = (message.Body, waiter)
+                            });
+                            waiter.Task.Wait();
+                        }
+                        break;
+                    case MessageType.Heartbeat:
+                        if (message.AppId == this.parent.AppId)
+                        {
+                            waiter = new TaskCompletionSource<bool>();
+                            this.parent.ProcessMessage(new Message
+                            {
+                                MessageId = message.MessageId,
+                                Type = message.Type,
+                                Body = (message.Body, waiter)
+                            });
+                            waiter.Task.Wait();
+                        }
+                        break;
+                    default: throw new Exception("Unknown message type");
+                }
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
+
+                //再延迟停止
+                if (this.isDeferClose)
+                    await this.Close();
+            };
+        }
+        else
+        {
+            //用户消息队列
+            consumer.ReceivedAsync += async (model, ea) =>
+            {
+                //先暂停消费
+                if (this.cancellationSource.IsCancellationRequested)
+                    return;
+
+                var iLoop = 0;
+                Exception exception = null;
+                bool isSuccess = true;
+                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+                var message = jsonBody.JsonTo<Message<string>>();
+                //兼容现非框架队列消息
+                if (message.MessageId == null)
+                {
+                    message.MessageId = ObjectId.NewId();
+                    message.Type = MessageType.Message;
+                    message.Body = jsonBody;
+                }
+                //内部消息，交给消息总分发处处理
+                string result = "success";
+                switch (message.Type)
+                {
+                    case MessageType.Message:
+                    case MessageType.RpcMessage:
+                        {
+                            while (iLoop < 3)
+                            {
+                                try
                                 {
-                                    var rpcResult = await typedHandler.Invoke(parameters);
-                                    var rpcMessage = new Message
+                                    (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
+                                    var parameters = TheaJsonSerializer.Deserialize(message.Body, parameterType);
+                                    if (message.Type == MessageType.RpcMessage)
                                     {
-                                        MessageId = message.MessageId,
-                                        Type = MessageType.RpcResponse,
-                                        AppId = this.parent.AppId,
-                                        Body = rpcResult.ToJson()
-                                    };
-                                    result += ", " + rpcResult.ToJson();
-                                    await this.parent.rabbitProducer.Publish("rpc.result", message.RoutingKey, rpcMessage.ToJson());
+                                        //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
+                                        var rpcResult = await typedHandler.Invoke(parameters);
+                                        var rpcMessage = new Message
+                                        {
+                                            MessageId = message.MessageId,
+                                            Type = MessageType.RpcResponse,
+                                            AppId = this.parent.AppId,
+                                            Exchange = Consts.RpcExchange,
+                                            RoutingKey = message.RoutingKey,
+                                            Body = rpcResult.ToJson()
+                                        };
+                                        result += ", " + rpcResult.ToJson();
+                                        await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.RoutingKey, rpcMessage.ToJson());
+                                        break;
+                                    }
+                                    else await typedHandler.Invoke(parameters);
                                     break;
                                 }
-                                else await typedHandler.Invoke(parameters);
-                                break;
+                                catch (Exception ex)
+                                {
+                                    isSuccess = false;
+                                    exception = ex.InnerException ?? ex;
+                                }
+                                iLoop++;
+                                Thread.Sleep(1000);
                             }
-                            catch (Exception ex)
+                            if (!isSuccess) result = exception.ToString();
+                            var logInfo = new ExecLog
                             {
-                                isSuccess = false;
-                                exception = ex.InnerException ?? ex;
+                                LogId = ObjectId.NewId(),
+                                ExchangeId = ea.Exchange,
+                                RoutingKey = ea.RoutingKey,
+                                Queue = this.QueueName,
+                                Body = jsonBody,
+                                IsSuccess = isSuccess,
+                                Result = result,
+                                RetryTimes = iLoop,
+                                UpdatedAt = DateTime.Now
+                            };
+                            if (this.IsLogEnabled || !isSuccess)
+                            {
+                                this.addLogsHandler.Invoke(logInfo);
+                                if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                             }
-                            iLoop++;
-                            Thread.Sleep(1000);
+                            if (!isSuccess) throw exception;
                         }
-                        if (!isSuccess) result = exception.ToString();
-                        var logInfo = new ExecLog
-                        {
-                            LogId = ObjectId.NewId(),
-                            ExchangeId = ea.Exchange,
-                            RoutingKey = ea.RoutingKey,
-                            Queue = this.QueueName,
-                            Body = jsonBody,
-                            IsSuccess = isSuccess,
-                            Result = result,
-                            RetryTimes = iLoop,
-                            UpdatedAt = DateTime.Now
-                        };
-                        if (this.IsLogEnabled || !isSuccess)
-                        {
-                            this.addLogsHandler.Invoke(logInfo);
-                            if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
-                        }
-                        if (!isSuccess) throw exception;
-                    }
-                    break;
-                case MessageType.RpcResponse:
-                    this.parent.Next(message.MessageId, message.Body);
-                    break;
-                case MessageType.Heartbeat:
-                    if (message.AppId == this.parent.AppId)
-                    {
-                        var waiter = new TaskCompletionSource<bool>();
-                        this.parent.ProcessMessage(new Message
-                        {
-                            MessageId = message.MessageId,
-                            Type = message.Type,
-                            Body = (message.Body, waiter)
-                        });
-                        waiter.Task.Wait();
-                    }
-                    break;
-                case MessageType.WaitForStart:
-                    break;
-                case MessageType.WaitForShutdown:
-                    await this.parent.rabbitProducer.Publish("heartbeat", "#", message.ToJson());
-                    break;
-                default:
-                    if (message.AppId == this.parent.AppId)
-                    {
-                        var waiter = new TaskCompletionSource<bool>();
-                        this.parent.ProcessMessage(new Message
-                        {
-                            MessageId = message.MessageId,
-                            Type = message.Type,
-                            Body = (message.Body, waiter)
-                        });
-                        waiter.Task.Wait();
-                    }
-                    break;
-            }
-            await channel.BasicAckAsync(ea.DeliveryTag, false);
+                        break;
+                    case MessageType.WaitForStart:
+                    case MessageType.WaitForShutdown:
+                        //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
+                        await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, "#", message.ToJson());
+                        break;
+                    default: throw new Exception("Unknown message type");
+                }
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
 
-            //再延迟停止
-            if (this.isDeferClose)
-                await this.Close();
-        };
+                //再延迟停止
+                if (this.isDeferClose)
+                    await this.Close();
+            };
+        }
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
 }

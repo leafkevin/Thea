@@ -56,12 +56,11 @@ public static class Startup
         //内存缓存更新
         app.UseMessageDriven(f =>
         {
-            f.UseTrolleyRepository("default");
-            f.UseProducer("award.take", true);
-            //f.UseSubscriber<string>("cache.refresh", "cache.refresh.queue",
-            //    key => { memoryCache.Remove(key); return Task.CompletedTask; })
-            f.UseStatefulConsumer<StatefulConsumer>("award.take", f => f.TakeAward)
-            .UseStatefulConsumer<StatefulConsumer>("award.issue", f => f.IssueAward);
+            f.UseTrolleyRepository("default")
+             .UseProducer("award.take", true, false)
+             .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
+             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
+             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward);
         });
     }
 }

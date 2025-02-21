@@ -12,6 +12,11 @@ public class StatefulConsumer
     {
         this.messageDriven = messageDriven;
     }
+    public Task RemoveCache(string key)
+    {
+        Console.WriteLine($"RemoveCache:  {RemoveCache}");
+        return Task.CompletedTask;
+    }
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {
         Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");

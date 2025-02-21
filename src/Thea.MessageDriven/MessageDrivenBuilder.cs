@@ -28,9 +28,9 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(clusterIds);
         return this;
     }
-    public MessageDrivenBuilder UseProducer(string clusterId, bool isUseRpc,bool isDelay)
+    public MessageDrivenBuilder UseProducer(string clusterId, bool isUseRpc)
     {
-        this.messageDriven.UseProducer(clusterId, isUseRpc, isDelay);
+        this.messageDriven.UseProducer(clusterId, isUseRpc);
         return this;
     }
     public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)

@@ -1,8 +1,8 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Trolley;
 using Trolley.MySqlConnector;
 
@@ -20,38 +20,35 @@ public class DefaultRepository : IMessageDrivenRepository
         this.dbKey = configuration.GetValue<string>("MessageDriven:DbKey");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
-    public virtual async Task<List<Cluster>> GetClusters(List<string> clusterIds)
+    public virtual async Task<(List<Queue>, List<Binding>)> GetConfigInfo()
     {
-        var result = new List<Cluster>();
-        foreach (var clusterId in clusterIds)
+        var cacheKey = "mds.config.all";
+        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
-            var myCluster = await this.GetCluster(clusterId);
-            if (myCluster != null) result.Add(myCluster);
-        }
-        return result;
+            var repository = this.dbFactory.Create(this.dbKey);
+            using var reader = await repository.QueryMultipleAsync(t =>
+            {
+                t.Query<Queue>(f => f.IsEnabled);
+                t.Query<Binding>();
+            });
+            var queues = await reader.ReadAsync<Queue>();
+            var bindings = await reader.ReadAsync<Binding>();
+            return (queues, bindings);
+        });
     }
-    public virtual async Task Register(List<Cluster> clusters)
+    public virtual async Task Register(List<Queue> queues, List<Binding> bindings)
     {
-        var repository = this.dbFactory.CreateRepository(this.dbKey);
-        await repository.CreateAsync<Cluster>(clusters);
-        foreach (var cluster in clusters)
-        {
-            var cacheKey = $"mds.cluster.{cluster.ClusterId}";
-            await this.redisCache.SetAsync(cacheKey, cluster);
-        }
+        var repository = this.dbFactory.Create(this.dbKey);
+        await repository.Create<Queue>()
+            .IgnoreInto().WithBulk(queues)
+            .ExecuteAsync();
+        await repository.Create<Binding>()
+            .IgnoreInto().WithBulk(bindings)
+            .ExecuteAsync();
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
     {
         var repository = this.dbFactory.CreateRepository(this.dbKey);
         await repository.CreateAsync<ExecLog>(logInfos);
-    }
-    public async Task<Cluster> GetCluster(string clusterId)
-    {
-        var cacheKey = $"mds.cluster.{clusterId}";
-        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
-        {
-            var repository = this.dbFactory.Create(this.dbKey);
-            return await repository.QueryFirstAsync<Cluster>(f => f.ClusterId == clusterId);
-        });
     }
 }

@@ -35,7 +35,7 @@ class Message<TBody> : Message
 {
     public new TBody Body { get; set; }
 }
-class WaitForStartMessage
+class ConsumerWaiter
 {
     public int WaitTotal { get; set; }
     public List<string> QueueNames { get; set; }

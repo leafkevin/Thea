@@ -3,18 +3,18 @@
 namespace Thea.MessageDriven;
 
 /// <summary>
-/// 信箱表，描述每个信箱与队列的绑定关系
+/// 绑定表，描述交换机与队列的绑定关系
 /// </summary>
-public class Exchange
+public class Binding
 {
     /// <summary>
     /// 信箱ID
     /// </summary>
     public string ExchangeId { get; set; }
     /// <summary>
-    /// 信箱名称
+    /// 队列ID
     /// </summary>
-    public string ExchangeName { get; set; }
+    public string QueueId { get; set; }
     /// <summary>
     /// 绑定类型
     /// </summary>
@@ -22,11 +22,7 @@ public class Exchange
     /// <summary>
     /// 绑定KEY
     /// </summary>
-    public string BindingKey { get; set; }
-    /// <summary>
-    /// 队列ID
-    /// </summary>
-    public string QueueId { get; set; }
+    public string BindingKey { get; set; }    
     /// <summary>
     /// 是否延时消费者
     /// </summary>
