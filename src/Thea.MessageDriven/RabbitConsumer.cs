@@ -1,16 +1,15 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -41,7 +40,7 @@ class RabbitConsumer
         this.parent = parent;
         this.ConsumerId = ObjectId.NewId();
         this.QueueName = queueName;
-        this.connectionId = queueName;
+        this.connectionId = $"{queueName}.{parent.NodeId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -120,6 +119,7 @@ class RabbitConsumer
         if (this.IsRunning || this.IsStarted) return;
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
+
         if (this.isExclusive)
         {
             await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);

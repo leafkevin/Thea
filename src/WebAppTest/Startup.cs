@@ -57,7 +57,7 @@ public static class Startup
         app.UseMessageDriven(f =>
         {
             f.UseTrolleyRepository("default")
-             .UseProducer("award.take", true, false)
+             .UseProducer("award.take", true)
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
              .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
              .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward);

@@ -22,29 +22,42 @@ public class DefaultRepository : IMessageDrivenRepository
     }
     public virtual async Task<(List<Queue>, List<Binding>)> GetConfigInfo()
     {
-        var cacheKey = "mds.config.all";
-        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        var cacheKey = "mds.queue.all";
+        var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
-            using var reader = await repository.QueryMultipleAsync(t =>
-            {
-                t.Query<Queue>(f => f.IsEnabled);
-                t.Query<Binding>();
-            });
-            var queues = await reader.ReadAsync<Queue>();
-            var bindings = await reader.ReadAsync<Binding>();
-            return (queues, bindings);
+            var result = await repository.QueryAsync<Queue>(f => f.IsEnabled);
+            if (result.Count <= 0) return null;
+            return result;
         });
+        cacheKey = "mds.binding.all";
+        var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        {
+            var repository = this.dbFactory.Create(this.dbKey);
+            var result = await repository.QueryAsync<Binding>();
+            if (result.Count <= 0) return null;
+            return result;
+        });
+        return (queues, bindings);
     }
     public virtual async Task Register(List<Queue> queues, List<Binding> bindings)
     {
+        var cacheKey = "mds.config.all";
         var repository = this.dbFactory.Create(this.dbKey);
-        await repository.Create<Queue>()
-            .IgnoreInto().WithBulk(queues)
-            .ExecuteAsync();
-        await repository.Create<Binding>()
-            .IgnoreInto().WithBulk(bindings)
-            .ExecuteAsync();
+        if (queues != null && queues.Count > 0)
+        {
+            await repository.Create<Queue>()
+                .IgnoreInto().WithBulk(queues)
+                .ExecuteAsync();
+            await this.redisCache.RemoveAsync(cacheKey);
+        }
+        if (bindings != null && bindings.Count > 0)
+        {
+            await repository.Create<Binding>()
+                .IgnoreInto().WithBulk(bindings)
+                .ExecuteAsync();
+            await this.redisCache.RemoveAsync(cacheKey);
+        }
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
     {
