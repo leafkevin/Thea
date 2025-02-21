@@ -22,13 +22,13 @@
 <#@ import namespace="Microsoft.VisualStudio.TextTemplating"#>
 <#@ output encoding="utf-8" #>
 <#
-    var connectionString = "Server=localhost;Database=fengling;Uid=root;password=123456;charset=utf8mb4;";
+    var connectionString = "Server=localhost;Database=thea;Uid=root;password=123456;charset=utf8mb4;";
 	var dbProvider = new MySqlProvider(connectionString);
     var manager = Manager.Create(Host, GenerationEnvironment);
 
-    var databaseName = "fengling";
-    var tableNames = new[]{"sys_user","sys_company","sys_order","sys_order_detail"};
-    var removePrefixes = new[]{"sys_"};
+    var databaseName = "thea";
+    var tableNames = new[]{"mds_exchange","mds_queue","mds_log"};
+    var removePrefixes = new[]{"mds_"};
     var separator = '_';
     var tableList = dbProvider.GetTableList(databaseName, tableNames);
     foreach(var tableInfo in tableList)
@@ -49,6 +49,8 @@ public class <#=className#>
 {
 <#foreach(ColumnInfo columnInfo in columnList){
 var propertyName = columnInfo.ColumnName;
+var segments = propertyName.Split('_');
+propertyName = string.Join("", segments.Select(f => dbProvider.ToBigCamel(f)));
 var memberInfo = dbProvider.MapMember(columnInfo);
 if(!String.IsNullOrEmpty(columnInfo.Description))
 {#>

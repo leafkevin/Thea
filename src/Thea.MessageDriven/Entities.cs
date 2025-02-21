@@ -3,52 +3,62 @@
 namespace Thea.MessageDriven;
 
 /// <summary>
-/// 集群表，描述消息驱动所有的业务集群，一个业务一个集群
+/// 信箱表，描述每个信箱与队列的绑定关系
 /// </summary>
-public class Cluster
+public class Exchange
 {
     /// <summary>
-    /// 集群ID
+    /// 信箱ID
     /// </summary>
-    public string ClusterId { get; set; }
+    public string ExchangeId { get; set; }
     /// <summary>
-    /// 集群名称
+    /// 信箱名称
     /// </summary>
-    public string ClusterName { get; set; }
-    /// <summary>
-    /// 信箱
-    /// </summary>
-    public string Exchange { get; set; }
+    public string ExchangeName { get; set; }
     /// <summary>
     /// 绑定类型
     /// </summary>
     public string BindType { get; set; }
     /// <summary>
-    /// 绑定Key
+    /// 绑定KEY
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
-    /// 队列名字或是队列前缀
+    /// 队列ID
     /// </summary>
-    public string Queue { get; set; }
+    public string QueueId { get; set; }
     /// <summary>
-    /// 工作负荷个数，有状态时是队列个数，无状态时是队列的消费者个数，0表示无限制，几个负载几个消费者
+    /// 是否延时消费者
     /// </summary>
-    public int WorkloadTotal { get; set; }
+    public bool IsDelay { get; set; }
+}
+/// <summary>
+/// 队列表，描述所有的队列基本信息
+/// </summary>
+public class Queue
+{
+    /// <summary>
+    /// 队列ID
+    /// </summary>
+    public string QueueId { get; set; }
+    /// <summary>
+    /// 队列名称
+    /// </summary>
+    public string QueueName { get; set; }
     /// <summary>
     /// 是否有状态
     /// </summary>
     public bool IsStateful { get; set; }
     /// <summary>
+    /// 工作负荷个数
+    /// </summary>
+    public int WorkloadTotal { get; set; }
+    /// <summary>
     /// 是否单一激活消费者
     /// </summary>
     public bool IsSac { get; set; }
     /// <summary>
-    /// 是否延迟消息
-    /// </summary>
-    public bool IsDelay { get; set; }
-    /// <summary>
-    /// 预取消息个数
+    /// 预取个数
     /// </summary>
     public int PrefetchCount { get; set; }
     /// <summary>
@@ -59,13 +69,11 @@ public class Cluster
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
-    /// <summary>
-    /// 最后更新日期
-    /// </summary>
-    public DateTime UpdatedAt { get; set; }
+
+    public bool IsConsumer { get; set; }
 }
 /// <summary>
-/// 消息驱动日志表
+/// 日志表，描述消息队列每个消费者的执行日志
 /// </summary>
 public class ExecLog
 {
@@ -74,11 +82,11 @@ public class ExecLog
     /// </summary>
     public string LogId { get; set; }
     /// <summary>
-    /// 集群ID
+    /// 信箱ID
     /// </summary>
-    public string ClusterId { get; set; }
+    public string ExchangeId { get; set; }
     /// <summary>
-    /// 路由
+    /// 路由KEY
     /// </summary>
     public string RoutingKey { get; set; }
     /// <summary>
@@ -90,21 +98,17 @@ public class ExecLog
     /// </summary>
     public string Body { get; set; }
     /// <summary>
-    /// 是否成功 
+    /// 是否成功
     /// </summary>
     public bool IsSuccess { get; set; }
     /// <summary>
-    /// 返回值
+    /// 执行结果
     /// </summary>
     public string Result { get; set; }
     /// <summary>
     /// 重试次数
     /// </summary>
     public int RetryTimes { get; set; }
-    /// <summary>
-    /// 最后更新人
-    /// </summary>
-    public string UpdatedBy { get; set; }
     /// <summary>
     /// 最后更新日期
     /// </summary>

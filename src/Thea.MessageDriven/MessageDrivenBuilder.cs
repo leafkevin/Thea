@@ -28,16 +28,16 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(clusterIds);
         return this;
     }
-    public MessageDrivenBuilder UseProducer(string clusterId, bool isUseRpc)
+    public MessageDrivenBuilder UseProducer(string clusterId, bool isUseRpc,bool isDelay)
     {
-        this.messageDriven.UseProducer(clusterId, isUseRpc);
+        this.messageDriven.UseProducer(clusterId, isUseRpc, isDelay);
         return this;
     }
-    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string clusterId, Func<TConsumer, Delegate> consumerHandlerSelector)
+    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseStatefulConsumer(clusterId, methodInfo);
+        this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo);
         return this;
     }
     public MessageDrivenBuilder UseSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)

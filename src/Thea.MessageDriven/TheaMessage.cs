@@ -31,14 +31,9 @@ class Message
     public DateTime? ScheduleTimeUtc { get; set; }
     public object Body { get; set; }
 }
-class Message<TBody>
+class Message<TBody> : Message
 {
-    public string MessageId { get; set; }
-    public string AppId { get; set; }
-    public MessageType Type { get; set; }
-    public string RoutingKey { get; set; }
-    public DateTime? ScheduleTimeUtc { get; set; }
-    public TBody Body { get; set; }
+    public new TBody Body { get; set; }
 }
 class WaitForStartMessage
 {

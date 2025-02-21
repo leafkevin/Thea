@@ -27,7 +27,7 @@
     var manager = Manager.Create(Host, GenerationEnvironment);
 
     var databaseName = "fengling";
-    var tableName = "sys_user";
+    var tableName = "mds_";
     var removePrefixes = new []{"sys_"};
     var separator = '_';
     var className = dbProvider.ToClassName(tableName, removePrefixes, separator);

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -22,26 +23,22 @@ class RabbitConsumer
     private ConnectionFactory factory;
     private Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
-    private volatile IConnection connection = null;
-    private volatile IChannel channel = null;
+    private IConnection connection = null;
+    private IChannel channel = null;
     private string connectionId;
     private bool isExclusive = false;
-    private bool isRpc = false;
-    private Type messageType;
-    private Delegate consumerHandler;
+    private Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
 
     public volatile bool IsRunning = false;
     public volatile bool IsStarted = false;
     private volatile bool isDeferClose = false;
     public volatile bool IsLogEnabled;
-    public string ClusterId { get; private set; }
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
 
-    public RabbitConsumer(string clusterId, string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isExclusive, MethodInfo consumerInvoker = null)
+    public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isExclusive, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
         this.parent = parent;
-        this.ClusterId = clusterId;
         this.ConsumerId = ObjectId.NewId();
         this.QueueName = queueName;
         this.connectionId = queueName;
@@ -52,24 +49,39 @@ class RabbitConsumer
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
         this.isExclusive = isExclusive;
-        this.isRpc = parent.RpcClusterIds.Contains(clusterId);
-        if (consumerInvoker != null)
+        if (exchangeMethodInfos != null)
         {
-            var targetType = consumerInvoker.DeclaringType;
-            var target = serviceProvider.GetService(targetType);
-            var methodExecutor = ObjectMethodExecutor.Create(consumerInvoker, targetType.GetTypeInfo());
-            this.messageType = consumerInvoker.GetParameters().FirstOrDefault().ParameterType;
-            if (this.isRpc)
+            exchangeHandlers = new();
+            foreach (var exchange in exchangeMethodInfos.Keys)
             {
-                Func<object, Task<object>> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-                    await methodExecutor.ExecuteAsync(target, [message]) : message => Task.FromResult(methodExecutor.Execute(target, [message]));
-                this.consumerHandler = consumerHandler;
-            }
-            else
-            {
-                Func<object, Task> consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-                    await methodExecutor.ExecuteAsync(target, [message]) : message => { methodExecutor.Execute(target, [message]); return Task.CompletedTask; };
-                this.consumerHandler = consumerHandler;
+                var consumerInvoker = exchangeMethodInfos[exchange];
+                var targetType = consumerInvoker.DeclaringType;
+                var target = serviceProvider.GetService(targetType);
+                var methodExecutor = ObjectMethodExecutor.Create(consumerInvoker, targetType.GetTypeInfo());
+                var messageType = consumerInvoker.GetParameters().FirstOrDefault().ParameterType;
+                var returnType = consumerInvoker.ReturnType;
+                var isVoid = consumerInvoker.ReturnType == typeof(void) || consumerInvoker.ReturnType == typeof(Task);
+                Func<object, Task<object>> consumerHandler = null;
+                if (isVoid)
+                {
+                    returnType = typeof(object);
+                    consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+                    {
+                        await methodExecutor.ExecuteAsync(target, [message]);
+                        return null;
+                    }
+                    : message =>
+                    {
+                        methodExecutor.Execute(target, [message]);
+                        return Task.FromResult<object>(null);
+                    };
+                }
+                else
+                {
+                    consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+                        await methodExecutor.ExecuteAsync(target, [message]) : message => Task.FromResult(methodExecutor.Execute(target, [message]));
+                }
+                this.exchangeHandlers.TryAdd(exchange, (messageType, returnType, consumerHandler));
             }
         }
 
@@ -127,7 +139,7 @@ class RabbitConsumer
     public async Task RemoveQueue()
     {
         if (this.channel != null)
-            await channel.QueueDeleteAsync(this.QueueName);
+            await this.channel.QueueDeleteAsync(this.QueueName);
     }
     public async void Shutdown()
     {
@@ -181,10 +193,10 @@ class RabbitConsumer
                         {
                             try
                             {
-                                var parameters = TheaJsonSerializer.Deserialize(message.Body, this.messageType);
+                                (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
+                                var parameters = TheaJsonSerializer.Deserialize(message.Body, parameterType);
                                 if (message.Type == MessageType.RpcMessage)
                                 {
-                                    var typedHandler = (Func<object, Task<object>>)this.consumerHandler;
                                     var rpcResult = await typedHandler.Invoke(parameters);
                                     var rpcMessage = new Message
                                     {
@@ -197,11 +209,7 @@ class RabbitConsumer
                                     await this.parent.rabbitProducer.Publish("rpc.result", message.RoutingKey, rpcMessage.ToJson());
                                     break;
                                 }
-                                else
-                                {
-                                    var typedHandler = (Func<object, Task>)this.consumerHandler;
-                                    await typedHandler.Invoke(parameters);
-                                }
+                                else await typedHandler.Invoke(parameters);
                                 break;
                             }
                             catch (Exception ex)
@@ -216,15 +224,14 @@ class RabbitConsumer
                         var logInfo = new ExecLog
                         {
                             LogId = ObjectId.NewId(),
-                            ClusterId = this.ClusterId,
+                            ExchangeId = ea.Exchange,
                             RoutingKey = ea.RoutingKey,
                             Queue = this.QueueName,
                             Body = jsonBody,
                             IsSuccess = isSuccess,
                             Result = result,
                             RetryTimes = iLoop,
-                            UpdatedAt = DateTime.Now,
-                            UpdatedBy = this.ConsumerId
+                            UpdatedAt = DateTime.Now
                         };
                         if (this.IsLogEnabled || !isSuccess)
                         {
@@ -236,6 +243,24 @@ class RabbitConsumer
                     break;
                 case MessageType.RpcResponse:
                     this.parent.Next(message.MessageId, message.Body);
+                    break;
+                case MessageType.Heartbeat:
+                    if (message.AppId == this.parent.AppId)
+                    {
+                        var waiter = new TaskCompletionSource<bool>();
+                        this.parent.ProcessMessage(new Message
+                        {
+                            MessageId = message.MessageId,
+                            Type = message.Type,
+                            Body = (message.Body, waiter)
+                        });
+                        waiter.Task.Wait();
+                    }
+                    break;
+                case MessageType.WaitForStart:
+                    break;
+                case MessageType.WaitForShutdown:
+                    await this.parent.rabbitProducer.Publish("heartbeat", "#", message.ToJson());
                     break;
                 default:
                     if (message.AppId == this.parent.AppId)

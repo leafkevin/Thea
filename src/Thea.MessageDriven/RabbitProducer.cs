@@ -62,12 +62,12 @@ class RabbitProducer : IDisposable
         await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
         this.channelQueue.Add(channel);
     }
-    public async Task CreateQueue(string queueName, bool isSac, bool isHeartbeat)
+    public async Task CreateQueue(string queueName, bool isSac, bool isExclusive)
     {
         var channel = this.channelQueue.Take();
         IDictionary<string, object> arguments = null;
         if (isSac) arguments = new Dictionary<string, object> { { "x-single-active-consumer", true } };
-        if (isHeartbeat) await channel.QueueDeclareAsync(queueName, false, true, false, arguments);
+        if (isExclusive) await channel.QueueDeclareAsync(queueName, false, true, false, arguments);
         else await channel.QueueDeclareAsync(queueName, true, false, false, arguments);
         this.channelQueue.Add(channel);
     }
