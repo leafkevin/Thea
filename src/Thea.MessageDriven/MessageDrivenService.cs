@@ -441,7 +441,7 @@ class MessageDrivenService : IMessageDriven
         if (this.localExchangeIds.Count > 0)
         {
             var exchange = Consts.RpcExchange;
-            var rpcQueueName = $"rpc.result.{this.NodeId}";
+            var rpcQueueName = "rpc.result";
             await this.rabbitProducer.CreateExchange(exchange, Consts.TopicBindingType);
             this.resultRabbitConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, true);
             await this.resultRabbitConsumer.Start(exchange, this.NodeId);
@@ -450,7 +450,7 @@ class MessageDrivenService : IMessageDriven
         //没有消费者，什么都不做，也不创建
         if (!this.hasConsumer) return;
         await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
-        var queueName = $"heartbeat.queue.{this.NodeId}";
+        var queueName = "heartbeat.queue";
         this.heartbeatRabbitConsumer = new RabbitConsumer(queueName, this, this.serviceProvider, true);
         await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.SubscriberRoutingKey);
 
