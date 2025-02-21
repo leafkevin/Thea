@@ -38,7 +38,7 @@ class Message<TBody> : Message
 class ConsumerWaiter
 {
     public int WaitTotal { get; set; }
-    public List<string> QueueNames { get; set; }
+    public List<string> QueueNames { get; set; } = new();
     public List<RabbitConsumer> Consumers { get; set; } = new();
 }
 class RpcWaiter

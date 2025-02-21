@@ -14,7 +14,7 @@ public class StatefulConsumer
     }
     public Task RemoveCache(string key)
     {
-        Console.WriteLine($"RemoveCache:  {RemoveCache}");
+        Console.WriteLine($"RemoveCache: {key}");
         return Task.CompletedTask;
     }
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)

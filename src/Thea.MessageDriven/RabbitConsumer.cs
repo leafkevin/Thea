@@ -1,15 +1,15 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -23,7 +23,7 @@ class RabbitConsumer
     private Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
     private IConnection connection = null;
-    private IChannel channel = null;
+    private volatile IChannel channel = null;
     private string connectionId;
     private bool isExclusive = false;
     private Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
@@ -34,13 +34,15 @@ class RabbitConsumer
     public volatile bool IsLogEnabled;
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
+    public bool IsActivated => this.channel != null && this.channel.IsOpen;
 
     public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, bool isExclusive, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
         this.parent = parent;
         this.ConsumerId = ObjectId.NewId();
         this.QueueName = queueName;
-        this.connectionId = $"{queueName}.{parent.NodeId}";
+        this.connectionId = queueName;
+        if (!isExclusive) this.connectionId += $".{parent.NodeId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -193,8 +195,10 @@ class RabbitConsumer
                     case MessageType.WaitForStart:
                         if (message.AppId == this.parent.AppId)
                         {
+                            Console.WriteLine($"WaitForStart - heartbeat: {this.QueueName} received!");
                             //让主分发处理器累加计算消息完成的队列个数
-                            (var queueId, var queueName) = message.Body.JsonTo<(string, string)>();
+                            var queueName = message.Body;
+                            var queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
                             waiter = new TaskCompletionSource<bool>();
                             this.parent.ProcessMessage(new Message
                             {
@@ -253,6 +257,7 @@ class RabbitConsumer
                 Exception exception = null;
                 bool isSuccess = true;
                 var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+
                 var message = jsonBody.JsonTo<Message<string>>();
                 //兼容现非框架队列消息
                 if (message.MessageId == null)
@@ -325,6 +330,7 @@ class RabbitConsumer
                         break;
                     case MessageType.WaitForStart:
                     case MessageType.WaitForShutdown:
+                        Console.WriteLine($"{message.Type} - message: {this.QueueName} received!");
                         //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
                         await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, "#", message.ToJson());
                         break;
