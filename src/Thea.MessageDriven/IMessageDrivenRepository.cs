@@ -6,6 +6,6 @@ namespace Thea.MessageDriven;
 public interface IMessageDrivenRepository
 {
     Task<(List<Queue>, List<Binding>)> GetConfigInfo();
-    Task Register(List<Queue> queues, List<Binding> bindings);
+    Task<bool> Register(List<Queue> queues, List<Binding> bindings);
     Task WriteLogs(List<ExecLog> logInfos);
 }

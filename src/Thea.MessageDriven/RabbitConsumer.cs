@@ -181,7 +181,7 @@ class RabbitConsumer
                     case MessageType.Heartbeat:
                         if (message.AppId == this.parent.AppId)
                         {
-                            Console.WriteLine($"WaitForStart - heartbeat: {this.QueueName} received!");
+                            Console.WriteLine($"{message.Type} - heartbeat: {message.Body} received!");
                             //让主分发处理器累加计算消息完成的队列个数
                             var queueName = message.Body;
                             waiter = new TaskCompletionSource<bool>();
