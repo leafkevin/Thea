@@ -51,7 +51,6 @@ public class DefaultRepository : IMessageDrivenRepository
             await repository.Create<Queue>()
                 .IgnoreInto().WithBulk(queues)
                 .ExecuteAsync();
-            await this.redisCache.RemoveAsync($"{this.appId}.queue.all");
             refresh = true;
         }
         if (bindings != null && bindings.Count > 0)
@@ -59,10 +58,18 @@ public class DefaultRepository : IMessageDrivenRepository
             await repository.Create<Binding>()
                 .IgnoreInto().WithBulk(bindings)
                 .ExecuteAsync();
-            await this.redisCache.RemoveAsync($"{this.appId}.binding.all");
             refresh = true;
         }
+        //这里不能更新缓存，一更新缓存，只有生产者的组件，在队列没有创建好前，获得了这个配置，
+        //消息会被发送到一个不存在的队列，导致消息丢失
         return refresh;
+    }
+    public virtual async Task UpdateCache()
+    {
+        var cacheKey = $"{this.appId}.queue.all";
+        await this.redisCache.RemoveAsync(cacheKey);
+        cacheKey = $"{this.appId}.binding.all";
+        await this.redisCache.RemoveAsync(cacheKey);
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
     {
