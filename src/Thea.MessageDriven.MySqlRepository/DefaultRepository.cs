@@ -64,6 +64,13 @@ public class DefaultRepository : IMessageDrivenRepository
         //消息会被发送到一个不存在的队列，导致消息丢失
         return refresh;
     }
+    public virtual async Task ChangeQueue(string queueId, int workloadTotal)
+    {
+        var repository = this.dbFactory.Create(this.dbKey);
+        await repository.UpdateAsync<Queue>(new { QueueId = queueId, WorkloadTotal = workloadTotal });
+        var cacheKey = $"{this.appId}.queue.all";
+        await this.redisCache.RemoveAsync(cacheKey);
+    }
     public virtual async Task UpdateCache()
     {
         var cacheKey = $"{this.appId}.queue.all";

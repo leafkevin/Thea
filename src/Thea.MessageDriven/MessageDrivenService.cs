@@ -437,7 +437,25 @@ class MessageDrivenService : IMessageDriven
             myBinding.IsDelay = isDelay;
         }
     }
-
+    public async Task ChangeQueue(string queueId, int workloadTotal)
+    {
+        var myQueue = this.queues.Find(f => f.QueueId == queueId);
+        var oldWorkloadTotal = myQueue.WorkloadTotal;
+        if (myQueue == null || !myQueue.IsEnabled || !myQueue.IsStateful
+            || oldWorkloadTotal == workloadTotal) return;
+        if (workloadTotal > oldWorkloadTotal)
+        {
+            var myBindings = this.bindings.FindAll(f => f.QueueId == queueId);
+            for (int i = oldWorkloadTotal; i < workloadTotal; i++)
+            {
+                var queueName = $"{queueId}.{i}";
+                await this.rabbitProducer.CreateQueue(queueName, myQueue.IsSac, false);
+                foreach (var myBinding in myBindings)
+                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+            }
+        }
+        await this.repository.ChangeQueue(queueId, workloadTotal);
+    }
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message
     {

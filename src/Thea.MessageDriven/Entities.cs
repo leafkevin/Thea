@@ -22,7 +22,7 @@ public class Binding
     /// <summary>
     /// 绑定KEY
     /// </summary>
-    public string BindingKey { get; set; }    
+    public string BindingKey { get; set; }
     /// <summary>
     /// 是否延时消费者
     /// </summary>
@@ -65,8 +65,6 @@ public class Queue
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
-
-    public bool IsConsumer { get; set; }
 }
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志

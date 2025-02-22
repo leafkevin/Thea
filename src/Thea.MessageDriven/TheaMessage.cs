@@ -18,8 +18,7 @@ enum ChangeType
 {
     None,
     AddQueue,
-    RemoveQueue,
-    BindingChanged
+    RemoveQueue
 }
 class Message
 {
