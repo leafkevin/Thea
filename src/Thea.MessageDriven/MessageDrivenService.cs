@@ -7,7 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.VisualBasic;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -21,7 +23,7 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
     private readonly ConcurrentDictionary<string, ConsumerWaiter> waitingStartConsumers = new();
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitingShutdownConsumers = new();
-    private readonly ConcurrentDictionary<string, DateTime> nodeHeartbeats = new();
+    private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
@@ -50,6 +52,9 @@ class MessageDrivenService : IMessageDriven
     public MessageDrivenService(IServiceProvider serviceProvider)
     {
         this.serviceProvider = serviceProvider;
+        var hostAppLifetime = serviceProvider.GetService<IHostApplicationLifetime>();
+        hostAppLifetime.ApplicationStopping.Register(() => this.Shutdown());
+
         this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
@@ -61,7 +66,7 @@ class MessageDrivenService : IMessageDriven
         }
         this.sacCount = configuration.GetValue("MessageDriven:SacCount", 3);
         this.NodeId = ObjectId.NewId();
-        Console.WriteLine($"Local NodeId: {this.NodeId}");
+
         this.task = Task.Factory.StartNew(async () =>
         {
             this.readyToStart.WaitOne();
@@ -114,29 +119,39 @@ class MessageDrivenService : IMessageDriven
                                     this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, theaMessage.ToJson());
                                 else
                                 {
-                                    var myExchange = this.bindings.Find(f => f.ExchangeId == message.Exchange);
-                                    if (myExchange == null)
-                                        throw new Exception($"未知的交换机{message.Exchange}，请先注册交换机:{message.Exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
-                                    var myQueue = this.queues.Find(f => f.QueueId == myExchange.QueueId);
-                                    if (myQueue == null)
-                                        throw new Exception($"未知的绑定队列{myExchange.QueueId}，请先注册队列及消费者，可使用UseStatefulConsumer或UseSubscriber方法");
-                                    if (myQueue.IsStateful)
+                                    var myBindings = this.bindings.FindAll(f => f.ExchangeId == message.Exchange);
+                                    foreach (var myBinding in myBindings)
                                     {
-                                        uint routingKey = 0;
-                                        if (myQueue.WorkloadTotal > 1)
+                                        var myQueue = this.queues.Find(f => f.QueueId == myBinding.QueueId);
+                                        if (myQueue == null)
                                         {
-                                            var hashKey = Farmhash.Hash32(message.RoutingKey);
-                                            routingKey = (uint)(hashKey % myQueue.WorkloadTotal);
+                                            (this.queues, this.bindings) = await this.repository.GetConfigInfo();
+                                            myQueue = this.queues.Find(f => f.QueueId == myBinding.QueueId);
+                                            if (myQueue == null)
+                                            {
+                                                var errMessage = $"未注册的队列{myBinding.QueueId}，可使用UseStatefulConsumer、UseSubscriber方法进行注册和绑定";
+                                                this.logger.LogTagError("MessageDriven", errMessage);
+                                                throw new Exception(errMessage);
+                                            }
                                         }
-                                        await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), theaMessage.ToJson());
+                                        if (myQueue.IsStateful)
+                                        {
+                                            uint routingKey = 0;
+                                            if (myQueue.WorkloadTotal > 1)
+                                            {
+                                                var hashKey = Farmhash.Hash32(message.RoutingKey);
+                                                routingKey = (uint)(hashKey % myQueue.WorkloadTotal);
+                                            }
+                                            await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), theaMessage.ToJson());
+                                        }
+                                        else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
                                     }
-                                    else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
                                 }
                                 break;
                             case MessageType.Heartbeat:
                                 //统一处理心跳，可防止并发
                                 (var nodeId, waiter) = ((string, TaskCompletionSource<bool>))message.Body;
-                                this.nodeHeartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
+                                this.heartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
                                 waiter.TrySetResult(true);
                                 break;
                             case MessageType.WaitForStart:
@@ -158,7 +173,7 @@ class MessageDrivenService : IMessageDriven
                             case MessageType.WaitForShutdown:
                                 (queueName, waiter) = ((string, TaskCompletionSource<bool>))message.Body;
                                 if (this.waitingShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
-                                    rabbitConsumers.ForEach(f => f.Shutdown());
+                                    rabbitConsumers.ForEach(async f => await f.Shutdown());
                                 waiter.TrySetResult(true);
                                 break;
                             case MessageType.Logs:
@@ -180,16 +195,20 @@ class MessageDrivenService : IMessageDriven
     public void Start()
     {
         this.Register().Wait();
-        this.nodeHeartbeats.TryAdd(this.NodeId, DateTime.Now);
+        this.heartbeats.TryAdd(this.NodeId, DateTime.Now);
         this.readyToStart.Set();
+        Console.WriteLine($"Local NodeId: {this.NodeId}");
     }
     public void Shutdown()
     {
         this.cancellationSource.Cancel();
         this.rabbitProducer.Shutdown().Wait();
         foreach (var rabbitConsumers in this.consumers.Values)
-            rabbitConsumers.ForEach(f => f.Shutdown());
+            rabbitConsumers.ForEach(async f => await f.Shutdown());
         this.consumers.Clear();
+        this.rabbitProducer.Shutdown().Wait();
+        this.heartbeatRabbitConsumer?.Shutdown().Wait();
+        this.resultRabbitConsumer?.Shutdown();
 
         if (this.task != null)
             this.task.Wait();
@@ -198,7 +217,11 @@ class MessageDrivenService : IMessageDriven
     public void Publish<TMessage>(string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
-            throw new Exception($"交换机{exchange}没有绑定到任何队列，本地没有绑定或是没有从持久化存储中捞取到绑定关系数据");
+        {
+            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
@@ -220,9 +243,17 @@ class MessageDrivenService : IMessageDriven
     public string Request<TMessage>(string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
-            throw new Exception($"交换机{exchange}没有绑定到任何队列，本地没有绑定或是没有从持久化存储中捞取到绑定关系数据");
+        {
+            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
         if (!this.rpcExchanges.Contains(exchange))
-            throw new Exception($"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true");
+        {
+            var errMessage = $"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
@@ -243,9 +274,17 @@ class MessageDrivenService : IMessageDriven
     public async Task<string> RequestAsync<TMessage>(string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
-            throw new Exception($"交换机{exchange}没有绑定到任何队列，本地没有绑定或是没有从持久化存储中捞取到绑定关系数据");
+        {
+            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
         if (!this.rpcExchanges.Contains(exchange))
-            throw new Exception($"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true");
+        {
+            var errMessage = $"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
@@ -267,9 +306,12 @@ class MessageDrivenService : IMessageDriven
     {
         if (enqueueTimeUtc < DateTime.UtcNow)
             throw new Exception($"入队时间晚于现在时间，只能选择未来时间");
-        var myExchange = this.bindings.Find(f => f.ExchangeId == exchange);
-        if (myExchange == null)
-            throw new Exception($"未知的交换机{exchange}，请先注册交换机:{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法");
+        if (!this.bindings.Exists(f => f.ExchangeId == exchange))
+        {
+            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
@@ -409,7 +451,7 @@ class MessageDrivenService : IMessageDriven
         Body = logInfo
     });
     internal void ProcessMessage(Message message) => this.messageQueue.Enqueue(message);
-    internal void Next(string messageId, string result)
+    internal void SetRpcResult(string messageId, string result)
     {
         if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
             rpcWaiter.Waiter.TrySetResult(result);
@@ -444,16 +486,20 @@ class MessageDrivenService : IMessageDriven
             this.resultRabbitConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, true);
             await this.resultRabbitConsumer.Start(exchange, this.NodeId);
         }
-        this.queues = dbQueues;
-        this.bindings = dbBindings;
-
-        //没有消费者，什么都不做，也不创建
+        var isCreated = dbQueues != null && dbQueues.Count > 0 && dbBindings != null && dbBindings.Count > 0;
+        if (isCreated)
+        {
+            this.queues = dbQueues;
+            this.bindings = dbBindings;
+        }
         if (!this.hasConsumer) return;
+
+
         await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
         var queueName = $"heartbeat.queue.{this.NodeId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer(queueName, this, this.serviceProvider, true);
-        await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.SubscriberRoutingKey);
-        var isCreated = dbQueues != null && dbQueues.Count > 0 && dbBindings != null && dbBindings.Count > 0;
+        await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
+
         //创建交换机和队列
         foreach (var queue in this.queues)
         {
@@ -471,19 +517,14 @@ class MessageDrivenService : IMessageDriven
                     queueName = $"{queue.QueueId}.{i}";
                     await this.rabbitProducer.CreateQueue(queueName, queue.IsSac, false);
                     foreach (var myBinding in myBindings)
-                    {
-                        var bindingKey = i.ToString();
-                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, bindingKey);
-                    }
+                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
                 }
             }
             else
             {
                 await this.rabbitProducer.CreateQueue(queue.QueueId, false, false);
                 foreach (var myBinding in myBindings)
-                {
-                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queue.QueueId, Consts.SubscriberRoutingKey);
-                }
+                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queue.QueueId, Consts.FanoutRoutingKey);
             }
         }
         await this.SendHeartbeat();
@@ -504,9 +545,9 @@ class MessageDrivenService : IMessageDriven
         (this.queues, this.bindings) = await this.repository.GetConfigInfo();
         var nodeIds = new List<string>();
         var removedKeys = new List<string>();
-        foreach (var nodeId in this.nodeHeartbeats.Keys)
+        foreach (var nodeId in this.heartbeats.Keys)
         {
-            if (DateTime.Now.Subtract(this.nodeHeartbeats[nodeId]) > this.heartbeatCycle * 1.5)
+            if (DateTime.Now.Subtract(this.heartbeats[nodeId]) > this.heartbeatCycle * 1.5)
             {
                 removedKeys.Add(nodeId);
                 continue;
@@ -515,7 +556,7 @@ class MessageDrivenService : IMessageDriven
         }
         nodeIds.Sort((x, y) => x.CompareTo(y));
         if (removedKeys.Count > 0)
-            removedKeys.ForEach(f => this.nodeHeartbeats.TryRemove(f, out _));
+            removedKeys.ForEach(f => this.heartbeats.TryRemove(f, out _));
 
         int index = 0;
         var myNodeInfo = nodeIds.Find(f => f == this.NodeId);
@@ -605,7 +646,7 @@ class MessageDrivenService : IMessageDriven
                         var removeIndex = rabbitConsumers.Count - 1;
                         var myRabbitConsumer = rabbitConsumers[removeIndex];
                         //增加节点导致本节点消费者减少，当前消息消费完，就直接关闭，会有其他SAC消费者继续消费
-                        myRabbitConsumer.Shutdown();
+                        await myRabbitConsumer.Shutdown();
                         rabbitConsumers.RemoveAt(removeIndex);
                     }
                 }
@@ -699,17 +740,18 @@ class MessageDrivenService : IMessageDriven
                 {
                     var removeIndex = rabbitConsumers.Count - 1;
                     var myRabbitConsumer = rabbitConsumers[removeIndex];
-                    myRabbitConsumer.Shutdown();
+                    await myRabbitConsumer.Shutdown();
                     rabbitConsumers.RemoveAt(removeIndex);
                 }
             }
         }
 
+        Console.WriteLine($"Nodes: {string.Join(" , ", nodeIds)}");
+        Console.WriteLine("Consumers:");
         foreach (var item in this.consumers)
         {
             var queues = string.Join(" , ", item.Value.Select(f => f.QueueName + ":" + f.IsActivated).ToList());
             Console.WriteLine($"QueueId: {item.Key}, Count: {item.Value.Count}, {queues}");
         }
-
     }
 }

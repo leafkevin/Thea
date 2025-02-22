@@ -19,18 +19,19 @@ class RabbitConsumer
 {
     private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
     private readonly MessageDrivenService parent;
-    private ConnectionFactory factory;
-    private Action<ExecLog> addLogsHandler;
+    private readonly ConnectionFactory factory;
+    private readonly Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
+    private readonly string connectionId;
+    private readonly bool isExclusive = false;
+    private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
+
     private IConnection connection = null;
     private volatile IChannel channel = null;
-    private string connectionId;
-    private bool isExclusive = false;
-    private Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
-
-    public volatile bool IsRunning = false;
-    public volatile bool IsStarted = false;
+    private volatile bool isRunning = false;
+    private volatile bool isStarted = false;
     private volatile bool isDeferClose = false;
+
     public volatile bool IsLogEnabled;
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
@@ -61,7 +62,7 @@ class RabbitConsumer
                 var methodExecutor = ObjectMethodExecutor.Create(consumerInvoker, targetType.GetTypeInfo());
                 var messageType = consumerInvoker.GetParameters().FirstOrDefault().ParameterType;
                 var returnType = consumerInvoker.ReturnType;
-                var isVoid = consumerInvoker.ReturnType == typeof(void) || consumerInvoker.ReturnType == typeof(Task);
+                var isVoid = returnType == typeof(void) || returnType == typeof(Task) || returnType == typeof(ValueTask);
                 Func<object, Task<object>> consumerHandler = null;
                 if (isVoid)
                 {
@@ -103,22 +104,17 @@ class RabbitConsumer
     }
     public async Task Start()
     {
-        if (this.IsRunning || this.IsStarted) return;
+        if (this.isRunning || this.isStarted) return;
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
         ushort prefetchCount = 20;
         await this.channel.BasicQosAsync(0, prefetchCount, false);
-        //this.channel.BasicRecoverOk += (o, e) =>
-        //{
-        //    var model = o as IModel;
-        //    model.BasicQos(0, prefetchCount, false);
-        //};
         await this.BindHandler();
-        this.IsStarted = true;
+        this.isStarted = true;
     }
     public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
     {
-        if (this.IsRunning || this.IsStarted) return;
+        if (this.isRunning || this.isStarted) return;
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
 
@@ -130,23 +126,18 @@ class RabbitConsumer
 
         ushort prefetchCount = 20;
         await this.channel.BasicQosAsync(0, prefetchCount, false);
-        //this.channel.BasicRecoverOk += (o, e) =>
-        //{
-        //    var model = o as IModel;
-        //    model.BasicQos(0, prefetchCount, false);
-        //};
         await this.BindHandler();
-        this.IsStarted = true;
+        this.isStarted = true;
     }
     public async Task RemoveQueue()
     {
         if (this.channel != null)
             await this.channel.QueueDeleteAsync(this.QueueName);
     }
-    public async void Shutdown()
+    public async Task Shutdown()
     {
         this.cancellationSource.Cancel();
-        if (this.IsRunning) this.isDeferClose = true;
+        if (this.isRunning) this.isDeferClose = true;
         else await this.Close();
     }
     private async Task Close()
@@ -177,61 +168,35 @@ class RabbitConsumer
 
                 var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
                 var message = jsonBody.JsonTo<Message<string>>();
-                //兼容现非框架队列消息
-                if (message.MessageId == null)
-                {
-                    message.MessageId = ObjectId.NewId();
-                    message.Type = MessageType.Message;
-                    message.Body = jsonBody;
-                }
                 //内部消息，交给消息总分发处处理
                 TaskCompletionSource<bool> waiter = null;
                 switch (message.Type)
                 {
                     case MessageType.RpcResponse:
-                        this.parent.Next(message.MessageId, message.Body);
+                        this.parent.SetRpcResult(message.MessageId, message.Body);
                         break;
 
                     case MessageType.WaitForStart:
+                    case MessageType.WaitForShutdown:
+                    case MessageType.Heartbeat:
                         if (message.AppId == this.parent.AppId)
                         {
                             Console.WriteLine($"WaitForStart - heartbeat: {this.QueueName} received!");
                             //让主分发处理器累加计算消息完成的队列个数
                             var queueName = message.Body;
-                            var queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
                             waiter = new TaskCompletionSource<bool>();
-                            this.parent.ProcessMessage(new Message
+                            var nextMessage = new Message
                             {
                                 MessageId = message.MessageId,
                                 Type = message.Type,
-                                Body = (queueId, queueName, waiter)
-                            });
-                            waiter.Task.Wait();
-                        }
-                        break;
-                    case MessageType.WaitForShutdown:
-                        if (message.AppId == this.parent.AppId)
-                        {
-                            waiter = new TaskCompletionSource<bool>();
-                            this.parent.ProcessMessage(new Message
+                                Body = (queueName, waiter)
+                            };
+                            if (message.Type == MessageType.WaitForStart)
                             {
-                                MessageId = message.MessageId,
-                                Type = message.Type,
-                                Body = (message.Body, waiter)
-                            });
-                            waiter.Task.Wait();
-                        }
-                        break;
-                    case MessageType.Heartbeat:
-                        if (message.AppId == this.parent.AppId)
-                        {
-                            waiter = new TaskCompletionSource<bool>();
-                            this.parent.ProcessMessage(new Message
-                            {
-                                MessageId = message.MessageId,
-                                Type = message.Type,
-                                Body = (message.Body, waiter)
-                            });
+                                var queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
+                                nextMessage.Body = (queueId, queueName, waiter);
+                            }
+                            this.parent.ProcessMessage(nextMessage);
                             waiter.Task.Wait();
                         }
                         break;
@@ -332,7 +297,7 @@ class RabbitConsumer
                     case MessageType.WaitForShutdown:
                         Console.WriteLine($"{message.Type} - message: {this.QueueName} received!");
                         //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
-                        await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, "#", message.ToJson());
+                        await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, message.ToJson());
                         break;
                     default: throw new Exception("Unknown message type");
                 }
