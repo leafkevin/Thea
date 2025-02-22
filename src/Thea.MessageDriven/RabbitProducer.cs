@@ -18,7 +18,7 @@ class RabbitProducer : IDisposable
 
     public static async Task<RabbitProducer> Create(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 10)
     {
-        var connectionId = $"producer-{parent.NodeId}";
+        var connectionId = $"producer.{parent.NodeId}";
         var configuration = serviceProvider.GetService<IConfiguration>();
         var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");

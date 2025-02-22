@@ -27,7 +27,6 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
     private bool hasConsumer = false;
-    private bool isChanged = false;
     private List<string> localExchangeIds = new();
     private List<string> localQueueIds = new();
     private List<Queue> queues = new();
@@ -80,12 +79,6 @@ class MessageDrivenService : IMessageDriven
                         if (this.hasConsumer) await this.SendHeartbeat();
                         await this.Initialize();
                         if (this.hasConsumer) await this.StartConsumers();
-                        if (this.isChanged && this.waitingStartConsumers.Count == 0 && this.waitingShutdownConsumers.Count == 0)
-                        {
-                            //清除缓存，保证生产者获得配置与消费者一致，避免消息丢失
-                            await this.repository.UpdateCache();
-                            this.isChanged = false;
-                        }
                         this.lastInitedTime = DateTime.Now;
                     }
                     if ((DateTime.Now - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
@@ -566,6 +559,7 @@ class MessageDrivenService : IMessageDriven
         var myQueues = this.queues.Where(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled && f.IsStateful)
             .OrderBy(f => f.QueueId).ToList();
 
+        bool isChanged = false;
         for (int i = 0; i < myQueues.Count; i++)
         {
             var myQueue = myQueues[i];
@@ -585,7 +579,7 @@ class MessageDrivenService : IMessageDriven
                     changeType = ChangeType.RemoveQueue;
             }
             if (changeType != ChangeType.None)
-                this.isChanged = true;
+                isChanged = true;
 
             //确保所有队列都已经创建并绑定
             var myBindings = this.bindings.FindAll(f => f.QueueId == queueId);
@@ -747,6 +741,9 @@ class MessageDrivenService : IMessageDriven
                 }
             }
         }
+
+        //清除缓存，保证生产者获得配置与消费者一致
+        if (isChanged) await this.repository.UpdateCache();
 
         Console.WriteLine($"Nodes: {string.Join(" , ", nodeIds)}");
         Console.WriteLine("Consumers:");
