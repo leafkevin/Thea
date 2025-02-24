@@ -503,7 +503,7 @@ class MessageDrivenService : IMessageDriven
             registerBindings.Add(myBinding);
         }
         //代码中有配置集群信息，但是数据库或是配置中心没有，需要注册，如果需要删除集群配置，需要在代码中要删除
-        await this.repository.Register(registerQueues, registerBindings);
+        var isChanged = await this.repository.Register(registerQueues, registerBindings);
 
         this.rabbitProducer = await RabbitProducer.Create(this, this.serviceProvider);
         if (this.localExchangeIds.Count > 0)
@@ -524,12 +524,19 @@ class MessageDrivenService : IMessageDriven
         await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
 
         //创建交换机和队列
-        foreach (var queue in this.queues)
+        if (isChanged)
+            await this.Register(registerQueues, registerBindings);
+        await this.Register(this.queues, this.bindings);
+        await this.SendHeartbeat();
+    }
+    private async Task Register(List<Queue> registerQueues, List<Binding> registerBindings)
+    {
+        foreach (var queue in registerQueues)
         {
             if (!queue.IsEnabled)
                 continue;
 
-            var myBindings = this.bindings.FindAll(f => f.QueueId == queue.QueueId);
+            var myBindings = registerBindings.FindAll(f => f.QueueId == queue.QueueId);
             foreach (var myBinding in myBindings)
                 await rabbitProducer.CreateExchange(myBinding.ExchangeId, myBinding.BindType, myBinding.IsDelay);
 
@@ -537,7 +544,7 @@ class MessageDrivenService : IMessageDriven
             {
                 for (int i = 0; i < queue.WorkloadTotal; i++)
                 {
-                    queueName = $"{queue.QueueId}.{i}";
+                    var queueName = $"{queue.QueueId}.{i}";
                     await this.rabbitProducer.CreateQueue(queueName, queue.IsSac, false);
                     foreach (var myBinding in myBindings)
                         await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
@@ -550,7 +557,6 @@ class MessageDrivenService : IMessageDriven
                     await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queue.QueueId, Consts.FanoutRoutingKey);
             }
         }
-        await this.SendHeartbeat();
     }
     private async Task Initialize()
     {
