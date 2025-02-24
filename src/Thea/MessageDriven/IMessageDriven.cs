@@ -3,12 +3,14 @@ using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
 
+public delegate (string, string) ExchangeRoutingSelector(string exchange, string routingKey, object message);
+
 public interface IMessageDriven
 {
     void Start();
     void Shutdown();
 
-    Task ChangeQueue(string queue, int prefetchCount );
+    Task ChangeQueue(string queue, int prefetchCount);
 
     void Publish<TMessage>(string exchange, string routingKey, TMessage message);
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message);

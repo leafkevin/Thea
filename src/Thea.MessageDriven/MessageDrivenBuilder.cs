@@ -47,4 +47,9 @@ public class MessageDrivenBuilder
         this.messageDriven.UseSubscriber(clusterId, queue, methodInfo, routingKey, isDelay);
         return this;
     }
+    public MessageDrivenBuilder UseStrategy(string exchange, ExchangeRoutingSelector exchangeRoutingKeySelector)
+    {
+        this.messageDriven.UseStrategy(exchange, exchangeRoutingKeySelector);
+        return this;
+    }
 }
