@@ -37,7 +37,7 @@ class MessageDrivenService : IMessageDriven
     private RabbitConsumer heartbeatRabbitConsumer;
     private RabbitConsumer resultRabbitConsumer;
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
-    private readonly Dictionary<string, ExchangeRoutingSelector> exchangeRoutingSelectors = new();
+    private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
     private IMessageDrivenRepository repository;
@@ -221,8 +221,8 @@ class MessageDrivenService : IMessageDriven
         }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
-        if (this.exchangeRoutingSelectors.TryGetValue(exchange, out var exchangeRoutingSelector))
-            (exchange, routingKey) = exchangeRoutingSelector(exchange, routingKey, message);
+        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
+            exchange = exchangeSelector.Invoke(exchange, message);
         this.messageQueue.Enqueue(new Message
         {
             MessageId = ObjectId.NewId(),
@@ -255,8 +255,8 @@ class MessageDrivenService : IMessageDriven
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
-        if (this.exchangeRoutingSelectors.TryGetValue(exchange, out var exchangeRoutingSelector))
-            (exchange, routingKey) = exchangeRoutingSelector(exchange, routingKey, message);
+        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
+            exchange = exchangeSelector.Invoke(exchange, message);
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
@@ -288,8 +288,8 @@ class MessageDrivenService : IMessageDriven
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
-        if (this.exchangeRoutingSelectors.TryGetValue(exchange, out var exchangeRoutingSelector))
-            (exchange, routingKey) = exchangeRoutingSelector(exchange, routingKey, message);
+        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
+            exchange = exchangeSelector.Invoke(exchange, message);
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
@@ -317,8 +317,8 @@ class MessageDrivenService : IMessageDriven
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
-        if (this.exchangeRoutingSelectors.TryGetValue(exchange, out var exchangeRoutingSelector))
-            (exchange, routingKey) = exchangeRoutingSelector(exchange, routingKey, message);
+        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
+            exchange = exchangeSelector.Invoke(exchange, message);
         this.messageQueue.Enqueue(new Message
         {
             MessageId = ObjectId.NewId(),
@@ -465,11 +465,11 @@ class MessageDrivenService : IMessageDriven
         }
         await this.repository.ChangeQueue(queueId, workloadTotal);
     }
-    public void UseStrategy(string exchange, ExchangeRoutingSelector exchangeRoutingKeySelector)
+    public void UseStrategy(string exchange, Func<string, object, string> exchangeSelector)
     {
-        if (exchangeRoutingKeySelector == null)
-            throw new ArgumentNullException(nameof(exchangeRoutingKeySelector));
-        this.exchangeRoutingSelectors.Add(exchange, exchangeRoutingKeySelector);
+        if (exchangeSelector == null)
+            throw new ArgumentNullException(nameof(exchangeSelector));
+        this.exchangeSelectors.Add(exchange, exchangeSelector);
     }
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message

@@ -3,8 +3,6 @@ using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
 
-public delegate (string, string) ExchangeRoutingSelector(string exchange, string routingKey, object message);
-
 public interface IMessageDriven
 {
     void Start();
