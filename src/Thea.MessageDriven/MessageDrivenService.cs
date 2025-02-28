@@ -28,6 +28,9 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentQueue<Message> messageQueue = new();
 
     private bool hasConsumer = false;
+    private bool isAllowCreateQueue = false;
+    private bool isAllowCreateExchange = false;
+    private bool isAllowCreateBinding = false;
     private List<string> localExchangeIds = new();
     private List<string> localQueueIds = new();
     private List<Queue> queues = new();
@@ -59,6 +62,10 @@ class MessageDrivenService : IMessageDriven
         var configuration = serviceProvider.GetService<IConfiguration>();
         this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
         this.AppId = configuration.GetValue<string>("AppId");
+        this.isAllowCreateQueue = configuration.GetValue<bool>("MessageDriven:IsAllowCreateQueue", false);
+        this.isAllowCreateExchange = configuration.GetValue<bool>("MessageDriven:IsAllowCreateExchange", false);
+        this.isAllowCreateBinding = configuration.GetValue<bool>("MessageDriven:IsAllowCreateBinding", false);
+
         if (string.IsNullOrEmpty(this.AppId))
         {
             this.logger.LogTagError("MessageDriven", "未设置AppId，无法初始化MessageDrivenService对象");
@@ -458,9 +465,15 @@ class MessageDrivenService : IMessageDriven
             for (int i = oldWorkloadTotal; i < workloadTotal; i++)
             {
                 var queueName = $"{queueId}.{i}";
-                await this.rabbitProducer.CreateQueue(queueName, myQueue.IsSac, false);
-                foreach (var myBinding in myBindings)
-                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+                if (this.isAllowCreateQueue)
+                    await this.rabbitProducer.CreateQueue(queueName, myQueue.IsSac, false);
+                if (this.isAllowCreateBinding)
+                {
+                    foreach (var myBinding in myBindings)
+                    {
+                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+                    }
+                }
             }
         }
         await this.repository.ChangeQueue(queueId, workloadTotal);
@@ -510,7 +523,8 @@ class MessageDrivenService : IMessageDriven
         {
             var exchange = Consts.RpcExchange;
             var rpcQueueName = $"rpc.result.{this.NodeId}";
-            await this.rabbitProducer.CreateExchange(exchange, Consts.TopicBindingType);
+            if (this.isAllowCreateExchange)
+                await this.rabbitProducer.CreateExchange(exchange, Consts.TopicBindingType);
             this.resultRabbitConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, true);
             await this.resultRabbitConsumer.Start(exchange, this.NodeId);
         }
@@ -518,7 +532,8 @@ class MessageDrivenService : IMessageDriven
 
         //消费者先把队列和绑定建好后，生产者再变更
         (this.queues, this.bindings) = await this.repository.GetConfigInfo();
-        await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
+        if (this.isAllowCreateExchange)
+            await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
         var queueName = $"heartbeat.queue.{this.NodeId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer(queueName, this, this.serviceProvider, true);
         await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
@@ -537,24 +552,41 @@ class MessageDrivenService : IMessageDriven
                 continue;
 
             var myBindings = registerBindings.FindAll(f => f.QueueId == queue.QueueId);
-            foreach (var myBinding in myBindings)
-                await rabbitProducer.CreateExchange(myBinding.ExchangeId, myBinding.BindType, myBinding.IsDelay);
+            if (this.isAllowCreateExchange)
+            {
+                foreach (var myBinding in myBindings)
+                {
+                    await rabbitProducer.CreateExchange(myBinding.ExchangeId, myBinding.BindType, myBinding.IsDelay);
+                }
+            }
 
             if (queue.IsStateful)
             {
                 for (int i = 0; i < queue.WorkloadTotal; i++)
                 {
                     var queueName = $"{queue.QueueId}.{i}";
-                    await this.rabbitProducer.CreateQueue(queueName, queue.IsSac, false);
-                    foreach (var myBinding in myBindings)
-                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+                    if (this.isAllowCreateQueue)
+                        await this.rabbitProducer.CreateQueue(queueName, queue.IsSac, false);
+                    if (this.isAllowCreateBinding)
+                    {
+                        foreach (var myBinding in myBindings)
+                        {
+                            await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+                        }
+                    }
                 }
             }
             else
             {
-                await this.rabbitProducer.CreateQueue(queue.QueueId, false, false);
-                foreach (var myBinding in myBindings)
-                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queue.QueueId, Consts.FanoutRoutingKey);
+                if (this.isAllowCreateQueue)
+                    await this.rabbitProducer.CreateQueue(queue.QueueId, false, false);
+                if (this.isAllowCreateBinding)
+                {
+                    foreach (var myBinding in myBindings)
+                    {
+                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queue.QueueId, Consts.FanoutRoutingKey);
+                    }
+                }
             }
         }
     }
@@ -625,9 +657,16 @@ class MessageDrivenService : IMessageDriven
             for (int k = oldWorkloadTotal; k < myQueue.WorkloadTotal; k++)
             {
                 var queueName = $"{queueId}.{k}";
-                await this.rabbitProducer.CreateQueue(queueName, true, false);
-                foreach (var myBinding in myBindings)
-                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, k.ToString());
+
+                if (this.isAllowCreateQueue)
+                    await this.rabbitProducer.CreateQueue(queueName, true, false);
+                if (this.isAllowCreateBinding)
+                {
+                    foreach (var myBinding in myBindings)
+                    {
+                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, k.ToString());
+                    }
+                }
             }
 
             if (!this.consumers.TryGetValue(queueId, out var rabbitConsumers))
