@@ -245,7 +245,7 @@ class MessageDrivenService : IMessageDriven
         this.Publish(exchange, routingKey, message);
         return Task.CompletedTask;
     }
-    public string Request<TMessage>(string exchange, string routingKey, TMessage message)
+    public TResponse Request<TMessage, TResponse>(string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
@@ -276,9 +276,12 @@ class MessageDrivenService : IMessageDriven
         var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId };
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
         this.messageQueue.Enqueue(theaMessage);
-        return rpcWaiter.Waiter.Task.Result;
+        var rpcMessage = rpcWaiter.Waiter.Task.Result;
+        if (rpcMessage.Type == MessageType.RpcFailure)
+            throw new Exception(rpcMessage.Body);
+        return rpcMessage.Body.JsonTo<TResponse>();
     }
-    public async Task<string> RequestAsync<TMessage>(string exchange, string routingKey, TMessage message)
+    public async Task<TResponse> RequestAsync<TMessage, TResponse>(string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
@@ -309,7 +312,10 @@ class MessageDrivenService : IMessageDriven
         var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId };
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
         this.messageQueue.Enqueue(theaMessage);
-        return await rpcWaiter.Waiter.Task;
+        var rpcMessage = rpcWaiter.Waiter.Task.Result;
+        if (rpcMessage.Type == MessageType.RpcFailure)
+            throw new Exception(rpcMessage.Body);
+        return rpcMessage.Body.JsonTo<TResponse>();
     }
     public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc)
     {
@@ -492,7 +498,7 @@ class MessageDrivenService : IMessageDriven
         Body = logInfo
     });
     internal void ProcessMessage(Message message) => this.messageQueue.Enqueue(message);
-    internal void SetRpcResult(string messageId, string result)
+    internal void SetRpcResult(string messageId, Message<string> result)
     {
         if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
             rpcWaiter.Waiter.TrySetResult(result);

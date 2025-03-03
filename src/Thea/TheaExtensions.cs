@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using Thea.Json;
@@ -38,6 +39,30 @@ public static class TheaExtensions
             enumDescriptions.TryAdd(enumType, descriptions);
         }
         return descriptions[enumValue];
+    }
+    public static List<string> GetDescriptions<TEnum>() where TEnum : struct, Enum
+    {
+        var enumType = typeof(TEnum);
+        if (!enumDescriptions.TryGetValue(enumType, out var descriptions))
+        {
+            var enumValues = Enum.GetValues(enumType);
+            descriptions = new Dictionary<object, string>();
+            foreach (var value in enumValues)
+            {
+                string description = null;
+                var enumName = Enum.GetName(enumType, value);
+                var fieldInfo = enumType.GetField(enumName);
+                if (fieldInfo != null)
+                {
+                    var descAttr = fieldInfo.GetCustomAttribute<DescriptionAttribute>();
+                    if (descAttr != null)
+                        description = descAttr.Description;
+                }
+                descriptions.Add(value, description ?? enumName);
+            }
+            enumDescriptions.TryAdd(enumType, descriptions);
+        }
+        return descriptions.Values.ToList();
     }
     public static T JsonTo<T>(this object obj)
     {

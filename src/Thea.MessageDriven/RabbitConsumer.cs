@@ -1,15 +1,15 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -173,7 +173,8 @@ class RabbitConsumer
                 switch (message.Type)
                 {
                     case MessageType.RpcResponse:
-                        this.parent.SetRpcResult(message.MessageId, message.Body);
+                    case MessageType.RpcFailure:
+                        this.parent.SetRpcResult(message.MessageId, message);
                         break;
 
                     case MessageType.WaitForStart:
@@ -232,7 +233,7 @@ class RabbitConsumer
                     message.Body = jsonBody;
                 }
                 //内部消息，交给消息总分发处处理
-                string result = "success";
+                string result = null;
                 switch (message.Type)
                 {
                     case MessageType.Message:
@@ -248,18 +249,7 @@ class RabbitConsumer
                                     {
                                         //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
                                         var rpcResult = await typedHandler.Invoke(parameters);
-                                        var rpcMessage = new Message
-                                        {
-                                            MessageId = message.MessageId,
-                                            Type = MessageType.RpcResponse,
-                                            AppId = this.parent.AppId,
-                                            Exchange = Consts.RpcExchange,
-                                            RoutingKey = message.RoutingKey,
-                                            Body = rpcResult.ToJson()
-                                        };
-                                        result += ", " + rpcResult.ToJson();
-                                        await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.RoutingKey, rpcMessage.ToJson());
-                                        break;
+                                        result = rpcResult.ToJson();
                                     }
                                     else await typedHandler.Invoke(parameters);
                                     break;
@@ -290,7 +280,23 @@ class RabbitConsumer
                                 this.addLogsHandler.Invoke(logInfo);
                                 if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                             }
-                            if (!isSuccess) throw exception;
+                            if (message.Type == MessageType.RpcMessage)
+                            {
+                                var messageType = isSuccess ? MessageType.RpcResponse : MessageType.RpcFailure;
+                                var rpcMessage = new Message
+                                {
+                                    MessageId = message.MessageId,
+                                    Type = messageType,
+                                    AppId = this.parent.AppId,
+                                    Exchange = Consts.RpcExchange,
+                                    RoutingKey = message.RoutingKey,
+                                    Body = result
+                                };
+                                await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.RoutingKey, rpcMessage.ToJson());
+                            }
+                            //RPC消息直接跳过，因为异常已经返回到前端了
+                            if (!isSuccess && message.Type == MessageType.Message)
+                                throw exception;
                         }
                         break;
                     case MessageType.WaitForStart:

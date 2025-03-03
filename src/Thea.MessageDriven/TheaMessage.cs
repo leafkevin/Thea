@@ -9,6 +9,7 @@ enum MessageType
     Message,
     RpcMessage,
     RpcResponse,
+    RpcFailure,
     Heartbeat,
     WaitForStart,
     WaitForShutdown,
@@ -43,5 +44,5 @@ class ConsumerWaiter
 class RpcWaiter
 {
     public string MessageId { get; set; }
-    public TaskCompletionSource<string> Waiter { get; set; } = new();
+    public TaskCompletionSource<Message<string>> Waiter { get; set; } = new();
 }
