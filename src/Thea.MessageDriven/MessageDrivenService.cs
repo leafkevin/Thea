@@ -1,15 +1,14 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -312,7 +311,7 @@ class MessageDrivenService : IMessageDriven
         var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId };
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
         this.messageQueue.Enqueue(theaMessage);
-        var rpcMessage = rpcWaiter.Waiter.Task.Result;
+        var rpcMessage = await rpcWaiter.Waiter.Task;
         if (rpcMessage.Type == MessageType.RpcFailure)
             throw new Exception(rpcMessage.Body);
         return rpcMessage.Body.JsonTo<TResponse>();
