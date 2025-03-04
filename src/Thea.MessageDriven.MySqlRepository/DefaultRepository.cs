@@ -22,9 +22,10 @@ public class DefaultRepository : IMessageDrivenRepository
         this.appId = configuration.GetValue<string>("AppId");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
-    public virtual async Task<(List<Queue>, List<Binding>)> GetConfigInfo()
+    public virtual async Task<(List<Queue>, List<Binding>)> GetConfigInfo(bool useCache = true)
     {
         var cacheKey = $"{this.appId}.queue.all";
+        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
         var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
@@ -33,6 +34,7 @@ public class DefaultRepository : IMessageDrivenRepository
             return result;
         });
         cacheKey = $"{this.appId}.binding.all";
+        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
         var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);

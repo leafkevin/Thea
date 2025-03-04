@@ -510,7 +510,7 @@ class MessageDrivenService : IMessageDriven
     private async Task Register()
     {
         //捞取数据库或是配置中心的集群信息        
-        (var dbQueues, var dbBindings) = await this.repository.GetConfigInfo();
+        (var dbQueues, var dbBindings) = await this.repository.GetConfigInfo(false);
         var registerQueues = new List<Queue>();
         var registerBindings = new List<Binding>();
         foreach (var myQueue in this.queues)
@@ -541,7 +541,7 @@ class MessageDrivenService : IMessageDriven
         if (!this.hasConsumer) return;
 
         //消费者先把队列和绑定建好后，生产者再变更
-        (this.queues, this.bindings) = await this.repository.GetConfigInfo();
+        (this.queues, this.bindings) = await this.repository.GetConfigInfo(false);
         if (this.isAllowCreateExchange)
             await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
         var queueName = $"heartbeat.queue.{this.NodeId}";
