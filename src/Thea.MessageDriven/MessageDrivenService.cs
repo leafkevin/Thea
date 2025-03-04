@@ -102,7 +102,7 @@ class MessageDrivenService : IMessageDriven
                     if (this.rpcWaiters.Count > 0)
                     {
                         var waiters = this.rpcWaiters.Values.Where(f => DateTime.Now.Subtract(f.CreatedAt) > this.rpcTimeout).ToList();
-                        waiters.ForEach(f => f.Waiter.TrySetException(new TimeoutException("RPC请求超时")));
+                        waiters.ForEach(f => f.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{DateTime.Now.Subtract(f.CreatedAt).TotalSeconds}s")));
                     }
                     if (this.messageQueue.TryDequeue(out var message))
                     {

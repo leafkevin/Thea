@@ -20,7 +20,7 @@ public class StatefulConsumer
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {
         Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");
-        this.messageDriven.PublishAsync("award.issue", awardInfo.AwardId, awardInfo);
+        this.messageDriven.RequestAsync<AwardInfo, TheaResponse>("award.issue", awardInfo.AwardId, awardInfo);
         return Task.FromResult(awardInfo);
     }
     public Task<TheaResponse> IssueAward(AwardInfo awardInfo)
