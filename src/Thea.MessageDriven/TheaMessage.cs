@@ -45,4 +45,5 @@ class RpcWaiter
 {
     public string MessageId { get; set; }
     public TaskCompletionSource<Message<string>> Waiter { get; set; } = new();
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
 }

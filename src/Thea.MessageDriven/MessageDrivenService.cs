@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,6 +42,7 @@ class MessageDrivenService : IMessageDriven
     private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
+    private readonly TimeSpan rpcTimeout;
     private IMessageDrivenRepository repository;
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
@@ -60,11 +60,13 @@ class MessageDrivenService : IMessageDriven
 
         this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
-        this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
+
         this.AppId = configuration.GetValue<string>("AppId");
         this.isAllowCreateQueue = configuration.GetValue<bool>("MessageDriven:IsAllowCreateQueue", false);
         this.isAllowCreateExchange = configuration.GetValue<bool>("MessageDriven:IsAllowCreateExchange", false);
         this.isAllowCreateBinding = configuration.GetValue<bool>("MessageDriven:IsAllowCreateBinding", false);
+        this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
+        this.rpcTimeout = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:RpcTimeout", 60));
 
         if (string.IsNullOrEmpty(this.AppId))
         {
@@ -96,6 +98,11 @@ class MessageDrivenService : IMessageDriven
                         await this.repository.WriteLogs(logs);
                         logs.Clear();
                         this.lastLoggedTime = DateTime.Now;
+                    }
+                    if (this.rpcWaiters.Count > 0)
+                    {
+                        var waiters = this.rpcWaiters.Values.Where(f => DateTime.Now.Subtract(f.CreatedAt) > this.rpcTimeout).ToList();
+                        waiters.ForEach(f => f.Waiter.TrySetException(new TimeoutException("RPC请求超时")));
                     }
                     if (this.messageQueue.TryDequeue(out var message))
                     {
@@ -312,7 +319,7 @@ class MessageDrivenService : IMessageDriven
         var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId };
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
         this.messageQueue.Enqueue(theaMessage);
-        var rpcMessage = rpcWaiter.Waiter.Task.Result;
+        var rpcMessage = await rpcWaiter.Waiter.Task;
         if (rpcMessage.Type == MessageType.RpcFailure)
             throw new Exception(rpcMessage.Body);
         return rpcMessage.Body.JsonTo<TResponse>();
