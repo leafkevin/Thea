@@ -18,7 +18,7 @@ public class HomeController : ControllerBase
     [HttpPost]
     public async Task<TheaResponse> PublishMessages()
     {
-        for (int i = 1867250; i < 999999999; i++)
+        for (int i = 0; i < 999999999; i++)
         {
             var message = $"message-{i}";
             await this.messageDriven.PublishAsync("cache.refresh", "1", message);
@@ -30,9 +30,8 @@ public class HomeController : ControllerBase
     [HttpPost]
     public async Task<TheaResponse> PublishMessage(int awardId)
     {
-        //await this.messageDriven.PublishAsync("cache.refresh", "1", message);
-        var jsonResult = await this.messageDriven.RequestAsync("award.take", awardId.ToString(), new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
-        Console.WriteLine($"Rpc Result: {jsonResult}");
+        await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+        await this.messageDriven.PublishAsync("award.take", awardId.ToString(), new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
         return TheaResponse.Succeed("ok");
     }
 }

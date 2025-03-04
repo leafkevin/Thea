@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -180,14 +179,22 @@ class RabbitConsumer
                     case MessageType.WaitForStart:
                     case MessageType.WaitForShutdown:
                     case MessageType.Heartbeat:
-                        Console.WriteLine($"{message.Type} - heartbeat: {message.Body} received!");
+                        if (message.Type == MessageType.WaitForShutdown)
+                            Console.WriteLine($"{message.Type} - heartbeat: {message.Body} received!");
                         if (message.AppId == this.parent.AppId)
-                            this.parent.ProcessMessage(message);
+                        {
+                            this.parent.ProcessMessage(new Message
+                            {
+                                MessageId = message.MessageId,
+                                Type = message.Type,
+                                AppId = message.AppId,
+                                Body = message.Body
+                            });
+                        }
                         break;
                     default: throw new Exception("Unknown message type");
                 }
                 await channel.BasicAckAsync(ea.DeliveryTag, false);
-
                 //再延迟停止
                 if (this.isDeferClose)
                     await this.Close();
@@ -284,7 +291,8 @@ class RabbitConsumer
                         break;
                     case MessageType.WaitForStart:
                     case MessageType.WaitForShutdown:
-                        Console.WriteLine($"{message.Type} - message: {this.QueueName} received!");
+                        if (message.Type == MessageType.WaitForShutdown)
+                            Console.WriteLine($"{message.Type} - message: {this.QueueName} received!");
                         //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
                         await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, message.ToJson());
                         break;

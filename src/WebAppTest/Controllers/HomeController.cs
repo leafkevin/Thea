@@ -59,9 +59,9 @@ namespace WebAppTest.Controllers
         [HttpPost]
         public async Task<TheaResponse> TakeAward(string awardId)
         {
-            var result = await this.messageDriven.RequestAsync("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
+            var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
             Console.WriteLine($"rpc.result:{result}");
-            return TheaResponse.Succeed(result.JsonTo<AwardInfo>());
+            return TheaResponse.Succeed(result);
         }
     }
 }
