@@ -108,7 +108,6 @@ class MessageDrivenService : IMessageDriven
                     {
                         string queueId = null;
                         string queueName = null;
-                        TaskCompletionSource<bool> waiter = null;
                         switch (message.Type)
                         {
                             case MessageType.Message:
@@ -161,12 +160,12 @@ class MessageDrivenService : IMessageDriven
                                 break;
                             case MessageType.Heartbeat:
                                 //统一处理心跳，可防止并发
-                                (var nodeId, waiter) = ((string, TaskCompletionSource<bool>))message.Body;
+                                var nodeId = (string)message.Body;
                                 this.heartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
-                                waiter.TrySetResult(true);
                                 break;
                             case MessageType.WaitForStart:
-                                (queueId, queueName, waiter) = ((string, string, TaskCompletionSource<bool>))message.Body;
+                                queueName = (string)message.Body;
+                                queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
                                 if (this.waitingStartConsumers.TryGetValue(queueId, out var consumerWaiter))
                                 {
                                     if (!consumerWaiter.QueueNames.Contains(queueName))
@@ -179,13 +178,11 @@ class MessageDrivenService : IMessageDriven
                                         this.waitingStartConsumers.TryRemove(queueId, out _);
                                     }
                                 }
-                                waiter.TrySetResult(true);
                                 break;
                             case MessageType.WaitForShutdown:
-                                (queueName, waiter) = ((string, TaskCompletionSource<bool>))message.Body;
+                                queueName = (string)message.Body;
                                 if (this.waitingShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
                                     rabbitConsumers.ForEach(async f => await f.Shutdown());
-                                waiter.TrySetResult(true);
                                 break;
                             case MessageType.Logs:
                                 logs.Add(message.Body as ExecLog);

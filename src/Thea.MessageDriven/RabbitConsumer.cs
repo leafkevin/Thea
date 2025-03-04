@@ -1,15 +1,16 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -169,7 +170,6 @@ class RabbitConsumer
                 var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
                 var message = jsonBody.JsonTo<Message<string>>();
                 //内部消息，交给消息总分发处处理
-                TaskCompletionSource<bool> waiter = null;
                 switch (message.Type)
                 {
                     case MessageType.RpcResponse:
@@ -180,26 +180,9 @@ class RabbitConsumer
                     case MessageType.WaitForStart:
                     case MessageType.WaitForShutdown:
                     case MessageType.Heartbeat:
+                        Console.WriteLine($"{message.Type} - heartbeat: {message.Body} received!");
                         if (message.AppId == this.parent.AppId)
-                        {
-                            Console.WriteLine($"{message.Type} - heartbeat: {message.Body} received!");
-                            //让主分发处理器累加计算消息完成的队列个数
-                            var queueName = message.Body;
-                            waiter = new TaskCompletionSource<bool>();
-                            var nextMessage = new Message
-                            {
-                                MessageId = message.MessageId,
-                                Type = message.Type,
-                                Body = (queueName, waiter)
-                            };
-                            if (message.Type == MessageType.WaitForStart)
-                            {
-                                var queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
-                                nextMessage.Body = (queueId, queueName, waiter);
-                            }
-                            this.parent.ProcessMessage(nextMessage);
-                            waiter.Task.Wait();
-                        }
+                            this.parent.ProcessMessage(message);
                         break;
                     default: throw new Exception("Unknown message type");
                 }
