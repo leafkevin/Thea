@@ -307,4 +307,39 @@ class RabbitConsumer
         }
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
+    private async Task BindHeartbeatHandler()
+    {
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (model, ea) =>
+        {
+            //先暂停消费
+            if (this.cancellationSource.IsCancellationRequested)
+                return;
+            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+            var message = jsonBody.JsonTo<Message<string>>();
+            switch (message.Type)
+            {
+                case MessageType.WaitForStart:
+                case MessageType.WaitForShutdown:
+                case MessageType.Heartbeat:
+                    if (message.AppId == this.parent.AppId)
+                    {
+                        this.parent.ProcessMessage(new Message
+                        {
+                            MessageId = message.MessageId,
+                            Type = message.Type,
+                            AppId = message.AppId,
+                            Body = message.Body
+                        });
+                    }
+                    break;
+                default: throw new Exception("Unknown message type");
+            }
+            await channel.BasicAckAsync(ea.DeliveryTag, false);
+            //再延迟停止
+            if (this.isDeferClose)
+                await this.Close();
+        };
+        await channel.BasicConsumeAsync(this.QueueName, false, consumer);
+    }
 }

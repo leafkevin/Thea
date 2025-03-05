@@ -538,7 +538,17 @@ class MessageDrivenService : IMessageDriven
             this.resultRabbitConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, true);
             await this.resultRabbitConsumer.Start(exchange, this.NodeId);
         }
-        if (!this.hasConsumer) return;
+        if (!this.hasConsumer)
+        {
+            foreach (var exchange in this.localExchangeIds)
+            {
+                if (this.isAllowCreateExchange)
+                    await this.rabbitProducer.CreateExchange(exchange, Consts.TopicBindingType);
+                if (this.isAllowCreateBinding)
+                    await this.rabbitProducer.BindExchange(Consts.TransferExchange, exchange, exchange);
+            }
+            return;
+        }
 
         //消费者先把队列和绑定建好后，生产者再变更
         (this.queues, this.bindings) = await this.repository.GetConfigInfo(false);

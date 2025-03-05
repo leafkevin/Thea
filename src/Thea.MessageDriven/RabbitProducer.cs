@@ -71,10 +71,16 @@ class RabbitProducer : IDisposable
         else await channel.QueueDeclareAsync(queueName, true, false, false, arguments);
         this.channelQueue.Add(channel);
     }
-    public async Task BindQueue(string exchange, string queueName, string bindingKey)
+    public async Task BindExchange(string exchange, string toExchange, string routingKey)
     {
         var channel = this.channelQueue.Take();
-        await channel.QueueBindAsync(queueName, exchange, bindingKey);
+        await channel.ExchangeBindAsync(toExchange, exchange, routingKey);
+        this.channelQueue.Add(channel);
+    }
+    public async Task BindQueue(string exchange, string queueName, string routingKey)
+    {
+        var channel = this.channelQueue.Take();
+        await channel.QueueBindAsync(queueName, exchange, routingKey);
         this.channelQueue.Add(channel);
     }
     public async Task Publish(string exchange, string routingKey, string message)
