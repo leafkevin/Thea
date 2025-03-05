@@ -24,6 +24,10 @@ public class Binding
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
+    /// 是否需要转发
+    /// </summary>
+    public bool IsNeedTransfer { get; set; }
+    /// <summary>
     /// 是否延时消费者
     /// </summary>
     public bool IsDelay { get; set; }

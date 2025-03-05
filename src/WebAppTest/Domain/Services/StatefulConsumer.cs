@@ -14,18 +14,18 @@ public class StatefulConsumer
     }
     public Task RemoveCache(string key)
     {
-        Console.WriteLine($"RemoveCache: {key}");
+        //Console.WriteLine($"RemoveCache: {key}");
         return Task.CompletedTask;
     }
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {
-        Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");
-        this.messageDriven.RequestAsync<AwardInfo, TheaResponse>("award.issue", awardInfo.AwardId, awardInfo);
+        //Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");
+        this.messageDriven.Publish("award.issue", awardInfo.AwardId, awardInfo);
         return Task.FromResult(awardInfo);
     }
     public Task<TheaResponse> IssueAward(AwardInfo awardInfo)
     {
-        Console.WriteLine($"IssueAward: 我已领取 {awardInfo.ToJson()}");
+        //Console.WriteLine($"IssueAward: 我已领取 {awardInfo.ToJson()}");
         return Task.FromResult(TheaResponse.Succeed(awardInfo));
     }
 }

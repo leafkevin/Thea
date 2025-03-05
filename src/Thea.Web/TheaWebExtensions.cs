@@ -23,8 +23,8 @@ public static class TheaWebExtensions
     }
     public static IServiceCollection AddTheaWeb(this IServiceCollection services)
     {
-        services.AddHttpClient();
         services.AddHttpContextAccessor();
+        services.AddHttpClient();
         services.AddTransient<IHttpClientFactory, TheaHttpClientFactory>();
         services.AddTransient<HttpMessageHandlerBuilder, TheaHttpMessageHandlerBuilder>();
         services.AddTransient<ProxyHttpMessageHandlerBuilder>();

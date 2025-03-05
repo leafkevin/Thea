@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
@@ -21,6 +22,13 @@ enum ChangeType
     AddQueue,
     RemoveQueue
 }
+enum QueueType
+{
+    Message,
+    Heartbeat,
+    RpcResult,
+    Transfer
+}
 class Message
 {
     public string MessageId { get; set; }
@@ -30,6 +38,8 @@ class Message
     public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }
     public object Body { get; set; }
+    [JsonIgnore]
+    public TaskCompletionSource<bool> Waiter { get; set; }
 }
 class Message<TBody>
 {

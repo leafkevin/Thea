@@ -15,15 +15,18 @@ public class HomeController : ControllerBase
         this.messageDriven = messageDriven;
     }
 
-    [HttpPost]
-    public async Task<TheaResponse> PublishMessages()
+    [HttpGet]
+    public async Task<TheaResponse> PublishMessages(int tps = 1000)
     {
         for (int i = 0; i < 999999999; i++)
         {
-            var message = $"message-{i}";
-            await this.messageDriven.PublishAsync("cache.refresh", "1", message);
-            await this.messageDriven.PublishAsync("award.take", i.ToString(), new { AwardId = message, Quantity = i % 5 });
-            Console.WriteLine($"Rpc Result: {message}");
+            for (int j = 0; j < tps; j++)
+            {
+                var message = $"message-{i}-{j}";
+                _ = this.messageDriven.PublishAsync("cache.refresh", "1", message);
+                _ = this.messageDriven.PublishAsync("award.take", i.ToString(), new { AwardId = message, Quantity = i % 5 });
+            }
+            Thread.Sleep(1000);
         }
         return TheaResponse.Succeed("ok");
     }
