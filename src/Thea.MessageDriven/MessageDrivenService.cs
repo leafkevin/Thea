@@ -131,7 +131,6 @@ class MessageDrivenService : IMessageDriven
                                                     routingKey = (uint)(hashKey % myQueue.WorkloadTotal);
                                                 }
                                                 await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), message.ToJson());
-                                                //Console.WriteLine($"publish message exchange:{message.Exchange}, routingKey={routingKey}");
                                                 message.Waiter?.TrySetResult(true);
                                             }
                                             else await this.rabbitProducer.Publish(Consts.DefaultExchange, $"{Consts.TransferExchange}.{message.Exchange}", message.ToJson());
@@ -429,7 +428,7 @@ class MessageDrivenService : IMessageDriven
         {
             myQueue.IsStateful = false;
             myQueue.IsSac = false;
-            myQueue.PrefetchCount = 5;
+            myQueue.PrefetchCount = 250;
             myQueue.WorkloadTotal = 2;
         }
         if (!this.localQueueIds.Contains(queue))
@@ -522,7 +521,7 @@ class MessageDrivenService : IMessageDriven
 
         string queueName = null;
         this.rabbitProducer = await RabbitProducer.Create(this, this.serviceProvider);
-        if (this.localExchangeIds.Count > 0)
+        if (this.rpcExchanges.Count > 0)
         {
             var exchange = Consts.RpcExchange;
             var rpcQueueName = $"rpc.result.{this.NodeId}";
@@ -543,15 +542,9 @@ class MessageDrivenService : IMessageDriven
                     await this.rabbitProducer.CreateQueue(queueName, true, false);
                 }
             });
-            foreach (var exchange in this.localExchangeIds)
-            {
-                if (this.isAllowCreateExchange)
-                    await this.rabbitProducer.CreateExchange(exchange, Consts.TopicBindingType);
-            }
             return;
         }
 
-        //消费者先把队列和绑定建好后，生产者再变更        
         if (this.isAllowCreateExchange)
             await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
         queueName = $"heartbeat.queue.{this.NodeId}";
