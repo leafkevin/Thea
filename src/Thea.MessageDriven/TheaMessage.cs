@@ -32,11 +32,11 @@ enum QueueType
 class Message
 {
     public string MessageId { get; set; }
+    public MessageType Type { get; set; }
     /// <summary>
     /// 心跳时是AppId，RpcMessage时，是NodeId
     /// </summary>
-    public string AppId { get; set; }
-    public MessageType Type { get; set; }
+    public string From { get; set; }    
     public string Exchange { get; set; }
     public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }
@@ -47,7 +47,7 @@ class Message
 class Message<TBody>
 {
     public string MessageId { get; set; }
-    public string AppId { get; set; }
+    public string From { get; set; }
     public MessageType Type { get; set; }
     public string Exchange { get; set; }
     public string RoutingKey { get; set; }

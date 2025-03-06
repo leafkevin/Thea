@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System;
+using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using Thea;
 using Thea.MessageDriven;
@@ -62,6 +64,40 @@ namespace WebAppTest.Controllers
             var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
             Console.WriteLine($"rpc.result:{result}");
             return TheaResponse.Succeed(result);
+        }
+        [HttpGet]
+        public async Task<TheaResponse> PublishMessages(int tps = 1000)
+        {
+            for (int i = 0; i < 999999999; i++)
+            {
+                for (int j = 0; j < tps; j++)
+                {
+                    var message = $"message-{i}-{j}";
+                    //_ = this.messageDriven.PublishAsync("cache.refresh", "1", message);
+                    //_ = this.messageDriven.PublishAsync("award.take", i.ToString(), new { AwardId = message, Quantity = i % 5 });
+                    _ = Task.Run(() =>
+                    {
+                        var stopwatch = Stopwatch.StartNew();
+                        stopwatch.Start();
+                        this.messageDriven.Request<AwardInfo, AwardInfo>("award.take", message, new AwardInfo { AwardId = message, Quantity = i % 5 });
+                        stopwatch.Stop();
+                        Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
+                    });
+                }
+                Thread.Sleep(1000);
+            }
+            return TheaResponse.Succeed("ok");
+        }
+        [HttpGet]
+        public async Task<TheaResponse> PublishMessage(int awardId)
+        {
+            //await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+            var stopwatch = Stopwatch.StartNew();
+            stopwatch.Start();
+            await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+            stopwatch.Stop();
+            Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
+            return TheaResponse.Succeed("ok");
         }
     }
 }

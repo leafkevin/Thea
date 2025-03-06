@@ -38,7 +38,7 @@ class RabbitConsumer
     public string QueueName { get; private set; }
     public bool IsActivated => this.channel != null && this.channel.IsOpen;
 
-    public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 50, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
+    public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
         this.parent = parent;
         this.ConsumerId = ObjectId.NewId();
@@ -218,21 +218,20 @@ class RabbitConsumer
                             Thread.Sleep(1000);
                         }
                         if (!isSuccess) result = exception.ToString();
-                        var logInfo = new ExecLog
-                        {
-                            LogId = ObjectId.NewId(),
-                            ExchangeId = ea.Exchange,
-                            RoutingKey = ea.RoutingKey,
-                            Queue = this.QueueName,
-                            Body = jsonBody,
-                            IsSuccess = isSuccess,
-                            Result = result,
-                            RetryTimes = iLoop,
-                            UpdatedAt = DateTime.Now
-                        };
                         if (this.IsLogEnabled || !isSuccess)
                         {
-                            this.addLogsHandler.Invoke(logInfo);
+                            this.addLogsHandler.Invoke(new ExecLog
+                            {
+                                LogId = ObjectId.NewId(),
+                                ExchangeId = ea.Exchange,
+                                RoutingKey = ea.RoutingKey,
+                                Queue = this.QueueName,
+                                Body = jsonBody,
+                                IsSuccess = isSuccess,
+                                Result = result,
+                                RetryTimes = iLoop,
+                                UpdatedAt = DateTime.Now
+                            });
                             if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                         }
                         if (message.Type == MessageType.RpcMessage)
@@ -242,10 +241,9 @@ class RabbitConsumer
                             {
                                 MessageId = message.MessageId,
                                 Type = messageType,
-                                RoutingKey = message.RoutingKey,
                                 Body = result
                             };
-                            await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.AppId, rpcMessage.ToJson());
+                            await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.From, rpcMessage.ToJson());
                         }
                         //RPC消息直接跳过，因为异常已经返回到前端了
                         if (!isSuccess && message.Type == MessageType.Message)
@@ -282,26 +280,24 @@ class RabbitConsumer
             switch (message.Type)
             {
                 case MessageType.Heartbeat:
-                    if (message.AppId == this.parent.AppId)
+                    if (message.From == this.parent.AppId)
                     {
                         this.parent.ProcessMessage(new Message
                         {
                             MessageId = message.MessageId,
                             Type = message.Type,
-                            AppId = message.AppId,
                             Body = message.Body
                         });
                     }
                     break;
                 case MessageType.WaitForStart:
                 case MessageType.WaitForShutdown:
-                    if (message.AppId == this.parent.AppId)
+                    if (message.From == this.parent.AppId)
                     {
                         var syncMessage = new Message
                         {
                             MessageId = message.MessageId,
                             Type = message.Type,
-                            AppId = message.AppId,
                             Body = message.Body,
                             Waiter = new()
                         };

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Thea;
 using Thea.MessageDriven;
@@ -23,18 +24,34 @@ public class HomeController : ControllerBase
             for (int j = 0; j < tps; j++)
             {
                 var message = $"message-{i}-{j}";
-                _ = this.messageDriven.PublishAsync("cache.refresh", "1", message);
-                _ = this.messageDriven.PublishAsync("award.take", i.ToString(), new { AwardId = message, Quantity = i % 5 });
+                //_ = this.messageDriven.PublishAsync("cache.refresh", "1", message);
+                //_ = this.messageDriven.PublishAsync("award.take", i.ToString(), new { AwardId = message, Quantity = i % 5 });
+
+                var stopwatch = Stopwatch.StartNew();
+                stopwatch.Start();
+                await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", i.ToString(), new AwardInfo { AwardId = message, Quantity = i % 5 });
+                stopwatch.Stop();
+                Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
             }
             Thread.Sleep(1000);
         }
         return TheaResponse.Succeed("ok");
     }
-    [HttpPost]
+    [HttpGet]
     public async Task<TheaResponse> PublishMessage(int awardId)
     {
-        await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
-        await this.messageDriven.PublishAsync("award.take", awardId.ToString(), new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+        //await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+        var stopwatch = Stopwatch.StartNew();
+        stopwatch.Start();
+        await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+        stopwatch.Stop();
+        Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
         return TheaResponse.Succeed("ok");
+    }
+    public class AwardInfo
+    {
+        public string AwardId { get; set; }
+        public int Quantity { get; set; }
+        public string RecipientId { get; set; }
     }
 }

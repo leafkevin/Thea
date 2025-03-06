@@ -1,14 +1,14 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -112,8 +112,16 @@ class MessageDrivenService : IMessageDriven
                         {
                             case MessageType.Message:
                             case MessageType.RpcMessage:
+                                object theaMessage = this.hasConsumer ? new
+                                {
+                                    message.MessageId,
+                                    message.From,
+                                    message.Type,
+                                    message.Body,
+                                    message.ScheduleTimeUtc
+                                } : message;
                                 if (message.ScheduleTimeUtc.HasValue)
-                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, message.ToJson());
+                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, theaMessage.ToJson());
                                 else
                                 {
                                     var myBindings = this.bindings.FindAll(f => f.ExchangeId == message.Exchange);
@@ -130,12 +138,13 @@ class MessageDrivenService : IMessageDriven
                                                     var hashKey = Farmhash.Hash32(message.RoutingKey);
                                                     routingKey = (uint)(hashKey % myQueue.WorkloadTotal);
                                                 }
-                                                await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), message.ToJson());
+                                                await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), theaMessage.ToJson());
                                                 message.Waiter?.TrySetResult(true);
                                             }
-                                            else await this.rabbitProducer.Publish(Consts.DefaultExchange, $"{Consts.TransferExchange}.{message.Exchange}", message.ToJson());
+                                            //转发时，要带上Exchange,RoutingKey
+                                            else await this.rabbitProducer.Publish(Consts.DefaultExchange, $"{Consts.TransferExchange}.{message.Exchange}", theaMessage.ToJson());
                                         }
-                                        else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
+                                        else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
                                     }
                                 }
                                 break;
@@ -261,7 +270,7 @@ class MessageDrivenService : IMessageDriven
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
-            AppId = this.NodeId,
+            From = this.NodeId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -297,7 +306,7 @@ class MessageDrivenService : IMessageDriven
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
-            AppId = this.NodeId,
+            From = this.NodeId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -382,7 +391,7 @@ class MessageDrivenService : IMessageDriven
         {
             myQueue.IsStateful = true;
             myQueue.IsSac = true;
-            myQueue.PrefetchCount = 50;
+            myQueue.PrefetchCount = 250;
             myQueue.WorkloadTotal = 2;
         }
         if (!this.localQueueIds.Contains(queue))
@@ -486,7 +495,6 @@ class MessageDrivenService : IMessageDriven
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message
     {
-        MessageId = ObjectId.NewId(),
         Type = MessageType.Logs,
         Body = logInfo
     });
@@ -620,7 +628,7 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Heartbeat,
-            AppId = this.AppId,
+            From = this.AppId,
             Body = this.NodeId
         }.ToJson());
     }
@@ -752,9 +760,7 @@ class MessageDrivenService : IMessageDriven
                     var message = new Message
                     {
                         MessageId = ObjectId.NewId(),
-                        AppId = this.AppId,
-                        Exchange = exchange,
-                        RoutingKey = queueName,
+                        From = this.AppId,
                         Type = MessageType.WaitForStart,
                         Body = queueName
                     };
@@ -783,9 +789,7 @@ class MessageDrivenService : IMessageDriven
                     var message = new Message
                     {
                         MessageId = ObjectId.NewId(),
-                        AppId = this.AppId,
-                        Exchange = exchange,
-                        RoutingKey = queueName,
+                        From = this.AppId,
                         Type = MessageType.WaitForShutdown,
                         Body = queueName
                     };
