@@ -206,6 +206,7 @@ class RabbitConsumer
                                     result = rpcResult.ToJson();
                                 }
                                 else await typedHandler.Invoke(parameters);
+                                isSuccess = true;
                                 break;
                             }
                             catch (Exception ex)
@@ -241,12 +242,10 @@ class RabbitConsumer
                             {
                                 MessageId = message.MessageId,
                                 Type = messageType,
-                                AppId = this.parent.AppId,
-                                Exchange = Consts.RpcExchange,
                                 RoutingKey = message.RoutingKey,
                                 Body = result
                             };
-                            await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.RoutingKey, rpcMessage.ToJson());
+                            await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.AppId, rpcMessage.ToJson());
                         }
                         //RPC消息直接跳过，因为异常已经返回到前端了
                         if (!isSuccess && message.Type == MessageType.Message)

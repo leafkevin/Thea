@@ -32,6 +32,9 @@ enum QueueType
 class Message
 {
     public string MessageId { get; set; }
+    /// <summary>
+    /// 心跳时是AppId，RpcMessage时，是NodeId
+    /// </summary>
     public string AppId { get; set; }
     public MessageType Type { get; set; }
     public string Exchange { get; set; }

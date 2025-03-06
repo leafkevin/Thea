@@ -228,7 +228,6 @@ class MessageDrivenService : IMessageDriven
         this.messageQueue.Enqueue(new Message
         {
             MessageId = ObjectId.NewId(),
-            AppId = this.AppId,
             Type = MessageType.Message,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -262,7 +261,7 @@ class MessageDrivenService : IMessageDriven
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
-            AppId = this.AppId,
+            AppId = this.NodeId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -298,7 +297,7 @@ class MessageDrivenService : IMessageDriven
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
-            AppId = this.AppId,
+            AppId = this.NodeId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -330,7 +329,6 @@ class MessageDrivenService : IMessageDriven
         this.messageQueue.Enqueue(new Message
         {
             MessageId = ObjectId.NewId(),
-            AppId = this.AppId,
             Type = MessageType.Message,
             Exchange = exchange,
             RoutingKey = routingKey,
