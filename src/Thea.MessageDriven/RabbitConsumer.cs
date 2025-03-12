@@ -47,7 +47,7 @@ class RabbitConsumer
         this.prefetchCount = prefetchCount;
         this.queueType = queueType;
         if (queueType == QueueType.Message)
-            this.connectionId += $".{parent.NodeId}";
+            this.connectionId += $".{parent.ServiceId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -188,6 +188,7 @@ class RabbitConsumer
             }
             //内部消息，交给消息总分发处处理
             string result = null;
+            var createdAt = DateTime.Now;
             switch (message.Type)
             {
                 case MessageType.Message:
@@ -222,7 +223,7 @@ class RabbitConsumer
                         {
                             this.addLogsHandler.Invoke(new ExecLog
                             {
-                                LogId = ObjectId.NewId(),
+                                LogId = message.MessageId,
                                 ExchangeId = ea.Exchange,
                                 RoutingKey = ea.RoutingKey,
                                 Queue = this.QueueName,
@@ -232,8 +233,22 @@ class RabbitConsumer
                                 RetryTimes = iLoop,
                                 UpdatedAt = DateTime.Now
                             });
-                            if (!isSuccess) this.logger.LogTagError("RabbitConsumer", exception, $"Consume message failed, Message:{jsonBody}");
                         }
+                        this.logger.LogEntity(new LogEntity
+                        {
+                            Id = message.MessageId,
+                            TraceId = message.MessageId,
+                            AppId = this.parent.AppId,
+                            Tag = "RabbitConsumer",
+                            Body = $"{(isSuccess ? "consumed success" : "consumed failed")}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
+                            LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
+                            Exception = exception,
+                            ApiType = (int)ApiType.LocalInvoke,
+                            Parameters = jsonBody,
+                            Response = result,
+                            CreatedAt = createdAt,
+                            Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
+                        });
                         if (message.Type == MessageType.RpcMessage)
                         {
                             var messageType = isSuccess ? MessageType.RpcResponse : MessageType.RpcFailure;

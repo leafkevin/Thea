@@ -36,7 +36,7 @@ class Message
     /// <summary>
     /// 心跳时是AppId，RpcMessage时，是NodeId
     /// </summary>
-    public string From { get; set; }    
+    public string From { get; set; }
     public string Exchange { get; set; }
     public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }

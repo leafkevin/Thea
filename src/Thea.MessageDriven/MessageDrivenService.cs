@@ -1,14 +1,14 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -30,12 +30,13 @@ class MessageDrivenService : IMessageDriven
     private bool isAllowCreateQueue = false;
     private bool isAllowCreateExchange = false;
     private bool isAllowCreateBinding = false;
+    private bool isRpcConsumer = false;
     private List<string> localExchangeIds = new();
     private List<string> localQueueIds = new();
+    private List<string> rpcExchanges = new();
     private List<Queue> queues = new();
     private List<Queue> lastQueues = null;
     private List<Binding> bindings = new();
-    private List<string> rpcExchanges = new();
     private RabbitConsumer heartbeatRabbitConsumer;
     private RabbitConsumer resultRabbitConsumer;
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
@@ -50,7 +51,7 @@ class MessageDrivenService : IMessageDriven
 
     internal RabbitProducer rabbitProducer;
     public string AppId { get; private set; }
-    public string NodeId { get; private set; }
+    public string ServiceId { get; private set; }
 
     public MessageDrivenService(IServiceProvider serviceProvider)
     {
@@ -74,7 +75,7 @@ class MessageDrivenService : IMessageDriven
             throw new Exception("未设置AppId，无法初始化MessageDrivenService对象");
         }
         this.sacCount = configuration.GetValue("MessageDriven:SacCount", 3);
-        this.NodeId = ObjectId.NewId();
+        this.ServiceId = ObjectId.NewId();
 
         this.task = Task.Factory.StartNew(async () =>
         {
@@ -203,9 +204,9 @@ class MessageDrivenService : IMessageDriven
     public void Start()
     {
         this.Register().Wait();
-        this.heartbeats.TryAdd(this.NodeId, DateTime.Now);
+        this.heartbeats.TryAdd(this.ServiceId, DateTime.Now);
         this.readyToStart.Set();
-        Console.WriteLine($"Local NodeId: {this.NodeId}");
+        Console.WriteLine($"Local NodeId: {this.ServiceId}");
     }
     public void Shutdown()
     {
@@ -248,6 +249,41 @@ class MessageDrivenService : IMessageDriven
         this.Publish(exchange, routingKey, message);
         return Task.CompletedTask;
     }
+    public void PublishRpc<TMessage>(string serviceId, string exchange, string routingKey, TMessage message)
+    {
+        if (!this.bindings.Exists(f => f.ExchangeId == exchange))
+        {
+            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
+        if (!this.rpcExchanges.Contains(exchange))
+        {
+            var errMessage = $"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true";
+            this.logger.LogTagError("MessageDriven", errMessage);
+            throw new Exception(errMessage);
+        }
+        if (message == null)
+            throw new ArgumentNullException(nameof(message));
+
+        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
+            exchange = exchangeSelector.Invoke(exchange, message);
+        var theaMessage = new Message
+        {
+            MessageId = ObjectId.NewId(),
+            From = serviceId,
+            Type = MessageType.RpcMessage,
+            Exchange = exchange,
+            RoutingKey = routingKey,
+            Body = message.ToJson()
+        };
+        this.messageQueue.Enqueue(theaMessage);
+    }
+    public Task PublishRpcAsync<TMessage, TResponse>(string serviceId, string exchange, string routingKey, TMessage message)
+    {
+        this.PublishRpc(serviceId, exchange, routingKey, message);
+        return Task.CompletedTask;
+    }
     public TResponse Request<TMessage, TResponse>(string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
@@ -270,7 +306,7 @@ class MessageDrivenService : IMessageDriven
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
-            From = this.NodeId,
+            From = this.ServiceId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -306,7 +342,7 @@ class MessageDrivenService : IMessageDriven
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
-            From = this.NodeId,
+            From = this.ServiceId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
             RoutingKey = routingKey,
@@ -368,6 +404,8 @@ class MessageDrivenService : IMessageDriven
     }
     public void UseStatefulConsumer(string exchange, string queue, MethodInfo methodInfo)
     {
+        if (methodInfo == null) throw new ArgumentNullException(nameof(methodInfo));
+
         this.hasConsumer = true;
         if (!this.consumerHandlers.TryGetValue(queue, out var exchangeHandlers))
             this.consumerHandlers.TryAdd(queue, exchangeHandlers = new());
@@ -411,6 +449,8 @@ class MessageDrivenService : IMessageDriven
     }
     public void UseSubscriber(string exchange, string queue, MethodInfo methodInfo, string routingKey = "#", bool isDelay = false)
     {
+        if (methodInfo == null) throw new ArgumentNullException(nameof(methodInfo));
+
         this.hasConsumer = true;
         if (!this.consumerHandlers.TryGetValue(queue, out var exchangeHandlers))
             this.consumerHandlers.TryAdd(queue, exchangeHandlers = new());
@@ -461,6 +501,7 @@ class MessageDrivenService : IMessageDriven
             myBinding.IsDelay = isDelay;
         }
     }
+    public void UseRpcConsumer() => this.isRpcConsumer = true;
     public async Task ChangeQueue(string queueId, int workloadTotal)
     {
         var myQueue = this.queues.Find(f => f.QueueId == queueId);
@@ -530,11 +571,14 @@ class MessageDrivenService : IMessageDriven
         if (this.rpcExchanges.Count > 0)
         {
             var exchange = Consts.RpcExchange;
-            var rpcQueueName = $"rpc.result.{this.NodeId}";
             if (this.isAllowCreateExchange)
                 await this.rabbitProducer.CreateExchange(exchange, Consts.TopicBindingType);
+        }
+        if (this.isRpcConsumer)
+        {
+            var rpcQueueName = $"{Consts.RpcExchange}.result.{this.ServiceId}";
             this.resultRabbitConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, QueueType.RpcResult);
-            await this.resultRabbitConsumer.Start(exchange, this.NodeId);
+            await this.resultRabbitConsumer.Start(Consts.RpcExchange, this.ServiceId);
         }
         (this.queues, this.bindings) = await this.repository.GetConfigInfo(false);
         if (!this.hasConsumer)
@@ -553,7 +597,7 @@ class MessageDrivenService : IMessageDriven
 
         if (this.isAllowCreateExchange)
             await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
-        queueName = $"heartbeat.queue.{this.NodeId}";
+        queueName = $"heartbeat.queue.{this.ServiceId}";
         this.heartbeatRabbitConsumer = new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Heartbeat);
         await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
 
@@ -624,12 +668,12 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task SendHeartbeat()
     {
-        await this.rabbitProducer.Publish(Consts.HeartbeatExchange, this.NodeId, new Message
+        await this.rabbitProducer.Publish(Consts.HeartbeatExchange, this.ServiceId, new Message
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Heartbeat,
             From = this.AppId,
-            Body = this.NodeId
+            Body = this.ServiceId
         }.ToJson());
     }
     private async Task StartConsumers()
@@ -650,7 +694,7 @@ class MessageDrivenService : IMessageDriven
             removedKeys.ForEach(f => this.heartbeats.TryRemove(f, out _));
 
         int index = 0;
-        var myNodeInfo = nodeIds.Find(f => f == this.NodeId);
+        var myNodeInfo = nodeIds.Find(f => f == this.ServiceId);
         var nodeCount = nodeIds.Count;
 
         //优先启动有状态队列消费者
@@ -707,8 +751,8 @@ class MessageDrivenService : IMessageDriven
 
                 for (int k = 0; k < this.sacCount; k++)
                 {
-                    var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.NodeId;
-                    if (nodeId == this.NodeId)
+                    var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.ServiceId;
+                    if (nodeId == this.ServiceId)
                     {
                         needCount++;
                         index++;
@@ -810,8 +854,8 @@ class MessageDrivenService : IMessageDriven
                 var needCount = 0;
                 for (int k = 0; k < this.sacCount; k++)
                 {
-                    var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.NodeId;
-                    if (nodeId == this.NodeId)
+                    var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.ServiceId;
+                    if (nodeId == this.ServiceId)
                         needCount++;
                     index++;
                 }
@@ -853,8 +897,8 @@ class MessageDrivenService : IMessageDriven
 
             for (int j = 0; j < myQueue.WorkloadTotal; j++)
             {
-                var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.NodeId;
-                if (nodeId == this.NodeId)
+                var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.ServiceId;
+                if (nodeId == this.ServiceId)
                     needCount++;
                 index++;
             }
