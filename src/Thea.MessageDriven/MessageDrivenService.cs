@@ -249,7 +249,7 @@ class MessageDrivenService : IMessageDriven
         this.Publish(exchange, routingKey, message);
         return Task.CompletedTask;
     }
-    public void PublishRpc<TMessage>(string serviceId, string exchange, string routingKey, TMessage message)
+    public void PublishRpc<TMessage>(string serviceId, string messageId, string exchange, string routingKey, TMessage message)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
@@ -268,9 +268,12 @@ class MessageDrivenService : IMessageDriven
 
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
             exchange = exchangeSelector.Invoke(exchange, message);
+
+        serviceId ??= this.ServiceId;
+        messageId ??= ObjectId.NewId();
         var theaMessage = new Message
         {
-            MessageId = ObjectId.NewId(),
+            MessageId = messageId,
             From = serviceId,
             Type = MessageType.RpcMessage,
             Exchange = exchange,
@@ -279,9 +282,9 @@ class MessageDrivenService : IMessageDriven
         };
         this.messageQueue.Enqueue(theaMessage);
     }
-    public Task PublishRpcAsync<TMessage, TResponse>(string serviceId, string exchange, string routingKey, TMessage message)
+    public Task PublishRpcAsync<TMessage, TResponse>(string serviceId, string messageId, string exchange, string routingKey, TMessage message)
     {
-        this.PublishRpc(serviceId, exchange, routingKey, message);
+        this.PublishRpc(serviceId, messageId, exchange, routingKey, message);
         return Task.CompletedTask;
     }
     public TResponse Request<TMessage, TResponse>(string exchange, string routingKey, TMessage message)
@@ -506,9 +509,8 @@ class MessageDrivenService : IMessageDriven
     {
         var myQueue = this.queues.Find(f => f.QueueId == queueId);
         var oldWorkloadTotal = myQueue.WorkloadTotal;
-        if (myQueue == null || !myQueue.IsEnabled || !myQueue.IsStateful
-            || oldWorkloadTotal == workloadTotal) return;
-        if (workloadTotal > oldWorkloadTotal)
+        if (myQueue == null || !myQueue.IsEnabled || oldWorkloadTotal == workloadTotal) return;
+        if (myQueue.IsStateful && workloadTotal > oldWorkloadTotal)
         {
             var myBindings = this.bindings.FindAll(f => f.QueueId == queueId);
             for (int i = oldWorkloadTotal; i < workloadTotal; i++)

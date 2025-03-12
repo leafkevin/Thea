@@ -11,8 +11,8 @@ public interface IMessageDriven
 
     void Publish<TMessage>(string exchange, string routingKey, TMessage message);
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message);
-    void PublishRpc<TMessage>(string serviceId, string exchange, string routingKey, TMessage message);
-    Task PublishRpcAsync<TMessage, TResponse>(string serviceId, string exchange, string routingKey, TMessage message);
+    void PublishRpc<TMessage>(string serviceId, string messageId, string exchange, string routingKey, TMessage message);
+    Task PublishRpcAsync<TMessage, TResponse>(string serviceId, string messageId, string exchange, string routingKey, TMessage message);
     TResponse Request<TMessage, TResponse>(string exchange, string routingKey, TMessage message);
     Task<TResponse> RequestAsync<TMessage, TResponse>(string exchange, string routingKey, TMessage message);
     void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc);
