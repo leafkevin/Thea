@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<AssemblyName>Thea.Logging</AssemblyName>
+		<AssemblyName>Thea.Logging.Alarm</AssemblyName>
 		<PackageId>$(AssemblyName)</PackageId>
 		<Title>$(AssemblyName)</Title>
 		<Description>Thea开发框架，日志报警组件</Description>

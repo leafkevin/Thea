@@ -49,6 +49,7 @@ public class TheaWebMiddleware
             {
                 exception = ex.InnerException ?? ex;
                 logEntityInfo.Exception = exception;
+                logEntityInfo.LogLevel = (int)LogLevel.Error;
             }
             var response = await this.responseDecorator.ProcessRequest(context, memoryStream, exception);
             context.Response.Body = originalStream;

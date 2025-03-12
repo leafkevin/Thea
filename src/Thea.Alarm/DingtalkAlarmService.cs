@@ -14,7 +14,7 @@ namespace Thea.Alarm;
 class DingtalkAlarmService : IAlarmService
 {
     private static readonly MediaTypeHeaderValue ApplicationJson = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
-    private const string ApiUrl = "https://oapi.dingtalk.com/robot/send?access_token=";
+    private readonly string apiUrl;
     private readonly ILogger<DingtalkAlarmService> logger;
     private readonly IHttpClientFactory clientFactory;
     private readonly string token;
@@ -23,6 +23,7 @@ class DingtalkAlarmService : IAlarmService
     public DingtalkAlarmService(IConfiguration configuration, IHttpClientFactory clientFactory, ILogger<DingtalkAlarmService> logger)
     {
         this.clientFactory = clientFactory;
+        this.apiUrl = configuration.GetValue("Alarm:Url", "https://oapi.dingtalk.com/robot/send?access_token=");
         this.token = configuration.GetValue("Alarm:Token", string.Empty);
         this.secret = configuration.GetValue("Alarm:Secret", string.Empty);
         if (string.IsNullOrEmpty(token))
@@ -43,7 +44,7 @@ class DingtalkAlarmService : IAlarmService
             builder.Append("\"},\"at\":{\"isAtAll\":true}}");
             var body = builder.ToString();
             var signValue = this.Sign(out var timestamp);
-            var url = $"{ApiUrl}{this.token}&timestamp={timestamp}&sign={signValue}";
+            var url = $"{apiUrl}{this.token}&timestamp={timestamp}&sign={signValue}";
             var httpContent = new StringContent(body, Encoding.UTF8);
             httpContent.Headers.ContentType = ApplicationJson;
             using var client = this.clientFactory.CreateClient();

@@ -85,6 +85,7 @@ namespace Thea.Logging
                             }
                             await this.SendToAsync(logEntities);
                             logEntities.Clear();
+                            this.lastPushedTime = DateTime.Now;
                         }
                         if (this.messageQueue.Count <= 0)
                             Thread.Sleep(100);
@@ -93,6 +94,7 @@ namespace Thea.Logging
                     {
                         Console.WriteLine(ex.ToString());
                         logEntities.Clear();
+                        this.lastPushedTime = DateTime.Now;
                     }
                 }
             }, this.stopTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
