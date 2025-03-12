@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using Thea.Alarm;
@@ -28,43 +29,45 @@ public class TheaLogAlarmMiddleware
         if (context.LogEntity != null)
         {
             var logEntityInfo = context.LogEntity;
-            if (logEntityInfo.LogLevel >= (int)LogLevel.Warning)
+            if (logEntityInfo.LogLevel < (int)LogLevel.Warning)
+                return;
+
+            var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, logEntityInfo.Body);
+            if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))
             {
-                var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.UserId, logEntityInfo.ApiUrl, logEntityInfo.Body);
-                if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))
+                this.alarmInfos.TryAdd(hashKey, alarmInfo = new AlarmInfo
                 {
-                    this.alarmInfos.TryAdd(hashKey, alarmInfo = new AlarmInfo
-                    {
-                        CreatedAt = DateTime.Now,
-                        FiredTimes = 1
-                    });
+                    CreatedAt = DateTime.Now,
+                    FiredTimes = 1
+                });
+                this.Build(logEntityInfo, alarmInfo);
+                alarmInfo.SenceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
+                await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
+            }
+            else
+            {
+                //过十分钟了，再报一次，同时更新时间
+                if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
+                {
+                    alarmInfo.FiredTimes++;
                     this.Build(logEntityInfo, alarmInfo);
-                    alarmInfo.SenceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
                     await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
+                    this.alarmInfos.TryRemove(hashKey, out _);
                 }
-                else
-                {
-                    if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
-                    {
-                        await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
-                        alarmInfo.CreatedAt = DateTime.Now;
-                        alarmInfo.FiredTimes = 1;
-                    }
-                    this.Build(logEntityInfo, alarmInfo);
-                }
+                else alarmInfo.FiredTimes++;
             }
         }
         else
         {
-            foreach (var alarmInfo in this.alarmInfos.Values)
+            //十分钟后，不再报警，就删除掉
+            var removeKeys = new List<int>();
+            foreach (var alarmInfo in this.alarmInfos)
             {
-                if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
-                {
-                    await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
-                    alarmInfo.CreatedAt = DateTime.Now;
-                    alarmInfo.FiredTimes = 1;
-                }
+                if (DateTime.Now.Subtract(alarmInfo.Value.CreatedAt) > TimeSpan.FromMinutes(10))
+                    removeKeys.Add(alarmInfo.Key);
             }
+            if (removeKeys.Count > 0)
+                removeKeys.ForEach(key => this.alarmInfos.TryRemove(key, out _));
         }
         await this.next(context);
     }
@@ -74,25 +77,25 @@ public class TheaLogAlarmMiddleware
         if (logEntityInfo.Exception is Exception exception && exception != null)
             body = exception.Message;
 
-        alarmInfo.Header = "Warning Alarm Info";
+        alarmInfo.Header = "告警";
         if (logEntityInfo.LogLevel > (int)LogLevel.Warning)
-            alarmInfo.Header = "Exception Alarm Info";
+            alarmInfo.Header = "异常告警";
 
         var logViewUrl = $"{this.logVisitUrl}thealogs-{logEntityInfo.CreatedAt.Date:yyyyMMdd}/{logEntityInfo.Id}";
         var contentBuilder = new StringBuilder()
-            .AppendLine($"[click me to view]({logViewUrl})  ")
-            .AppendLine("**Request Info**  ")
-            .AppendLine($"> App  Id：{logEntityInfo.AppId}  ")
-            .AppendLine($"> User Id：{logEntityInfo.UserId}  ")
-            .AppendLine($"> Elapsed：{logEntityInfo.Elapsed} ms  ")
-            .AppendLine($"> Api Url：{logEntityInfo.ApiUrl}  ")
-            .AppendLine($"> Parameters：{logEntityInfo.Parameters}  ")
-            .AppendLine($"> Response：{logEntityInfo.Response}  ")
-            .AppendLine($"> Created At：{logEntityInfo.CreatedAt:yyyy-MM-dd HH:mm:ss}  ")
-            .AppendLine($"> Fired Times：{alarmInfo.FiredTimes}  ").AppendLine();
+            .AppendLine($"[查看]({logViewUrl})  ")
+            .AppendLine("**日志信息**  ")
+            .AppendLine($"> 应用ID：{logEntityInfo.AppId}  ")
+            .AppendLine($"> 用户ID：{logEntityInfo.UserId}  ")
+            .AppendLine($"> 耗  时：{logEntityInfo.Elapsed} ms  ")
+            .AppendLine($"> Api地址：{logEntityInfo.ApiUrl}  ")
+            .AppendLine($"> 请求参数：{logEntityInfo.Parameters}  ")
+            .AppendLine($"> 响应内容：{logEntityInfo.Response}  ")
+            .AppendLine($"> 发生时间：{logEntityInfo.CreatedAt:yyyy-MM-dd HH:mm:ss}  ")
+            .AppendLine($"> 触发次数：{alarmInfo.FiredTimes}  ").AppendLine();
         if (logEntityInfo.Exception != null)
-            contentBuilder.AppendLine("**Exception**  ").AppendLine($"> {logEntityInfo.Exception}  ");
-        else contentBuilder.AppendLine("**Body**  ").AppendLine($"> {body}  ");
+            contentBuilder.AppendLine("**详细内容**  ").AppendLine($"> {logEntityInfo.Exception}  ");
+        else contentBuilder.AppendLine("**详细内容**  ").AppendLine($"> {body}  ");
         alarmInfo.Content = contentBuilder.ToString();
     }
     class AlarmInfo
