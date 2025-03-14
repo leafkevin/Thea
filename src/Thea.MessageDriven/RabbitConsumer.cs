@@ -233,22 +233,22 @@ class RabbitConsumer
                                 RetryTimes = iLoop,
                                 UpdatedAt = DateTime.Now
                             });
+                            this.logger.LogEntity(new LogEntity
+                            {
+                                Id = message.MessageId,
+                                TraceId = message.MessageId,
+                                AppId = this.parent.AppId,
+                                Tag = "RabbitConsumer",
+                                Body = $"consumed failed, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
+                                LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
+                                Exception = exception,
+                                ApiType = (int)ApiType.LocalInvoke,
+                                Parameters = jsonBody,
+                                Response = result,
+                                CreatedAt = createdAt,
+                                Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
+                            });
                         }
-                        this.logger.LogEntity(new LogEntity
-                        {
-                            Id = message.MessageId,
-                            TraceId = message.MessageId,
-                            AppId = this.parent.AppId,
-                            Tag = "RabbitConsumer",
-                            Body = $"{(isSuccess ? "consumed success" : "consumed failed")}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
-                            LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
-                            Exception = exception,
-                            ApiType = (int)ApiType.LocalInvoke,
-                            Parameters = jsonBody,
-                            Response = result,
-                            CreatedAt = createdAt,
-                            Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
-                        });
                         if (message.Type == MessageType.RpcMessage)
                         {
                             var messageType = isSuccess ? MessageType.RpcResponse : MessageType.RpcFailure;

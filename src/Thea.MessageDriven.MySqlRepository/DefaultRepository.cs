@@ -73,6 +73,13 @@ public class DefaultRepository : IMessageDrivenRepository
         var cacheKey = $"{this.appId}.queue.all";
         await this.redisCache.RemoveAsync(cacheKey);
     }
+    public virtual async Task ChangeBindings(List<Binding> bindings)
+    {
+        var repository = this.dbFactory.Create(this.dbKey);
+        await repository.UpdateAsync<Binding>(bindings);
+        var cacheKey = $"{this.appId}.binding.all";
+        await this.redisCache.RemoveAsync(cacheKey);
+    }
     public virtual async Task UpdateCache()
     {
         var cacheKey = $"{this.appId}.queue.all";

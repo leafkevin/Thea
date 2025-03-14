@@ -31,14 +31,16 @@ class MessageDrivenService : IMessageDriven
     private bool isAllowCreateExchange = false;
     private bool isAllowCreateBinding = false;
     private bool isRpcConsumer = false;
-    private List<string> localExchangeIds = new();
+    private List<string> localExchanges = new();
     private List<string> localQueueIds = new();
     private List<string> rpcExchanges = new();
+    private List<string> transferExchanges = new();
     private List<Queue> queues = new();
     private List<Queue> lastQueues = null;
     private List<Binding> bindings = new();
     private RabbitConsumer heartbeatRabbitConsumer;
     private RabbitConsumer resultRabbitConsumer;
+    private List<RabbitConsumer> transferRabbitConsumers;
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
     private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
     private readonly IServiceProvider serviceProvider;
@@ -218,6 +220,12 @@ class MessageDrivenService : IMessageDriven
         this.rabbitProducer.Shutdown().Wait();
         this.heartbeatRabbitConsumer?.Shutdown().Wait();
         this.resultRabbitConsumer?.Shutdown();
+        if (this.transferRabbitConsumers != null)
+        {
+            this.transferRabbitConsumers.ForEach(async f => await f.Shutdown());
+            this.transferRabbitConsumers.Clear();
+            this.transferExchanges.Clear();
+        }
 
         if (this.task != null)
             this.task.Wait();
@@ -393,15 +401,15 @@ class MessageDrivenService : IMessageDriven
     {
         foreach (var exchange in exchanges)
         {
-            if (this.localExchangeIds.Exists(f => f == exchange))
+            if (this.localExchanges.Exists(f => f == exchange))
                 continue;
-            this.localExchangeIds.Add(exchange);
+            this.localExchanges.Add(exchange);
         }
     }
     public void UseProducer(string exchange, bool isUseRpc)
     {
-        if (!this.localExchangeIds.Contains(exchange))
-            this.localExchangeIds.Add(exchange);
+        if (!this.localExchanges.Contains(exchange))
+            this.localExchanges.Add(exchange);
         if (isUseRpc && !this.rpcExchanges.Contains(exchange))
             this.rpcExchanges.Add(exchange);
     }
@@ -505,6 +513,18 @@ class MessageDrivenService : IMessageDriven
         }
     }
     public void UseRpcConsumer() => this.isRpcConsumer = true;
+    public void UseTransfer(params string[] exchanges)
+    {
+        if (exchanges == null || exchanges.Length == 0)
+            throw new ArgumentNullException(nameof(exchanges));
+
+        foreach (var exchange in exchanges)
+        {
+            if (this.transferExchanges.Contains(exchange))
+                continue;
+            this.transferExchanges.Add(exchange);
+        }
+    }
     public async Task ChangeQueue(string queueId, int workloadTotal)
     {
         var myQueue = this.queues.Find(f => f.QueueId == queueId);
@@ -585,15 +605,22 @@ class MessageDrivenService : IMessageDriven
         (this.queues, this.bindings) = await this.repository.GetConfigInfo(false);
         if (!this.hasConsumer)
         {
-            var myBindings = this.bindings.FindAll(f => f.IsNeedTransfer);
-            myBindings.ForEach(async f =>
+            var updateBindings = new List<Binding>();
+            var myBindings = this.bindings.FindAll(f => this.localExchanges.Contains(f.ExchangeId));
+            foreach (var myBinding in myBindings)
             {
-                if (f.IsNeedTransfer && this.isAllowCreateQueue)
+                var refQueue = this.queues.Find(f => f.QueueId == f.QueueId);
+                if (refQueue == null || !refQueue.IsStateful) continue;
+                if (this.isAllowCreateQueue)
                 {
-                    queueName = $"{Consts.TransferExchange}.{f.ExchangeId}";
+                    queueName = $"{Consts.TransferExchange}.{myBinding.ExchangeId}";
                     await this.rabbitProducer.CreateQueue(queueName, true, false);
                 }
-            });
+                myBinding.IsNeedTransfer = true;
+                updateBindings.Add(myBinding);
+            }
+            if (updateBindings.Count > 0)
+                await this.repository.ChangeBindings(updateBindings);
             return;
         }
 
@@ -607,6 +634,19 @@ class MessageDrivenService : IMessageDriven
         if (isChanged)
             await this.Register(registerQueues, registerBindings);
         await this.Register(this.queues, this.bindings);
+
+        var transferBindings = this.bindings.FindAll(f => f.IsNeedTransfer);
+        if (transferBindings.Count > 0)
+        {
+            this.transferRabbitConsumers = new();
+            foreach (var exchange in this.transferExchanges)
+            {
+                queueName = $"{Consts.TransferExchange}.{exchange}";
+                var consumer = new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Transfer);
+                this.transferRabbitConsumers.Add(consumer);
+                await this.heartbeatRabbitConsumer.Start();
+            }
+        }
         await this.SendHeartbeat();
     }
     private async Task Register(List<Queue> registerQueues, List<Binding> registerBindings)

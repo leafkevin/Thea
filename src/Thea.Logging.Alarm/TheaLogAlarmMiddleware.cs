@@ -89,12 +89,13 @@ public class TheaLogAlarmMiddleware
             .AppendLine($"> 用户ID：{logEntityInfo.UserId}  ")
             .AppendLine($"> 耗  时：{logEntityInfo.Elapsed} ms  ")
             .AppendLine($"> Api地址：{logEntityInfo.ApiUrl}  ")
-            .AppendLine($"> 请求参数：{logEntityInfo.Parameters}  ")
-            .AppendLine($"> 响应内容：{logEntityInfo.Response}  ")
-            .AppendLine($"> 发生时间：{logEntityInfo.CreatedAt:yyyy-MM-dd HH:mm:ss}  ")
+            .AppendLine($"> 请求参数：{logEntityInfo.Parameters}  ");
+        if (logEntityInfo.Exception == null)
+            contentBuilder.AppendLine($"> 响应内容：{logEntityInfo.Response}  ");
+        contentBuilder.AppendLine($"> 发生时间：{logEntityInfo.CreatedAt:yyyy-MM-dd HH:mm:ss}  ")
             .AppendLine($"> 触发次数：{alarmInfo.FiredTimes}  ").AppendLine();
         if (logEntityInfo.Exception != null)
-            contentBuilder.AppendLine("**详细内容**  ").AppendLine($"> {logEntityInfo.Exception}  ");
+            contentBuilder.AppendLine("**异常内容**  ").AppendLine($"> {logEntityInfo.Exception}  ");
         else contentBuilder.AppendLine("**详细内容**  ").AppendLine($"> {body}  ");
         alarmInfo.Content = contentBuilder.ToString();
     }
