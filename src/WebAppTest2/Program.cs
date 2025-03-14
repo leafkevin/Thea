@@ -33,7 +33,8 @@ app.UseMessageDriven(f =>
 {
     f.UseTrolleyRepository("default")
     .UseProducer("cache.refresh", "award.take", "award.issue")
-    .UseProducer("award.take", true);
+    .UseProducer("award.take", true)
+    .UseRpcConsumer();
 });
 app.UseAuthorization();
 

@@ -235,7 +235,7 @@ class MessageDrivenService : IMessageDriven
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
-            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
@@ -261,13 +261,13 @@ class MessageDrivenService : IMessageDriven
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
-            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
-        if (!this.rpcExchanges.Contains(exchange))
+        if (!this.isRpcConsumer)
         {
-            var errMessage = $"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true";
+            var errMessage = $"未配置RPC消费者，请使用方法：UseRpcConsumer()配置RPC消费者";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
@@ -299,13 +299,13 @@ class MessageDrivenService : IMessageDriven
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
-            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
-        if (!this.rpcExchanges.Contains(exchange))
+        if (!this.isRpcConsumer)
         {
-            var errMessage = $"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true";
+            var errMessage = $"未配置RPC消费者，请使用方法：UseRpcConsumer()配置RPC消费者";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
@@ -335,13 +335,13 @@ class MessageDrivenService : IMessageDriven
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
-            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
-        if (!this.rpcExchanges.Contains(exchange))
+        if (!this.isRpcConsumer)
         {
-            var errMessage = $"当前交换机{exchange}并没有配置RPC模式，可使用方法：UseProducer(exchange, isUseRpc, isDelay)，isUseRpc设置为true";
+            var errMessage = $"未配置RPC消费者，请使用方法：UseRpcConsumer()配置RPC消费者";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
@@ -373,7 +373,7 @@ class MessageDrivenService : IMessageDriven
             throw new Exception($"入队时间晚于现在时间，只能选择未来时间");
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
-            var errMessage = $"未注册的交换机{exchange}，可使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册，但必须有应用使用UseStatefulConsumer、UseSubscriber方法进行绑定";
+            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
@@ -590,7 +590,7 @@ class MessageDrivenService : IMessageDriven
 
         string queueName = null;
         this.rabbitProducer = await RabbitProducer.Create(this, this.serviceProvider);
-        if (this.rpcExchanges.Count > 0)
+        if (this.rpcExchanges.Count > 0 || this.isRpcConsumer)
         {
             var exchange = Consts.RpcExchange;
             if (this.isAllowCreateExchange)
@@ -605,7 +605,8 @@ class MessageDrivenService : IMessageDriven
         (this.queues, this.bindings) = await this.repository.GetConfigInfo(false);
         if (!this.hasConsumer)
         {
-            var updateBindings = new List<Binding>();
+            //只有生产者时并且与交换机绑定的队列是有状态队列，就需要创建转发队列，转发消息给有消费者的消息驱动组件再转发出去
+            var changedBindings = new List<Binding>();
             var myBindings = this.bindings.FindAll(f => this.localExchanges.Contains(f.ExchangeId));
             foreach (var myBinding in myBindings)
             {
@@ -617,10 +618,10 @@ class MessageDrivenService : IMessageDriven
                     await this.rabbitProducer.CreateQueue(queueName, true, false);
                 }
                 myBinding.IsNeedTransfer = true;
-                updateBindings.Add(myBinding);
+                changedBindings.Add(myBinding);
             }
-            if (updateBindings.Count > 0)
-                await this.repository.ChangeBindings(updateBindings);
+            if (changedBindings.Count > 0)
+                await this.repository.ChangeBindings(changedBindings);
             return;
         }
 

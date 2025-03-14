@@ -50,8 +50,8 @@ public class HomeController : ControllerBase
     }
     public class AwardInfo
     {
-        public string AwardId { get; set; }
+        public required string AwardId { get; set; }
         public int Quantity { get; set; }
-        public string RecipientId { get; set; }
+        public string? RecipientId { get; set; }
     }
 }
