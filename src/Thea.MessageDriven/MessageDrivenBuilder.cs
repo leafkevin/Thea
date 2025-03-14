@@ -23,14 +23,14 @@ public class MessageDrivenBuilder
         this.messageDriven.UseRepository(new TRepository());
         return this;
     }
-    public MessageDrivenBuilder UseProducer(params string[] clusterIds)
+    public MessageDrivenBuilder UseProducer(params string[] exchanges)
     {
-        this.messageDriven.UseProducer(clusterIds);
+        this.messageDriven.UseProducer(exchanges);
         return this;
     }
-    public MessageDrivenBuilder UseProducer(string clusterId, bool isUseRpc)
+    public MessageDrivenBuilder UseProducer(string exchange, bool isUseRpc)
     {
-        this.messageDriven.UseProducer(clusterId, isUseRpc);
+        this.messageDriven.UseProducer(exchange, isUseRpc);
         return this;
     }
     public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)
