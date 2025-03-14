@@ -40,11 +40,11 @@ public class MessageDrivenBuilder
         this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo);
         return this;
     }
-    public MessageDrivenBuilder UseSubscriber<TConsumer>(string clusterId, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
+    public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseSubscriber(clusterId, queue, methodInfo, routingKey, isDelay);
+        this.messageDriven.UseSubscriber(exchange, queue, methodInfo, routingKey, isDelay);
         return this;
     }
     public MessageDrivenBuilder UseRpcConsumer()
