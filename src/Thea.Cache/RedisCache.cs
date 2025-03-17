@@ -99,19 +99,12 @@ public class RedisCache : IDistributedCache
         }
         return redisValue.ToString().JsonTo<T>();
     }
-    public async Task<long> IncrementAsync(string key, int lifetimeMinutes = 120)
+    public async Task<long> IncrementAsync(string key, long defaultVavlue = 1)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
         var database = connectionPool.GetDatabase(this.databaseIndex);
-        if (!database.KeyExists(key))
-        {
-            var randomSeconds = Random.Shared.Next(-60, 60);
-            var expires = TimeSpan.FromMinutes(lifetimeMinutes).Add(TimeSpan.FromSeconds(randomSeconds));
-            database.StringSet(key, 0, expires);
-        }
-        var result = await database.StringIncrementAsync(key);
-        return result;
+        return await database.StringIncrementAsync(key, defaultVavlue);
     }
     public void Remove(string key)
     {
