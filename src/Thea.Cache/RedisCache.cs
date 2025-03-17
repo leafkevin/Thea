@@ -104,7 +104,13 @@ public class RedisCache : IDistributedCache
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
         var database = connectionPool.GetDatabase(this.databaseIndex);
-        return await database.StringIncrementAsync(key, defaultVavlue);
+        var result = await database.StringIncrementAsync(key);
+        if (result == 1)
+        {
+            result = defaultVavlue;
+            await this.SetAsync(key, result);
+        }
+        return result;
     }
     public void Remove(string key)
     {
