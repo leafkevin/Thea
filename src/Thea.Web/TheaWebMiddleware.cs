@@ -51,7 +51,7 @@ public class TheaWebMiddleware
                 logEntityInfo.Exception = exception;
                 logEntityInfo.LogLevel = (int)LogLevel.Error;
             }
-            var response = await this.responseDecorator.ProcessRequest(context, memoryStream, exception);
+            logEntityInfo.Response = await this.responseDecorator.ProcessRequest(context, memoryStream, exception);
             context.Response.Body = originalStream;
             if (exception != null)
             {
@@ -60,6 +60,8 @@ public class TheaWebMiddleware
                 logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
             }
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
+            
+            logEntityInfo.Headers = context.Request.Headers.ToJson();
             if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
             {
                 logEntityInfo.Authorization = authorization.ToString();
@@ -71,7 +73,7 @@ public class TheaWebMiddleware
                     logEntityInfo.TenantId = passport.TenantId;
                 }
             }
-            await context.Response.WriteAsync(response);
+            await context.Response.WriteAsync(logEntityInfo.Response);
             this.logger.LogEntity(logEntityInfo);
         }
     }
@@ -119,7 +121,7 @@ public class TheaWebMiddleware
             case (int)ApiType.HttpPost:
             case (int)ApiType.HttpPut:
                 if (context.Request.Query != null && context.Request.Query.Count > 0)
-                    logEntityInfo.Parameters = "QueryString: {HttpUtility.UrlDecode(context.Request.QueryString.ToString())} \nBody: ";
+                    logEntityInfo.Parameters = $"QueryString: {HttpUtility.UrlDecode(context.Request.QueryString.ToString())} \nBody: ";
                 logEntityInfo.Parameters += await this.ReadBody(context.Request.Body);
                 break;
         }

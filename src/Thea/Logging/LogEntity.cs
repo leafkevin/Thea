@@ -12,6 +12,7 @@ public class LogEntity
     public string ApiUrl { get; set; }
     public string ClientIp { get; set; }
     public string Host { get; set; }
+    public string Headers { get; set; }
     public string Parameters { get; set; }
 
     public string UserId { get; set; }

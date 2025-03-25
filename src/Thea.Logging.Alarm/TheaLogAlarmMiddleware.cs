@@ -15,6 +15,7 @@ public class TheaLogAlarmMiddleware
     private readonly string logVisitUrl;
     private readonly LoggerHandlerDelegate next;
     private readonly ConcurrentDictionary<int, AlarmInfo> alarmInfos = new();
+    private readonly int alarmLevel = (int)LogLevel.Warning;
 
     public TheaLogAlarmMiddleware(LoggerHandlerDelegate next, IAlarmService alarmService, IConfiguration configuration, ILogger<TheaLogAlarmMiddleware> logger)
     {
@@ -23,13 +24,20 @@ public class TheaLogAlarmMiddleware
         this.logVisitUrl = configuration.GetValue<string>("Alarm:LogWebSite");
         if (string.IsNullOrEmpty(this.logVisitUrl))
             throw new ArgumentNullException("appsettings.json not found 'Alarm:LogWebSite' node or value is null.");
+        var logLevel = configuration.GetValue<string>("Alarm:LogLevel");
+        if (!string.IsNullOrEmpty(logLevel))
+        {
+            if (Enum.TryParse<LogLevel>(logLevel, out var level))
+                this.alarmLevel = (int)level;
+            else logger.LogWarning($"The LogLevel value '{logLevel}' is invalid, the default value is 'Warning'.");
+        }
     }
     public async Task Invoke(LoggerHandlerContext context)
     {
         if (context.LogEntity != null)
         {
             var logEntityInfo = context.LogEntity;
-            if (logEntityInfo.LogLevel < (int)LogLevel.Warning)
+            if (logEntityInfo.LogLevel < this.alarmLevel)
                 return;
 
             var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, logEntityInfo.Body);
@@ -85,8 +93,10 @@ public class TheaLogAlarmMiddleware
         var contentBuilder = new StringBuilder()
             .AppendLine($"[查看]({logViewUrl})  ")
             .AppendLine("**日志信息**  ")
+            .AppendLine($"> TraceId：{logEntityInfo.TraceId}  ")
             .AppendLine($"> 应用ID：{logEntityInfo.AppId}  ")
             .AppendLine($"> 用户ID：{logEntityInfo.UserId}  ")
+            .AppendLine($"> Headers：{logEntityInfo.Headers}  ")
             .AppendLine($"> 耗  时：{logEntityInfo.Elapsed} ms  ")
             .AppendLine($"> Api地址：{logEntityInfo.ApiUrl}  ")
             .AppendLine($"> 请求参数：{logEntityInfo.Parameters}  ");
