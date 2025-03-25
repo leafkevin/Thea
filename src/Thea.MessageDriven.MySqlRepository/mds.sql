@@ -28,7 +28,6 @@ CREATE TABLE `mds_queue`
     `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',
     `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
     CONSTRAINT `pk_mds_queue` PRIMARY KEY(`queue_id`)
-
 );
 ALTER TABLE `mds_queue` COMMENT '队列表，描述所有的队列基本信息';
 -- -------------- TABLE [mds_queue] END----------------

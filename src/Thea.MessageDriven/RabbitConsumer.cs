@@ -221,9 +221,10 @@ class RabbitConsumer
                         if (!isSuccess) result = exception.ToString();
                         if (this.IsLogEnabled || !isSuccess)
                         {
+                            var logId = ObjectId.NewId();
                             this.addLogsHandler.Invoke(new ExecLog
                             {
-                                LogId = message.MessageId,
+                                LogId = logId,
                                 ExchangeId = ea.Exchange,
                                 RoutingKey = ea.RoutingKey,
                                 Queue = this.QueueName,
@@ -235,7 +236,7 @@ class RabbitConsumer
                             });
                             this.logger.LogEntity(new LogEntity
                             {
-                                Id = message.MessageId,
+                                Id = logId,
                                 TraceId = message.MessageId,
                                 AppId = this.parent.AppId,
                                 Tag = "RabbitConsumer",
