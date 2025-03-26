@@ -52,8 +52,8 @@ public class TheaLogger : ILogger
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
 
         logEntityInfo.LogTime = DateTime.Now;
-        if (!string.IsNullOrEmpty(logEntityInfo.Authorization))
-            logEntityInfo.Authorization = Encrypt(logEntityInfo.Authorization);
+        //if (!string.IsNullOrEmpty(logEntityInfo.Authorization))
+        //    logEntityInfo.Authorization = Encrypt(logEntityInfo.Authorization);
 
         if (TheaLogScope.Current != null && TheaLogScope.Current.State != null)
         {

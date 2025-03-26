@@ -11,16 +11,6 @@ namespace Thea.Web;
 
 public static class TheaWebExtensions
 {
-    public static void AddPassport(this IServiceCollection services)
-    {
-        services.AddTransient<IPassport>(provider =>
-        {
-            var contextAccessor = provider.GetService<IHttpContextAccessor>();
-            if (contextAccessor != null)
-                return new Passport(contextAccessor.HttpContext.User);
-            return null;
-        });
-    }
     public static IServiceCollection AddTheaWeb(this IServiceCollection services)
     {
         services.AddHttpContextAccessor();
@@ -53,4 +43,9 @@ public static class TheaWebExtensions
         return (T)Convert.ChangeType(claim.Value, underlyingType);
     }
     public static IPassport ToPassport(this ClaimsPrincipal user) => new Passport(user);
+    public static IPassport ToPassport(this IHttpContextAccessor contextAccessor)
+    {
+        var user = contextAccessor.HttpContext.User;
+        return new Passport(user);
+    }
 }

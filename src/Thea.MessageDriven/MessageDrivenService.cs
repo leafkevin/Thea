@@ -214,11 +214,17 @@ class MessageDrivenService : IMessageDriven
         foreach (var rabbitConsumers in this.consumers.Values)
             rabbitConsumers.ForEach(async f => await f.Shutdown());
         this.consumers.Clear();
+        this.heartbeats.Clear();
         this.rabbitProducer.Shutdown().Wait();
         this.heartbeatRabbitConsumer?.Shutdown().Wait();
         this.resultRabbitConsumer?.Shutdown();
         foreach (var rabbitConsumers in this.transferRabbitConsumers.Values)
             rabbitConsumers.ForEach(async f => await f.Shutdown());
+        this.waitingStartConsumers.Clear();
+        foreach (var rabbitConsumers in this.waitingShutdownConsumers.Values)
+            rabbitConsumers.ForEach(async f => await f.Shutdown());
+        foreach (var rpcWaiter in this.rpcWaiters.Values)
+            rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
 
         if (this.task != null)
             this.task.Wait();

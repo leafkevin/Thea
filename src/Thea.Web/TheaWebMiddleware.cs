@@ -98,7 +98,8 @@ public class TheaWebMiddleware
         logEntityInfo.Host = GetHost();
         logEntityInfo.ApiType = this.GetApiType(context.Request.Method);
         logEntityInfo.ClientIp = context.GetClientIp();
-        var apiUrl = $"{context.Request.Scheme}://*{context.Request.PathBase.Value}{context.Request.Path.Value}";
+        var request = context.Request;
+        var apiUrl = $"{request.Scheme}://*{request.Path}{request.QueryString}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
         logEntityInfo.CreatedAt = DateTime.Now;
 
