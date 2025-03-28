@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Web;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Thea.Logging;
@@ -19,8 +20,9 @@ public class TheaWebMiddleware
     private readonly RequestDelegate next;
     private readonly IResponseDecorator responseDecorator;
     private readonly ILogger<TheaWebMiddleware> logger;
+    private readonly string environment;
 
-    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseDecorator responseDecorator, IHostEnvironment hostEnvironment, ILogger<TheaWebMiddleware> logger)
     {
         this.appId = configuation.GetValue<string>("AppId");
         if (string.IsNullOrEmpty(this.appId))
@@ -29,14 +31,14 @@ public class TheaWebMiddleware
         this.next = next;
         this.responseDecorator = responseDecorator;
         this.logger = logger;
+        this.environment = hostEnvironment.EnvironmentName;
     }
 
     public async Task Invoke(HttpContext context)
     {
         var originalStream = context.Response.Body;
         var logEntityInfo = await this.CreateLogEntity(context);
-        var logScope = new TheaLogState { TraceId = logEntityInfo.TraceId, Tag = logEntityInfo.Tag };
-        using (this.logger.BeginScope(logScope))
+        using (this.logger.BeginScope(logEntityInfo.TraceId))
         {
             using var memoryStream = new MemoryStream();
             Exception exception = null;
@@ -59,8 +61,8 @@ public class TheaWebMiddleware
                 logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
                 logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
             }
-            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
-            
+            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
+
             logEntityInfo.Headers = context.Request.Headers.ToJson();
             if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
             {
@@ -96,11 +98,13 @@ public class TheaWebMiddleware
             logEntityInfo.Tag = tag.ToString();
 
         logEntityInfo.Host = GetHost();
+        logEntityInfo.Environment = this.environment;
         logEntityInfo.ApiType = this.GetApiType(context.Request.Method);
         logEntityInfo.ClientIp = context.GetClientIp();
-        var apiUrl = $"{context.Request.Scheme}://*{context.Request.PathBase.Value}{context.Request.Path.Value}";
+        var request = context.Request;
+        var apiUrl = $"{request.Scheme}://*{request.Path}{request.QueryString}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
-        logEntityInfo.CreatedAt = DateTime.Now;
+        logEntityInfo.LogTime = DateTime.Now;
 
         context.Request.EnableBuffering();
         context.Response.OnStarting(() =>

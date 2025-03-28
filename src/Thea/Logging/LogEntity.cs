@@ -7,6 +7,7 @@ public class LogEntity
     public string Id { get; set; }
     public string TraceId { get; set; }
     public string AppId { get; set; }
+    public string Environment { get; set; }
     public int LogLevel { get; set; }
     public int ApiType { get; set; }
     public string ApiUrl { get; set; }
@@ -26,8 +27,7 @@ public class LogEntity
     public string Response { get; set; }
 
     public object Exception { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.Now;
-    public DateTime LogTime { get; set; }
+    public DateTime LogTime { get; set; } = DateTime.Now;
     public int? Elapsed { get; set; }
 
     public override string ToString() => this.Body;

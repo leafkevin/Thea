@@ -89,7 +89,7 @@ public class TheaLogAlarmMiddleware
         if (logEntityInfo.LogLevel > (int)LogLevel.Warning)
             alarmInfo.Header = "异常告警";
 
-        var logViewUrl = $"{this.logVisitUrl}thealogs-{logEntityInfo.CreatedAt.Date:yyyyMMdd}/{logEntityInfo.Id}";
+        var logViewUrl = $"{this.logVisitUrl}thealogs-{logEntityInfo.LogTime.Date:yyyyMMdd}/{logEntityInfo.Id}";
         var contentBuilder = new StringBuilder()
             .AppendLine($"[查看]({logViewUrl})  ")
             .AppendLine("**日志信息**  ")
@@ -102,7 +102,7 @@ public class TheaLogAlarmMiddleware
             .AppendLine($"> 请求参数：{logEntityInfo.Parameters}  ");
         if (logEntityInfo.Exception == null)
             contentBuilder.AppendLine($"> 响应内容：{logEntityInfo.Response}  ");
-        contentBuilder.AppendLine($"> 发生时间：{logEntityInfo.CreatedAt:yyyy-MM-dd HH:mm:ss}  ")
+        contentBuilder.AppendLine($"> 发生时间：{logEntityInfo.LogTime:yyyy-MM-dd HH:mm:ss}  ")
             .AppendLine($"> 触发次数：{alarmInfo.FiredTimes}  ").AppendLine();
         if (logEntityInfo.Exception != null)
             contentBuilder.AppendLine("**异常内容**  ").AppendLine($"> {logEntityInfo.Exception}  ");

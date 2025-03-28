@@ -6,12 +6,6 @@ namespace Thea.Logging;
 public static class TagLoggerExtensions
 {
     private static string LogEntityFormatter(LogEntity state, Exception ex) => state.Body;
-    public static void AddLogState(this ILogger logger, string traceId, string tag)
-        => logger.BeginScope(new TheaLogState { TraceId = traceId, Tag = tag });
-    public static void AddTraceId(this ILogger logger, string traceId)
-        => logger.BeginScope(new TheaLogState { TraceId = traceId });
-    public static void AddTag(this ILogger logger, string tag)
-        => logger.BeginScope(new TheaLogState { Tag = tag });
     public static void LogEntity(this ILogger logger, LogEntity logEntityInfo)
     {
         if (logEntityInfo == null) return;
@@ -98,7 +92,7 @@ public static class TagLoggerExtensions
             Tag = tag,
             Body = body,
             Exception = exception,
-            CreatedAt = DateTime.Now
+            LogTime = DateTime.Now
         });
     }
 }

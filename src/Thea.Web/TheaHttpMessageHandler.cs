@@ -1,11 +1,11 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Http;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using Thea.Logging;
 
 namespace Thea.Web;
@@ -51,22 +51,12 @@ public sealed class TheaHttpMessageHandler : DelegatingHandler
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var context = this.contextAccessor.HttpContext;
-        if (context == null) return base.SendAsync(request, cancellationToken);
         if (!request.Headers.Contains("TraceId"))
         {
-            if (TheaLogScope.Current != null)
-            {
-                request.Headers.Add("TraceId", TheaLogScope.Current.State.TraceId);
-                if (!string.IsNullOrEmpty(TheaLogScope.Current.State.Tag))
-                    request.Headers.Add("Tag", TheaLogScope.Current.State.Tag);
-            }
-            else
-            {
-                request.Headers.Add("TraceId", context.TraceIdentifier);
-                if (context.Request.Headers.TryGetValue("Tag", out var tag))
-                    request.Headers.Add("Tag", tag.ToString());
-            }
+            var context = this.contextAccessor.HttpContext;
+            var traceId = StateScope.TraceId ?? context?.TraceIdentifier;
+            if (!string.IsNullOrEmpty(traceId))
+                request.Headers.Add("TraceId", traceId);
         }
         return base.SendAsync(request, cancellationToken);
     }

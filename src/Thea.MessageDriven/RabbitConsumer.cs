@@ -246,7 +246,7 @@ class RabbitConsumer
                                 ApiType = (int)ApiType.LocalInvoke,
                                 Parameters = jsonBody,
                                 Response = result,
-                                CreatedAt = createdAt,
+                                LogTime = createdAt,
                                 Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
                             });
                         }

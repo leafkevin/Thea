@@ -1,24 +1,20 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using System;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System;
-using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace Thea.Logging;
 
 public class TheaLogger : ILogger
 {
-    private static byte[] _rgbKey = ASCIIEncoding.ASCII.GetBytes("Thea.Log");
-    private static byte[] _rgbIV = ASCIIEncoding.ASCII.GetBytes("Thea.Log");
-
     private readonly string name;
     private readonly string appId;
+    private readonly string environment;
     private readonly LogLevel logLevel;
     private readonly LogLevel aspnetLogLevel;
     private readonly ILoggerProcessor processor;
 
-    public TheaLogger(string name, IConfiguration configuration, ILoggerProcessor processor)
+    public TheaLogger(string name, IConfiguration configuration, IHostEnvironment hostEnvironment, ILoggerProcessor processor)
     {
         if (name == null) throw new ArgumentNullException(nameof(name));
         this.appId = configuration["AppId"];
@@ -26,6 +22,7 @@ public class TheaLogger : ILogger
         this.aspnetLogLevel = configuration.GetValue("Logging:LogLevel:Microsoft.AspNetCore", LogLevel.Error);
         if (appId == null) throw new ArgumentNullException(nameof(appId));
         this.name = name;
+        this.environment = hostEnvironment.EnvironmentName;
         this.processor = processor;
     }
 
@@ -34,6 +31,7 @@ public class TheaLogger : ILogger
         if (!this.IsEnabled(logLevel)) return;
         if (formatter == null)
             throw new ArgumentNullException(nameof(formatter));
+
         var logEntityInfo = state as LogEntity;
         if (logEntityInfo == null)
         {
@@ -48,20 +46,13 @@ public class TheaLogger : ILogger
         }
         if (string.IsNullOrEmpty(logEntityInfo.AppId))
             logEntityInfo.AppId = this.appId;
+        if (!string.IsNullOrEmpty(StateScope.TraceId))
+            logEntityInfo.TraceId = StateScope.TraceId;
+        if (string.IsNullOrEmpty(logEntityInfo.Environment))
+            logEntityInfo.Environment = this.environment;
         if (!logEntityInfo.Elapsed.HasValue)
-            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.CreatedAt).TotalMilliseconds;
+            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
 
-        logEntityInfo.LogTime = DateTime.Now;
-        if (!string.IsNullOrEmpty(logEntityInfo.Authorization))
-            logEntityInfo.Authorization = Encrypt(logEntityInfo.Authorization);
-
-        if (TheaLogScope.Current != null && TheaLogScope.Current.State != null)
-        {
-            if (string.IsNullOrEmpty(logEntityInfo.TraceId))
-                logEntityInfo.TraceId = TheaLogScope.Current.State.TraceId;
-            if (string.IsNullOrEmpty(logEntityInfo.Tag))
-                logEntityInfo.Tag = TheaLogScope.Current.State.Tag;
-        }
         this.processor.Execute(logEntityInfo);
     }
 
@@ -77,38 +68,14 @@ public class TheaLogger : ILogger
         if (state == null)
             throw new ArgumentNullException(nameof(state));
 
-        if (state is TheaLogState logState)
-            return TheaLogScope.Push(logState);
-        else if (state is LogEntity logEntity)
-        {
-            return TheaLogScope.Push(new TheaLogState
-            {
-                TraceId = logEntity.TraceId,
-                Tag = logEntity.Tag
-            });
-        }
+        if (state is string traceId)
+            return StateScope.Push(traceId);
         //其他类型暂时不处理，没有意义
         return null;
     }
-    private static string Encrypt(string content)
-    {
-        if (string.IsNullOrEmpty(content))
-            return null;
-
-        var dsp = DES.Create();
-        using var memStream = new MemoryStream();
-        using var crypStream = new CryptoStream(memStream, dsp.CreateEncryptor(_rgbKey, _rgbIV), CryptoStreamMode.Write);
-        var sWriter = new StreamWriter(crypStream);
-        sWriter.Write(content);
-        sWriter.Flush();
-        crypStream.FlushFinalBlock();
-        memStream.Flush();
-        return Convert.ToBase64String(memStream.GetBuffer(), 0, (int)memStream.Length);
-    }
 }
-
 public class TheaLogger<T> : TheaLogger
 {
-    public TheaLogger(string name, IConfiguration configuration, ILoggerProcessor processor)
-        : base(name, configuration, processor) { }
+    public TheaLogger(string name, IConfiguration configuration, IHostEnvironment hostEnvironment, ILoggerProcessor processor)
+        : base(name, configuration, hostEnvironment, processor) { }
 }
