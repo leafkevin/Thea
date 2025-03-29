@@ -8,6 +8,7 @@ using Thea.Cache;
 using Thea.MessageDriven;
 using Thea.MessageDriven.MySqlRepository;
 using Thea.Web;
+using Thea.Logging;
 using Trolley;
 using WebAppTest.Domain.Services;
 
@@ -28,8 +29,7 @@ public static class Startup
         services.AddMemoryCache();
         services.AddRedisCache();
         services.AddTheaWeb();
-        services.AddPassport();
-        //services.AddTheaLogging();
+        services.AddTheaLogging();
         services.AddTheaAuthentication(f =>
         {
             f.Issuer = "thea";
@@ -40,7 +40,6 @@ public static class Startup
         });
 
         services.AddTheaWeb();
-        services.AddPassport();
         services.AddMessageDriven();
         services.AddSingleton<StatefulConsumer>();
 

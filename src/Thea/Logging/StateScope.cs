@@ -8,17 +8,17 @@ public class StateScope : IDisposable
     private static readonly AsyncLocal<StateHolder> current = new();
     private static readonly StateScope instance = new();
     private StateScope() { }
-
-    public static string TraceId => current.Value?.Value;
-    public static StateScope Push(string traceId)
+    public static LogEntity State => current.Value?.State;
+    public static StateScope Push(object scopeState)
     {
         var holder = current.Value ??= new StateHolder();
-        holder.Value = traceId;
+        if (scopeState is LogEntity logEntity)
+            holder.State = logEntity; 
         return instance;
     }
     public void Dispose() => current.Value = null;
     private sealed class StateHolder
     {
-        public string Value;
+        public LogEntity State;
     }
 }

@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Thea;
+using Thea.Logging;
 using Thea.MessageDriven;
 using Trolley;
 using Trolley.PostgreSql;
@@ -19,16 +21,21 @@ namespace WebAppTest.Controllers
     {
         private readonly IOrmDbFactory dbFactory;
         private readonly IMessageDriven messageDriven;
-        public HomeController(IOrmDbFactory dbFactory, IMessageDriven messageDriven)
+        private readonly ILogger logger;
+        public HomeController(IOrmDbFactory dbFactory, IMessageDriven messageDriven, ILogger<HomeController> logger)
         {
             this.dbFactory = dbFactory;
             this.messageDriven = messageDriven;
+            this.logger = logger;
         }
 
         [HttpGet]
-        public string Index()
+        public async Task<TheaResponse> Index()
         {
-            return "ok";
+            Thread.Sleep(200);
+            this.logger.LogTagInformation("Index", "111111------------");
+            await this.messageDriven.PublishAsync("cache.refresh", "1","111");
+            return TheaResponse.Success;
         }
         [HttpPost]
         public async Task<TheaResponse> GetLookupValueList([FromBody] QueryPagedRequest request)

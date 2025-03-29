@@ -38,7 +38,7 @@ public class TheaWebMiddleware
     {
         var originalStream = context.Response.Body;
         var logEntityInfo = await this.CreateLogEntity(context);
-        using (this.logger.BeginScope(logEntityInfo.TraceId))
+        using (this.logger.BeginScope(logEntityInfo))
         {
             using var memoryStream = new MemoryStream();
             Exception exception = null;
@@ -61,20 +61,7 @@ public class TheaWebMiddleware
                 logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
                 logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
             }
-            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
 
-            logEntityInfo.Headers = context.Request.Headers.ToJson();
-            if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
-            {
-                logEntityInfo.Authorization = authorization.ToString();
-                if (context.User != null)
-                {
-                    var passport = context.User.ToPassport();
-                    logEntityInfo.UserId = passport.UserId;
-                    logEntityInfo.UserName = passport.UserName;
-                    logEntityInfo.TenantId = passport.TenantId;
-                }
-            }
             await context.Response.WriteAsync(logEntityInfo.Response);
             this.logger.LogEntity(logEntityInfo);
         }
@@ -94,8 +81,6 @@ public class TheaWebMiddleware
             context.TraceIdentifier = logEntityInfo.TraceId;
             context.Request.Headers.TryAdd("TraceId", new StringValues(logEntityInfo.TraceId));
         }
-        if (context.Request.Headers.TryGetValue("Tag", out var tag))
-            logEntityInfo.Tag = tag.ToString();
 
         logEntityInfo.Host = GetHost();
         logEntityInfo.Environment = this.environment;
@@ -111,8 +96,6 @@ public class TheaWebMiddleware
         {
             if (!context.Response.Headers.ContainsKey("TraceId"))
                 context.Response.Headers.Append("TraceId", logEntityInfo.TraceId);
-            if (!context.Response.Headers.ContainsKey("Tag") && !string.IsNullOrEmpty(logEntityInfo.Tag))
-                context.Response.Headers.Append("Tag", logEntityInfo.Tag);
             return Task.CompletedTask;
         });
         switch (logEntityInfo.ApiType)
@@ -124,12 +107,25 @@ public class TheaWebMiddleware
                 break;
             case (int)ApiType.HttpPost:
             case (int)ApiType.HttpPut:
+                string queryString = null;
                 if (context.Request.Query != null && context.Request.Query.Count > 0)
-                    logEntityInfo.Parameters = $"QueryString: {HttpUtility.UrlDecode(context.Request.QueryString.ToString())} \nBody: ";
-                logEntityInfo.Parameters += await this.ReadBody(context.Request.Body);
+                    queryString = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
+                var body = await this.ReadBody(context.Request.Body);
+                logEntityInfo.Parameters = new { QuerySting = queryString, Body = body }.ToJson();
                 break;
         }
-
+        logEntityInfo.Headers = context.Request.Headers.ToJson();
+        if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
+        {
+            logEntityInfo.Authorization = authorization.ToString();
+            if (context.User != null)
+            {
+                var passport = context.User.ToPassport();
+                logEntityInfo.UserId = passport.UserId;
+                logEntityInfo.UserName = passport.UserName;
+                logEntityInfo.TenantId = passport.TenantId;
+            }
+        }
         return logEntityInfo;
     }
     private async Task<string> ReadBody(Stream stream)

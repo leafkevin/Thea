@@ -115,7 +115,6 @@ class MessageDrivenService : IMessageDriven
                         {
                             case MessageType.Message:
                             case MessageType.RpcMessage:
-
                                 object theaMessage = new
                                 {
                                     message.MessageId,

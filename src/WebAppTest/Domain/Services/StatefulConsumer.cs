@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Thea;
 using Thea.MessageDriven;
 
@@ -8,13 +9,16 @@ namespace WebAppTest.Domain.Services;
 public class StatefulConsumer
 {
     private readonly IMessageDriven messageDriven;
-    public StatefulConsumer(IMessageDriven messageDriven)
+    private readonly ILogger<StatefulConsumer> logger;
+    public StatefulConsumer(IMessageDriven messageDriven, ILogger<StatefulConsumer> logger)
     {
         this.messageDriven = messageDriven;
+        this.logger = logger;
     }
     public Task RemoveCache(string key)
     {
         //Console.WriteLine($"RemoveCache: {key}");
+        this.logger.LogInformation("2222222");
         return Task.CompletedTask;
     }
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
