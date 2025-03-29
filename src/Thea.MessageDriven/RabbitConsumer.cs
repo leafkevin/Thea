@@ -29,7 +29,7 @@ class RabbitConsumer
 
     private IConnection connection = null;
     private volatile IChannel channel = null;
-    private volatile bool isRunning = false;
+
     private volatile bool isStarted = false;
     private volatile bool isDeferClose = false;
 
@@ -37,6 +37,7 @@ class RabbitConsumer
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
     public bool IsActivated => this.channel != null && this.channel.IsOpen;
+    public volatile bool IsRunning = false;
 
     public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
@@ -107,7 +108,7 @@ class RabbitConsumer
     }
     public async Task Start()
     {
-        if (this.isRunning || this.isStarted) return;
+        if (this.IsRunning || this.isStarted) return;
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
         await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
@@ -120,7 +121,7 @@ class RabbitConsumer
     }
     public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
     {
-        if (this.isRunning || this.isStarted) return;
+        if (this.IsRunning || this.isStarted) return;
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
 
@@ -138,15 +139,10 @@ class RabbitConsumer
         }
         this.isStarted = true;
     }
-    public async Task RemoveQueue()
-    {
-        if (this.channel != null)
-            await this.channel.QueueDeleteAsync(this.QueueName);
-    }
     public async Task Shutdown()
     {
         this.cancellationSource.Cancel();
-        if (this.isRunning) this.isDeferClose = true;
+        if (this.IsRunning) this.isDeferClose = true;
         else await this.Close();
     }
     private async Task Close()
@@ -194,6 +190,10 @@ class RabbitConsumer
                 case MessageType.Message:
                 case MessageType.RpcMessage:
                     {
+                        //赋值TraceId，用于日志跟踪
+                        if (!string.IsNullOrEmpty(message.TraceId))
+                            this.logger.BeginScope(new LogEntity { TraceId = message.TraceId });
+
                         while (iLoop < 3)
                         {
                             try
@@ -237,16 +237,13 @@ class RabbitConsumer
                             this.logger.LogEntity(new LogEntity
                             {
                                 Id = logId,
-                                TraceId = message.MessageId,
-                                AppId = this.parent.AppId,
+                                ApiType = (int)ApiType.LocalInvoke,
                                 Tag = "RabbitConsumer",
                                 Body = $"consumed failed, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
                                 LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
                                 Exception = exception,
-                                ApiType = (int)ApiType.LocalInvoke,
                                 Parameters = jsonBody,
                                 Response = result,
-                                LogTime = createdAt,
                                 Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
                             });
                         }
@@ -257,6 +254,7 @@ class RabbitConsumer
                             {
                                 MessageId = message.MessageId,
                                 Type = messageType,
+                                TraceId = message.TraceId,
                                 Body = result
                             };
                             await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.From, rpcMessage.ToJson());

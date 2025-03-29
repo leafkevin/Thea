@@ -1,14 +1,14 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -21,8 +21,8 @@ class MessageDrivenService : IMessageDriven
     private readonly EventWaitHandle readyToStart = new EventWaitHandle(false, EventResetMode.AutoReset);
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> transferRabbitConsumers = new();
-    private readonly ConcurrentDictionary<string, ConsumerWaiter> waitingStartConsumers = new();
-    private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitingShutdownConsumers = new();
+    private readonly ConcurrentDictionary<string, ConsumerWaiter> waitStartingConsumers = new();
+    private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitShutdownConsumers = new();
     private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
     private readonly ConcurrentQueue<Message> messageQueue = new();
@@ -38,8 +38,10 @@ class MessageDrivenService : IMessageDriven
     private List<Queue> queues = new();
     private List<Queue> lastQueues = null;
     private List<Binding> bindings = new();
-    private RabbitConsumer heartbeatRabbitConsumer;
-    private RabbitConsumer resultRabbitConsumer;
+    private RabbitConsumer heartbeatConsumer;
+    private RabbitConsumer rpcConsumer;
+    private Func<string> traceIdFetcher;
+    private Action<MonitoringData> dataPusher;
 
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
     private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
@@ -49,7 +51,7 @@ class MessageDrivenService : IMessageDriven
     private IMessageDrivenRepository repository;
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
-    private int sacCount = 3;
+    private int sacCount = 2;
 
     internal RabbitProducer rabbitProducer;
     public string AppId { get; private set; }
@@ -76,7 +78,7 @@ class MessageDrivenService : IMessageDriven
             this.logger.LogTagError("MessageDriven", "未设置AppId，无法初始化MessageDrivenService对象");
             throw new Exception("未设置AppId，无法初始化MessageDrivenService对象");
         }
-        this.sacCount = configuration.GetValue("MessageDriven:SacCount", 3);
+        this.sacCount = configuration.GetValue("MessageDriven:SacCount", 2);
         this.ServiceId = ObjectId.NewId();
 
         this.task = Task.Factory.StartNew(async () =>
@@ -120,6 +122,7 @@ class MessageDrivenService : IMessageDriven
                                     message.MessageId,
                                     message.From,
                                     message.Type,
+                                    message.TraceId,
                                     message.Body,
                                     message.ScheduleTimeUtc
                                 };
@@ -161,7 +164,7 @@ class MessageDrivenService : IMessageDriven
                             case MessageType.WaitForStart:
                                 queueName = (string)message.Body;
                                 queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
-                                if (this.waitingStartConsumers.TryGetValue(queueId, out var consumerWaiter))
+                                if (this.waitStartingConsumers.TryGetValue(queueId, out var consumerWaiter))
                                 {
                                     if (!consumerWaiter.QueueNames.Contains(queueName))
                                         consumerWaiter.QueueNames.Add(queueName);
@@ -170,14 +173,14 @@ class MessageDrivenService : IMessageDriven
                                     {
                                         foreach (var consumer in consumerWaiter.Consumers)
                                             await consumer.Start();
-                                        this.waitingStartConsumers.TryRemove(queueId, out _);
+                                        this.waitStartingConsumers.TryRemove(queueId, out _);
                                     }
                                 }
                                 message.Waiter?.TrySetResult(true);
                                 break;
                             case MessageType.WaitForShutdown:
                                 queueName = (string)message.Body;
-                                if (this.waitingShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
+                                if (this.waitShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
                                     rabbitConsumers.ForEach(async f => await f.Shutdown());
                                 queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
                                 var queueInfo = this.queues.Find(f => f.QueueId == queueId);
@@ -215,12 +218,12 @@ class MessageDrivenService : IMessageDriven
         this.consumers.Clear();
         this.heartbeats.Clear();
         this.rabbitProducer.Shutdown().Wait();
-        this.heartbeatRabbitConsumer?.Shutdown().Wait();
-        this.resultRabbitConsumer?.Shutdown();
+        this.heartbeatConsumer?.Shutdown().Wait();
+        this.rpcConsumer?.Shutdown();
         foreach (var rabbitConsumers in this.transferRabbitConsumers.Values)
             rabbitConsumers.ForEach(async f => await f.Shutdown());
-        this.waitingStartConsumers.Clear();
-        foreach (var rabbitConsumers in this.waitingShutdownConsumers.Values)
+        this.waitStartingConsumers.Clear();
+        foreach (var rabbitConsumers in this.waitShutdownConsumers.Values)
             rabbitConsumers.ForEach(async f => await f.Shutdown());
         foreach (var rpcWaiter in this.rpcWaiters.Values)
             rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
@@ -245,6 +248,7 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Message,
+            TraceId = this.traceIdFetcher?.Invoke(),
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -263,25 +267,22 @@ class MessageDrivenService : IMessageDriven
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
-        if (!this.isRpcConsumer)
-        {
-            var errMessage = $"未配置RPC消费者，请使用方法：UseRpcConsumer()配置RPC消费者";
-            this.logger.LogTagError("MessageDriven", errMessage);
-            throw new Exception(errMessage);
-        }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
             exchange = exchangeSelector.Invoke(exchange, message);
 
-        serviceId ??= this.ServiceId;
-        messageId ??= ObjectId.NewId();
+        if (string.IsNullOrEmpty(serviceId))
+            serviceId = this.ServiceId;
+        if (string.IsNullOrEmpty(messageId))
+            messageId = ObjectId.NewId();
         var theaMessage = new Message
         {
             MessageId = messageId,
             From = serviceId,
             Type = MessageType.RpcMessage,
+            TraceId = this.traceIdFetcher?.Invoke(),
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -317,6 +318,7 @@ class MessageDrivenService : IMessageDriven
             MessageId = ObjectId.NewId(),
             From = this.ServiceId,
             Type = MessageType.RpcMessage,
+            TraceId = this.traceIdFetcher?.Invoke(),
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -353,6 +355,7 @@ class MessageDrivenService : IMessageDriven
             MessageId = ObjectId.NewId(),
             From = this.ServiceId,
             Type = MessageType.RpcMessage,
+            TraceId = this.traceIdFetcher?.Invoke(),
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -384,6 +387,7 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Message,
+            TraceId = this.traceIdFetcher?.Invoke(),
             Exchange = exchange,
             RoutingKey = routingKey,
             ScheduleTimeUtc = enqueueTimeUtc,
@@ -535,6 +539,15 @@ class MessageDrivenService : IMessageDriven
         }
         await this.repository.ChangeQueue(queueId, workloadTotal);
     }
+    public async Task RemoveQueue(string queueId, int minIndex, int maxIndex)
+    {
+        var myBindings = this.bindings.FindAll(f => f.QueueId == queueId);
+        for (int i = minIndex; i <= maxIndex; i++)
+        {
+            var queueName = $"{queueId}.{i}";
+            await this.rabbitProducer.RemoveQueue(queueName);
+        }
+    }
     public void UseStrategy(string exchange, Func<string, object, string> exchangeSelector)
     {
         if (exchangeSelector == null)
@@ -542,6 +555,8 @@ class MessageDrivenService : IMessageDriven
         this.exchangeSelectors.Add(exchange, exchangeSelector);
     }
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
+    internal void UseTraceIdFetcher(Func<string> traceIdFetcher) => this.traceIdFetcher = traceIdFetcher;
+    internal void UseMonitoringDataPusher(Action<MonitoringData> dataPusher) => this.dataPusher = dataPusher;
     internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message
     {
         Type = MessageType.Logs,
@@ -585,8 +600,8 @@ class MessageDrivenService : IMessageDriven
         if (this.isRpcConsumer)
         {
             var rpcQueueName = $"{Consts.RpcExchange}.result.{this.ServiceId}";
-            this.resultRabbitConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, QueueType.RpcResult);
-            await this.resultRabbitConsumer.Start(Consts.RpcExchange, this.ServiceId);
+            this.rpcConsumer = new RabbitConsumer(rpcQueueName, this, this.serviceProvider, QueueType.RpcResult);
+            await this.rpcConsumer.Start(Consts.RpcExchange, this.ServiceId);
         }
         (this.queues, this.bindings) = await this.repository.GetConfigInfo(false);
 
@@ -603,10 +618,15 @@ class MessageDrivenService : IMessageDriven
 
             //创建转发队列
             queueName = $"{Consts.TransferExchange}.{myBinding.ExchangeId}";
-            myBinding.IsNeedTransfer = true;
             if (this.isAllowCreateQueue)
                 await this.rabbitProducer.CreateQueue(queueName, true, false);
-            changedBindings.Add(myBinding);
+
+            //防止每次都更新数据库
+            if (!myBinding.IsNeedTransfer)
+            {
+                myBinding.IsNeedTransfer = true;
+                changedBindings.Add(myBinding);
+            }
         }
         if (changedBindings.Count > 0)
             await this.repository.ChangeBindings(changedBindings);
@@ -615,8 +635,8 @@ class MessageDrivenService : IMessageDriven
         if (this.isAllowCreateExchange)
             await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
         queueName = $"heartbeat.queue.{this.ServiceId}";
-        this.heartbeatRabbitConsumer = new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Heartbeat);
-        await this.heartbeatRabbitConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
+        this.heartbeatConsumer = new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Heartbeat);
+        await this.heartbeatConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
 
         //创建交换机和队列
         if (isChanged)
@@ -789,8 +809,8 @@ class MessageDrivenService : IMessageDriven
                         if (changeType == ChangeType.AddQueue && j >= oldWorkloadTotal)
                         {
                             //新增加的队列消费者，需要等待前面的几个队列消费完毕后再启动，避免消息顺序错乱问题
-                            if (!this.waitingStartConsumers.TryGetValue(queueId, out var startingConsumerWaiter))
-                                this.waitingStartConsumers.TryAdd(queueId, startingConsumerWaiter = new());
+                            if (!this.waitStartingConsumers.TryGetValue(queueId, out var startingConsumerWaiter))
+                                this.waitStartingConsumers.TryAdd(queueId, startingConsumerWaiter = new());
                             startingConsumerWaiter.WaitTotal = oldWorkloadTotal;
                             startingConsumerWaiter.Consumers.Add(myRabbitConsumer);
                         }
@@ -800,13 +820,43 @@ class MessageDrivenService : IMessageDriven
                 }
                 else if (needCount < existedCount)
                 {
-                    while (rabbitConsumers.Count > needCount)
+                    //先移除本地的消费者不关闭，等待收到这些消费者的消息消费完毕的结束标志消息后，再关闭
+                    if (changeType == ChangeType.RemoveQueue)
                     {
-                        var removeIndex = rabbitConsumers.Count - 1;
-                        var myRabbitConsumer = rabbitConsumers[removeIndex];
-                        //增加节点导致本节点消费者减少，当前消息消费完，就直接关闭，会有其他SAC消费者继续消费
-                        await myRabbitConsumer.Shutdown();
-                        rabbitConsumers.RemoveAt(removeIndex);
+                        //先移除本地的消费者不关闭，等待收到这些消费者的消息消费完毕的结束标志消息后，再关闭
+                        for (int k = myQueue.WorkloadTotal; k < oldWorkloadTotal; k++)
+                        {
+                            queueName = $"{queueId}.{k}";
+                            //关闭队列消费者，按照实际子队列来进行关闭
+                            if (!this.waitShutdownConsumers.TryGetValue(queueName, out var waitingConsumers))
+                                this.waitShutdownConsumers.TryAdd(queueName, waitingConsumers = new());
+                            var removedConsumers = rabbitConsumers.FindAll(f => f.QueueName == queueName);
+                            foreach (var myRabbitConsumer in removedConsumers)
+                            {
+                                waitingConsumers.Add(myRabbitConsumer);
+                                rabbitConsumers.Remove(myRabbitConsumer);
+                            }
+                            var exchange = Consts.DefaultExchange;
+                            var message = new Message
+                            {
+                                MessageId = ObjectId.NewId(),
+                                From = this.AppId,
+                                Type = MessageType.WaitForShutdown,
+                                Body = queueName
+                            };
+                            await this.rabbitProducer.Publish(exchange, queueName, message.ToJson());
+                        }
+                    }
+                    else
+                    {
+                        while (rabbitConsumers.Count > needCount)
+                        {
+                            var removeIndex = rabbitConsumers.Count - 1;
+                            var myRabbitConsumer = rabbitConsumers[removeIndex];
+                            //增加节点导致本节点消费者减少，当前消息消费完，就直接关闭，会有其他SAC消费者继续消费
+                            await myRabbitConsumer.Shutdown();
+                            rabbitConsumers.RemoveAt(removeIndex);
+                        }
                     }
                 }
                 else myRabbitConsumers.ForEach(f => f.IsLogEnabled = myQueue.IsLogEnabled);
@@ -828,35 +878,6 @@ class MessageDrivenService : IMessageDriven
                     };
                     //使用默认的交换机，路由键为队列名
                     await this.rabbitProducer.Publish(exchange, queueName, message.ToJson());
-                    Console.WriteLine($"Queue {queueId} Add new queue, message is Sent to {queueName}");
-                }
-            }
-            else if (changeType == ChangeType.RemoveQueue)
-            {
-                //先移除本地的消费者不关闭，等待收到这些消费者的消息消费完毕的结束标志消息后，再关闭
-                for (int j = myQueue.WorkloadTotal; j < oldWorkloadTotal; j++)
-                {
-                    var queueName = $"{queueId}.{j}";
-                    //关闭队列消费者，按照实际子队列来进行关闭
-                    if (!this.waitingShutdownConsumers.TryGetValue(queueName, out var waitingConsumers))
-                        this.waitingShutdownConsumers.TryAdd(queueName, waitingConsumers = new());
-                    var myRabbitConsumers = rabbitConsumers.FindAll(f => f.QueueName == queueName);
-                    foreach (var myRabbitConsumer in myRabbitConsumers)
-                    {
-                        waitingConsumers.Add(myRabbitConsumer);
-                        rabbitConsumers.Remove(myRabbitConsumer);
-                    }
-
-                    var exchange = Consts.DefaultExchange;
-                    var message = new Message
-                    {
-                        MessageId = ObjectId.NewId(),
-                        From = this.AppId,
-                        Type = MessageType.WaitForShutdown,
-                        Body = queueName
-                    };
-                    await this.rabbitProducer.Publish(exchange, queueName, message.ToJson());
-                    Console.WriteLine($"Queue {queueId} Remove queue, message is Sent to {queueName}");
                 }
             }
         }
@@ -944,12 +965,71 @@ class MessageDrivenService : IMessageDriven
             }
             else rabbitConsumers.ForEach(f => f.IsLogEnabled = myQueue.IsLogEnabled);
         }
-        //Console.WriteLine($"Nodes: {string.Join(" , ", nodeIds)}");
-        //Console.WriteLine("Consumers:");
-        //foreach (var item in this.consumers)
-        //{
-        //    var queues = string.Join(" , ", item.Value.Select(f => f.QueueName + ":" + f.IsActivated).ToList());
-        //    Console.WriteLine($"QueueId: {item.Key}, Count: {item.Value.Count}, {queues}");
-        //}
+        if (this.dataPusher != null)
+            this.dataPusher.Invoke(this.BuildMonitoringData());
+    }
+    private MonitoringData BuildMonitoringData()
+    {
+        var monitoringData = new MonitoringData
+        {
+            ServiceId = this.ServiceId,
+            Producer = this.rabbitProducer.ConnectionName,
+            RpcConsumer = this.rpcConsumer?.QueueName,
+            HeartbeatConsumer = this.heartbeatConsumer?.QueueName
+        };
+        if (this.consumers.Count > 0)
+        {
+            var myConsumers = monitoringData.Consumers = new();
+            foreach (var consumerInfo in this.consumers)
+            {
+                var myQueue = this.queues.Find(f => f.QueueId == consumerInfo.Key);
+                myConsumers.Add(new ConsumerInfo
+                {
+                    QueueId = consumerInfo.Key,
+                    IsStateful = myQueue.IsStateful,
+                    WorkloadTotal = myQueue.WorkloadTotal,
+                    States = consumerInfo.Value.Select(f => new ConsumerState
+                    {
+                        ConsumerId = f.ConsumerId,
+                        IsRunning = f.IsRunning,
+                        QueueName = f.QueueName,
+                        IsActivated = f.IsActivated
+                    }).ToList()
+                });
+            }
+        }
+        if (this.waitStartingConsumers.Count > 0)
+        {
+            var myConsumers = monitoringData.WaitStartingConsumers = new();
+            foreach (var consumerInfo in this.waitStartingConsumers)
+            {
+                myConsumers.Add(new WaitingConsumerInfo
+                {
+                    QueueId = consumerInfo.Key,
+                    QueueNames = consumerInfo.Value.QueueNames
+                });
+            }
+        }
+        if (this.waitShutdownConsumers.Count > 0)
+        {
+            var myConsumers = monitoringData.WaitShutdownConsumers = new();
+            foreach (var consumerInfo in this.waitShutdownConsumers)
+            {
+                myConsumers.Add(new WaitingConsumerInfo
+                {
+                    QueueId = consumerInfo.Key,
+                    QueueNames = consumerInfo.Value.Select(f => f.QueueName).ToList()
+                });
+            }
+        }
+        if (this.rpcWaiters.Count > 0)
+        {
+            monitoringData.RpcWaiters = this.rpcWaiters.Values.Select(f => new RpcWaiterState
+            {
+                MessageId = f.MessageId,
+                CreatedAt = f.CreatedAt
+            }).ToList();
+        }
+        return monitoringData;
     }
 }

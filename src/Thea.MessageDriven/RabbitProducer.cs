@@ -15,6 +15,7 @@ class RabbitProducer : IDisposable
     private IConnection connection;
     private ConcurrentDictionary<int, IChannel> channels;
     private BlockingCollection<IChannel> channelQueue;
+    public string ConnectionName { get; private set; }
 
     public static async Task<RabbitProducer> Create(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 10)
     {
@@ -51,7 +52,8 @@ class RabbitProducer : IDisposable
         {
             connection = connection,
             channels = channels,
-            channelQueue = channelQueue
+            channelQueue = channelQueue,
+            ConnectionName = connectionId
         };
     }
     public async Task CreateExchange(string exchangeName, string bindType, bool isDelay = false)
@@ -81,6 +83,20 @@ class RabbitProducer : IDisposable
     {
         var channel = this.channelQueue.Take();
         await channel.QueueBindAsync(queueName, exchange, routingKey);
+        this.channelQueue.Add(channel);
+    }
+    public async Task RemoveQueue(string queueName)
+    {
+        var channel = this.channelQueue.Take();
+        try
+        {
+            await channel.QueuePurgeAsync(queueName);
+            await channel.QueueDeleteAsync(queueName);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"RemoveQueue error: {ex}");
+        }
         this.channelQueue.Add(channel);
     }
     public async Task Publish(string exchange, string routingKey, string message)

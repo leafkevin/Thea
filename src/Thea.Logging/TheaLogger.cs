@@ -38,7 +38,7 @@ public class TheaLogger : ILogger
             logEntityInfo = new LogEntity
             {
                 Id = ObjectId.NewId(),
-                AppId = this.appId,
+                ApiType = (int)ApiType.LocalInvoke,
                 Body = formatter.Invoke(state, exception),
                 LogLevel = (int)logLevel,
                 Exception = exception
@@ -75,11 +75,9 @@ public class TheaLogger : ILogger
             if (string.IsNullOrEmpty(logEntityInfo.ClientIp) && !string.IsNullOrEmpty(stateScope.ClientIp))
                 logEntityInfo.ClientIp = stateScope.ClientIp;
 
-            //设置基础信息
-            if (!string.IsNullOrEmpty(stateScope.TraceId))
+            //设置基础信息，不设置Tag
+            if (!string.IsNullOrEmpty(logEntityInfo.TraceId))
                 stateScope.TraceId = logEntityInfo.TraceId;
-            if (!string.IsNullOrEmpty(logEntityInfo.Tag))
-                stateScope.Tag = logEntityInfo.Tag;
             if (!string.IsNullOrEmpty(logEntityInfo.TenantId))
                 stateScope.TenantId = logEntityInfo.TenantId;
             if (!string.IsNullOrEmpty(logEntityInfo.UserId))
@@ -95,7 +93,8 @@ public class TheaLogger : ILogger
             if (!string.IsNullOrEmpty(logEntityInfo.Parameters))
                 stateScope.Parameters = logEntityInfo.Parameters;
         }
-        logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
+        if (!logEntityInfo.Elapsed.HasValue)
+            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
         this.processor.Execute(logEntityInfo);
     }
 

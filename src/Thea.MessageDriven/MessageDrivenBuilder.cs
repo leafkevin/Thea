@@ -57,4 +57,18 @@ public class MessageDrivenBuilder
         this.messageDriven.UseStrategy(exchange, exchangeSelector);
         return this;
     }
+    public MessageDrivenBuilder UseTraceId(Func<string> traceIdFetcher)
+    {
+        if (traceIdFetcher == null)
+            throw new ArgumentNullException(nameof(traceIdFetcher));
+        this.messageDriven.UseTraceIdFetcher(traceIdFetcher);
+        return this;
+    }
+    public MessageDrivenBuilder UseMonitoringDataPusher(Action<MonitoringData> dataPusher)
+    {
+        if (dataPusher == null)
+            throw new ArgumentNullException(nameof(dataPusher));
+        this.messageDriven.UseMonitoringDataPusher(dataPusher);
+        return this;
+    }
 }

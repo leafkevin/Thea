@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using System.Web;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Thea.Logging;
@@ -20,9 +19,8 @@ public class TheaWebMiddleware
     private readonly RequestDelegate next;
     private readonly IResponseDecorator responseDecorator;
     private readonly ILogger<TheaWebMiddleware> logger;
-    private readonly string environment;
 
-    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseDecorator responseDecorator, IHostEnvironment hostEnvironment, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
     {
         this.appId = configuation.GetValue<string>("AppId");
         if (string.IsNullOrEmpty(this.appId))
@@ -31,7 +29,6 @@ public class TheaWebMiddleware
         this.next = next;
         this.responseDecorator = responseDecorator;
         this.logger = logger;
-        this.environment = hostEnvironment.EnvironmentName;
     }
 
     public async Task Invoke(HttpContext context)
@@ -68,7 +65,7 @@ public class TheaWebMiddleware
     }
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
-        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), AppId = this.appId, LogLevel = (int)LogLevel.Information };
+        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
         if (context.Request.Headers.TryGetValue("TraceId", out var traceIds))
         {
             var traceId = traceIds.ToString();
@@ -83,13 +80,11 @@ public class TheaWebMiddleware
         }
 
         logEntityInfo.Host = GetHost();
-        logEntityInfo.Environment = this.environment;
         logEntityInfo.ApiType = this.GetApiType(context.Request.Method);
         logEntityInfo.ClientIp = context.GetClientIp();
         var request = context.Request;
         var apiUrl = $"{request.Scheme}://*{request.Path}{request.QueryString}";
         logEntityInfo.ApiUrl = HttpUtility.UrlDecode(apiUrl);
-        logEntityInfo.LogTime = DateTime.Now;
 
         context.Request.EnableBuffering();
         context.Response.OnStarting(() =>

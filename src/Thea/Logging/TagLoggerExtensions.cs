@@ -1,5 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
-using System;
+﻿using System;
+using Microsoft.Extensions.Logging;
 
 namespace Thea.Logging;
 
@@ -91,8 +91,7 @@ public static class TagLoggerExtensions
             ApiType = (int)ApiType.LocalInvoke,
             Tag = tag,
             Body = body,
-            Exception = exception,
-            LogTime = DateTime.Now
+            Exception = exception
         });
     }
 }
