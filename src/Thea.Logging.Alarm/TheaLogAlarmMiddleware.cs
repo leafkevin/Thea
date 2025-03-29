@@ -94,6 +94,7 @@ public class TheaLogAlarmMiddleware
             .AppendLine($"[查看]({logViewUrl})  ")
             .AppendLine("**日志信息**  ")
             .AppendLine($"> TraceId：{logEntityInfo.TraceId}  ")
+            .AppendLine($"> 环  境：{logEntityInfo.Environment}  ")
             .AppendLine($"> 应用ID：{logEntityInfo.AppId}  ")
             .AppendLine($"> 用户ID：{logEntityInfo.UserId}  ")
             .AppendLine($"> Headers：{logEntityInfo.Headers}  ")

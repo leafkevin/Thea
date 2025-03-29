@@ -41,6 +41,7 @@ public class RedisCache : IDistributedCache
             await database.StringSetAsync(key, value.ToJson());
         else
         {
+            //增加随机秒数，避免缓存雪崩
             var randomSeconds = Random.Shared.Next(-60, 60);
             var expires = TimeSpan.FromMinutes(lifetimeMinutes).Add(TimeSpan.FromSeconds(randomSeconds));
             await database.StringSetAsync(key, value.ToJson(), expires);
