@@ -10,6 +10,7 @@ public class RedisCache : IDistributedCache
     private readonly int databaseIndex = 0;
     private readonly string url;
     private readonly ConnectionMultiplexer connectionPool;
+    private Func<string, int> databaseSelector;
 
     public RedisCache(IConfiguration configuration)
     {
@@ -18,14 +19,18 @@ public class RedisCache : IDistributedCache
             throw new ArgumentNullException("缺少配置Redis:Url");
         this.databaseIndex = configuration.GetValue("Redis:Database", -1);
         this.connectionPool = ConnectionMultiplexer.Connect(url);
+        this.databaseSelector = f => this.databaseIndex;
     }
+    public void UserDatabase(Func<string, int> databaseSelector)
+        => this.databaseSelector = databaseSelector;
     public void Set(string key, object value, int lifetimeMinutes = 120)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
         if (value == null)
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var randomSeconds = Random.Shared.Next(-60, 60);
         var expires = TimeSpan.FromMinutes(lifetimeMinutes).Add(TimeSpan.FromSeconds(randomSeconds));
         database.StringSet(key, value.ToJson(), expires);
@@ -36,7 +41,7 @@ public class RedisCache : IDistributedCache
             throw new ArgumentNullException(key);
         if (value == null)
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         if (lifetimeMinutes == -1)
             await database.StringSetAsync(key, value.ToJson());
         else
@@ -51,7 +56,7 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var redisValue = database.StringGet(key);
         if (redisValue.IsNull)
         {
@@ -80,7 +85,7 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var redisValue = await database.StringGetAsync(key);
         if (redisValue.IsNull) return (false, default);
         return (true, redisValue.ToString().JsonTo<T>());
@@ -89,7 +94,7 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var redisValue = await database.StringGetAsync(key);
         if (redisValue.IsNull)
         {
@@ -104,7 +109,7 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var result = await database.StringIncrementAsync(key);
         if (result == 1)
         {
@@ -117,14 +122,14 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         database.KeyDelete(key);
     }
     public async Task RemoveAsync(string key)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseIndex);
+        var database = connectionPool.GetDatabase(this.databaseSelector(key));
         await database.KeyDeleteAsync(key);
     }
 }
