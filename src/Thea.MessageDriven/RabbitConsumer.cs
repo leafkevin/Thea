@@ -169,6 +169,7 @@ class RabbitConsumer
             if (this.cancellationSource.IsCancellationRequested)
                 return;
 
+            this.IsRunning = true;
             var iLoop = 0;
             Exception exception = null;
             bool isSuccess = true;
@@ -278,6 +279,7 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
+            this.IsRunning = false;
         };
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
@@ -289,6 +291,7 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
+            this.IsRunning = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message<string>>();
             switch (message.Type)
@@ -325,6 +328,7 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
+            this.IsRunning = false;
         };
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
@@ -336,6 +340,7 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
+            this.IsRunning = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message<string>>();
             this.parent.SetRpcResult(message.MessageId, message);
@@ -343,6 +348,7 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
+            this.IsRunning = false;
         };
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
@@ -354,6 +360,7 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
+            this.IsRunning = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message>();
             message.Waiter = new();
@@ -363,6 +370,7 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
+            this.IsRunning = false;
         };
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
