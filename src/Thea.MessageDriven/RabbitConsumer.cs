@@ -31,13 +31,11 @@ class RabbitConsumer
     private IChannel channel = null;
     private AsyncEventingBasicConsumer consumer = null;
 
-    private volatile bool isStarted = false;
     private volatile bool isDeferClose = false;
-
     public volatile bool IsLogEnabled;
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
-    public bool IsActivated => this.channel != null && this.channel.IsOpen;
+    public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false);
     public bool IsRunning => this.consumer?.IsRunning ?? false;
 
     public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
@@ -109,7 +107,7 @@ class RabbitConsumer
     }
     public async Task Start()
     {
-        if (this.IsRunning || this.isStarted) return;
+        this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
         await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
@@ -118,11 +116,10 @@ class RabbitConsumer
             case QueueType.Message: await this.BindUserMessageHandler(); break;
             case QueueType.Transfer: await this.BindTransferHandler(); break;
         }
-        this.isStarted = true;
     }
     public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
     {
-        if (this.IsRunning || this.isStarted) return;
+        this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
 
@@ -138,13 +135,12 @@ class RabbitConsumer
             case QueueType.Heartbeat: await this.BindHeartbeatHandler(); break;
             case QueueType.RpcResult: await this.BindRpcResultHandler(); break;
         }
-        this.isStarted = true;
     }
-    public async Task Shutdown(bool isDeferred = true)
+    public async Task Shutdown(bool isForce = false)
     {
-        this.isDeferClose = isDeferred;
         this.cancellationSource.Cancel();
-        if (!this.IsRunning)
+        this.isDeferClose = !isForce && !this.IsRunning;
+        if (isForce || !this.IsRunning)
             await this.Close();
     }
     private async Task Close()
@@ -159,8 +155,8 @@ class RabbitConsumer
             await this.connection.DisposeAsync();
             this.connection = null;
         }
-        this.factory = null;
         this.cancellationSource.Dispose();
+        this.cancellationSource = null;
     }
     private async Task BindUserMessageHandler()
     {
@@ -286,8 +282,8 @@ class RabbitConsumer
     }
     private async Task BindHeartbeatHandler()
     {
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (model, ea) =>
+        this.consumer = new AsyncEventingBasicConsumer(channel);
+        this.consumer.ReceivedAsync += async (model, ea) =>
         {
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
