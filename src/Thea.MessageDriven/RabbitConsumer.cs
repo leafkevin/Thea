@@ -1,15 +1,15 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -17,9 +17,7 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
-    private readonly CancellationTokenSource cancellationSource = new CancellationTokenSource();
     private readonly MessageDrivenService parent;
-    private readonly ConnectionFactory factory;
     private readonly Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly string connectionId;
@@ -27,8 +25,11 @@ class RabbitConsumer
     private readonly int prefetchCount;
     private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
 
+    private ConnectionFactory factory;
+    private CancellationTokenSource cancellationSource = null;
     private IConnection connection = null;
-    private volatile IChannel channel = null;
+    private IChannel channel = null;
+    private AsyncEventingBasicConsumer consumer = null;
 
     private volatile bool isStarted = false;
     private volatile bool isDeferClose = false;
@@ -37,7 +38,7 @@ class RabbitConsumer
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
     public bool IsActivated => this.channel != null && this.channel.IsOpen;
-    public volatile bool IsRunning = false;
+    public bool IsRunning => this.consumer?.IsRunning ?? false;
 
     public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
@@ -139,24 +140,26 @@ class RabbitConsumer
         }
         this.isStarted = true;
     }
-    public async Task Shutdown()
+    public async Task Shutdown(bool isDeferred = true)
     {
+        this.isDeferClose = isDeferred;
         this.cancellationSource.Cancel();
-        if (this.IsRunning) this.isDeferClose = true;
-        else await this.Close();
+        if (!this.IsRunning)
+            await this.Close();
     }
     private async Task Close()
     {
         if (this.channel != null)
         {
-            await channel.CloseAsync();
+            await channel.DisposeAsync();
             this.channel = null;
         }
         if (this.connection != null)
         {
-            await this.connection.CloseAsync();
+            await this.connection.DisposeAsync();
             this.connection = null;
         }
+        this.factory = null;
         this.cancellationSource.Dispose();
     }
     private async Task BindUserMessageHandler()
@@ -169,7 +172,6 @@ class RabbitConsumer
             if (this.cancellationSource.IsCancellationRequested)
                 return;
 
-            this.IsRunning = true;
             var iLoop = 0;
             Exception exception = null;
             bool isSuccess = true;
@@ -217,7 +219,7 @@ class RabbitConsumer
                                 exception = ex.InnerException ?? ex;
                             }
                             iLoop++;
-                            Thread.Sleep(1000);
+                            //Thread.Sleep(1000);
                         }
                         if (!isSuccess) result = exception.ToString();
                         if (this.IsLogEnabled || !isSuccess)
@@ -279,7 +281,6 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
-            this.IsRunning = false;
         };
         await channel.BasicConsumeAsync(this.QueueName, false, consumer);
     }
@@ -291,7 +292,6 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-            this.IsRunning = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message<string>>();
             switch (message.Type)
@@ -328,19 +328,17 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
-            this.IsRunning = false;
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, consumer);
+        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindRpcResultHandler()
     {
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (model, ea) =>
+        this.consumer = new AsyncEventingBasicConsumer(channel);
+        this.consumer.ReceivedAsync += async (model, ea) =>
         {
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-            this.IsRunning = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message<string>>();
             this.parent.SetRpcResult(message.MessageId, message);
@@ -348,19 +346,17 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
-            this.IsRunning = false;
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, consumer);
+        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindTransferHandler()
     {
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (model, ea) =>
+        this.consumer = new AsyncEventingBasicConsumer(channel);
+        this.consumer.ReceivedAsync += async (model, ea) =>
         {
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-            this.IsRunning = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message>();
             message.Waiter = new();
@@ -370,8 +366,7 @@ class RabbitConsumer
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
-            this.IsRunning = false;
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, consumer);
+        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
 }

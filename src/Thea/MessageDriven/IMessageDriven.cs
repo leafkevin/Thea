@@ -13,6 +13,7 @@ public interface IMessageDriven
     Task ChangeQueue(string queueId, int workloadTotal);
     Task RemoveQueue(string queueId, int minIndex, int maxIndex);
 
+    Task PublishAsync(string queue, object orgMessage);
     void Publish<TMessage>(string exchange, string routingKey, TMessage message);
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message);
     void PublishRpc<TMessage>(string serviceId, string messageId, string exchange, string routingKey, TMessage message);

@@ -1,14 +1,14 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -71,7 +71,7 @@ class MessageDrivenService : IMessageDriven
         this.isAllowCreateExchange = configuration.GetValue("MessageDriven:IsAllowCreateExchange", true);
         this.isAllowCreateBinding = configuration.GetValue("MessageDriven:IsAllowCreateBinding", true);
         this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
-        this.rpcTimeout = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:RpcTimeout", 60));
+        this.rpcTimeout = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:RpcTimeout", 30));
 
         if (string.IsNullOrEmpty(this.AppId))
         {
@@ -231,6 +231,12 @@ class MessageDrivenService : IMessageDriven
         if (this.task != null)
             this.task.Wait();
         this.cancellationSource.Dispose();
+    }
+    public async Task PublishAsync(string queue, object orgMessage)
+    {
+        if (orgMessage == null)
+            throw new ArgumentNullException(nameof(orgMessage));
+        await this.rabbitProducer.Publish(Consts.DefaultExchange, queue, orgMessage.ToJson());
     }
     public void Publish<TMessage>(string exchange, string routingKey, TMessage message)
     {
@@ -518,6 +524,7 @@ class MessageDrivenService : IMessageDriven
     public async Task ChangeQueue(string queueId, int workloadTotal)
     {
         var myQueue = this.queues.Find(f => f.QueueId == queueId);
+        if (myQueue == null) return;
         var oldWorkloadTotal = myQueue.WorkloadTotal;
         if (myQueue == null || !myQueue.IsEnabled || oldWorkloadTotal == workloadTotal) return;
         if (myQueue.IsStateful && workloadTotal > oldWorkloadTotal)
@@ -778,6 +785,7 @@ class MessageDrivenService : IMessageDriven
                 this.consumers.TryAdd(queueId, rabbitConsumers = new());
 
             //构造消费者
+            var sacCount = myQueue.IsSac ? this.sacCount : 1;
             for (int j = 0; j < myQueue.WorkloadTotal; j++)
             {
                 var queueName = $"{queueId}.{j}";
@@ -786,7 +794,7 @@ class MessageDrivenService : IMessageDriven
                 var myRabbitConsumers = rabbitConsumers.FindAll(f => f.QueueName == queueName);
                 var existedCount = myRabbitConsumers.Count;
 
-                for (int k = 0; k < this.sacCount; k++)
+                for (int k = 0; k < sacCount; k++)
                 {
                     var nodeId = nodeCount > 0 ? nodeIds[index % nodeCount] : this.ServiceId;
                     if (nodeId == this.ServiceId)
@@ -806,16 +814,17 @@ class MessageDrivenService : IMessageDriven
                         rabbitConsumers.Add(myRabbitConsumer);
 
                         //不管是第一次还是已经存在了，新增本节点，都直接启动，因为有已经存在的消费者在消费了
-                        if (changeType == ChangeType.AddQueue && j >= oldWorkloadTotal)
-                        {
-                            //新增加的队列消费者，需要等待前面的几个队列消费完毕后再启动，避免消息顺序错乱问题
-                            if (!this.waitStartingConsumers.TryGetValue(queueId, out var startingConsumerWaiter))
-                                this.waitStartingConsumers.TryAdd(queueId, startingConsumerWaiter = new());
-                            startingConsumerWaiter.WaitTotal = oldWorkloadTotal;
-                            startingConsumerWaiter.Consumers.Add(myRabbitConsumer);
-                        }
-                        //节点偏移或是新启动，直接启动
-                        else await myRabbitConsumer.Start();
+                        //if (changeType == ChangeType.AddQueue && j >= oldWorkloadTotal)
+                        //{
+                        //    //新增加的队列消费者，需要等待前面的几个队列消费完毕后再启动，避免消息顺序错乱问题
+                        //    if (!this.waitStartingConsumers.TryGetValue(queueId, out var startingConsumerWaiter))
+                        //        this.waitStartingConsumers.TryAdd(queueId, startingConsumerWaiter = new());
+                        //    startingConsumerWaiter.WaitTotal = oldWorkloadTotal;
+                        //    startingConsumerWaiter.Consumers.Add(myRabbitConsumer);
+                        //}
+                        ////节点偏移或是新启动，直接启动
+                        //else
+                        await myRabbitConsumer.Start();
                     }
                 }
                 else if (needCount < existedCount)
@@ -859,7 +868,18 @@ class MessageDrivenService : IMessageDriven
                         }
                     }
                 }
-                else myRabbitConsumers.ForEach(f => f.IsLogEnabled = myQueue.IsLogEnabled);
+                else
+                {
+                    foreach (var rabbitConsumer in myRabbitConsumers)
+                    {
+                        rabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
+                        if (!rabbitConsumer.IsActivated)
+                        {
+                            await rabbitConsumer.Shutdown(false);
+                            await rabbitConsumer.Start();
+                        }
+                    }
+                }
             }
             if (changeType == ChangeType.AddQueue)
             {
@@ -963,7 +983,18 @@ class MessageDrivenService : IMessageDriven
                     rabbitConsumers.RemoveAt(removeIndex);
                 }
             }
-            else rabbitConsumers.ForEach(f => f.IsLogEnabled = myQueue.IsLogEnabled);
+            else
+            {
+                foreach (var rabbitConsumer in rabbitConsumers)
+                {
+                    rabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
+                    if (!rabbitConsumer.IsActivated)
+                    {
+                        await rabbitConsumer.Shutdown(false);
+                        await rabbitConsumer.Start();
+                    }
+                }
+            }
         }
         if (this.dataPusher != null)
             this.dataPusher.Invoke(this.BuildMonitoringData());

@@ -125,11 +125,20 @@ public class TheaWebMiddleware
     }
     private async Task<string> ReadBody(Stream stream)
     {
-        stream.Position = 0;
-        var reader = new StreamReader(stream);
-        var result = await reader.ReadToEndAsync();
-        stream.Position = 0;
-        return result;
+        try
+        {
+            if (stream == null || stream.Length == 0)
+                return string.Empty;
+            stream.Position = 0;
+            var reader = new StreamReader(stream);
+            var result = await reader.ReadToEndAsync();
+            stream.Position = 0;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
     }
     private static string GetHost()
     {
