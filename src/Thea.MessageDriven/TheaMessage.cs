@@ -12,8 +12,8 @@ enum MessageType
     RpcResponse,
     RpcFailure,
     Heartbeat,
-    WaitForStart,
-    WaitForShutdown,
+    WaitStarting,
+    WaitShutdowning,
     Logs
 }
 enum ChangeType

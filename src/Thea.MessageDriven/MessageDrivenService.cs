@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Thea.Logging;
+using static Thea.ObjectMethodExecutorAwaitable;
 
 namespace Thea.MessageDriven;
 
@@ -161,16 +163,18 @@ class MessageDrivenService : IMessageDriven
                                 this.heartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
                                 message.Waiter?.TrySetResult(true);
                                 break;
-                            case MessageType.WaitForStart:
+                            case MessageType.WaitStarting:
                                 queueName = (string)message.Body;
                                 queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
                                 if (this.waitStartingConsumers.TryGetValue(queueId, out var consumerWaiter))
                                 {
                                     if (!consumerWaiter.QueueNames.Contains(queueName))
                                         consumerWaiter.QueueNames.Add(queueName);
+                                    Console.WriteLine($"队列{queueName}已收到结束标志消息，共接收到：{consumerWaiter.QueueNames.Count}个标志");
 
                                     if (consumerWaiter.QueueNames.Count >= consumerWaiter.WaitTotal)
                                     {
+                                        Console.WriteLine($"所有队列均收到结束标志消息，共接收到：{consumerWaiter.QueueNames.Count}个标志，并启动所有消费者！！！");
                                         foreach (var consumer in consumerWaiter.Consumers)
                                             await consumer.Start();
                                         this.waitStartingConsumers.TryRemove(queueId, out _);
@@ -178,7 +182,7 @@ class MessageDrivenService : IMessageDriven
                                 }
                                 message.Waiter?.TrySetResult(true);
                                 break;
-                            case MessageType.WaitForShutdown:
+                            case MessageType.WaitShutdowning:
                                 queueName = (string)message.Body;
                                 if (this.waitShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
                                     rabbitConsumers.ForEach(async f => await f.Shutdown());
@@ -705,8 +709,7 @@ class MessageDrivenService : IMessageDriven
         Console.WriteLine($"可用节点：{string.Join(",", this.heartbeats.Keys)}");
         var nodeIds = this.heartbeats.Keys.ToList();
         nodeIds.Sort((x, y) => x.CompareTo(y));
-        int index = 0;
-        var nodeCount = nodeIds.Count;
+
         var hashCode = this.GetHashCode(nodeIds);
         if (hashCode == this.lastHashCode)
         {
@@ -729,10 +732,12 @@ class MessageDrivenService : IMessageDriven
         }
         Console.WriteLine($"hashCode：{hashCode}, need build consumers, and starting!!!");
 
+        int index = 0;
+        var queueCounters = new Dictionary<string, int>();
+        var queueWorkloads = new Dictionary<string, (bool, int)>();
         //先创建有状态队列SAC激活消费者
         var myQueues = this.queues.Where(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled && f.IsStateful)
-            .OrderBy(f => f.QueueId).ToList();
-        var sacCounters = new Dictionary<string, int>();
+           .OrderBy(f => f.QueueId).ToList();
         foreach (var myQueue in myQueues)
         {
             var queueId = myQueue.QueueId;
@@ -749,9 +754,10 @@ class MessageDrivenService : IMessageDriven
             for (int i = workloadTotal; i < myQueue.WorkloadTotal; i++)
             {
                 var queueName = $"{queueId}.{i}";
-                await this.CreateQueueAndBinding(queueName, true, false, i.ToString(), myBindings);
+                await this.CreateQueueAndBinding(queueName, myQueue.IsSac, false, i.ToString(), myBindings);
             }
-
+            var isStarting = workloadTotal >= myQueue.WorkloadTotal;
+            queueWorkloads.TryAdd(queueId, (isStarting, workloadTotal));
             for (int i = 0; i < myQueue.WorkloadTotal; i++)
             {
                 var queueName = $"{queueId}.{i}";
@@ -759,11 +765,12 @@ class MessageDrivenService : IMessageDriven
                 Func<string, RabbitConsumer> consumerBuilder = queueName => new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Message, myQueue.PrefetchCount, exchangeHandlers) { IsLogEnabled = myQueue.IsLogEnabled };
                 if (!this.consumers.TryGetValue(queueName, out var rabbitConsumers))
                     this.consumers.TryAdd(queueName, rabbitConsumers = new());
-                var needCount = await this.CreateConsumer(index, queueName, i < workloadTotal, nodeIds, sacCounters, rabbitConsumers, consumerBuilder);
-                //确保当前消费者是激活的
-                await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
+                var needCount = await this.CreateConsumer(index, queueName, isStarting || i < workloadTotal, workloadTotal, nodeIds, queueCounters, rabbitConsumers, consumerBuilder);
+                //为确保SAC消费者负载均衡，强制关闭多余的消费者，使当前消费者变成激活状态
+                if (myQueue.IsSac) await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
                 index++;
             }
+            //增加增加队列，要确定前面的队列都已经消费完毕，才能开始消费新加入的队列消息
             //往前面的几个队列发送结束标志消息，当消费者收到这个消息时，可以确定新加入的队列前消息都已经消费完毕，
             //此后新队列中的消息才可以进行消费，这样可以避免消息顺序错乱问题
             if (workloadTotal < myQueue.WorkloadTotal)
@@ -776,12 +783,13 @@ class MessageDrivenService : IMessageDriven
                     {
                         MessageId = ObjectId.NewId(),
                         From = this.AppId,
-                        Type = MessageType.WaitForStart,
+                        Type = MessageType.WaitStarting,
                         //已经消费完毕的队列名
                         Body = queueName
                     };
                     //使用默认的交换机，路由键为队列名
                     await this.rabbitProducer.Publish(exchange, queueName, message.ToJson());
+                    Console.WriteLine($"新增队列{workloadTotal} -> {myQueue.WorkloadTotal}, 向队列{queueName}发送结束标志消息");
                 }
             }
         }
@@ -797,8 +805,8 @@ class MessageDrivenService : IMessageDriven
                 Func<string, RabbitConsumer> consumerBuilder = queueName => new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Transfer);
                 if (!this.transferConsumers.TryGetValue(queueName, out var rabbitConsumers))
                     this.transferConsumers.TryAdd(queueName, rabbitConsumers = new());
-                var needCount = await this.CreateConsumer(index, queueName, true, nodeIds, sacCounters, rabbitConsumers, consumerBuilder);
-                //确保当前消费者是激活的
+                var needCount = await this.CreateConsumer(index, queueName, true, 0, nodeIds, queueCounters, rabbitConsumers, consumerBuilder);
+                //为确保SAC消费者负载均衡，强制关闭多余的消费者，使当前消费者变成激活状态
                 await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
                 index++;
             }
@@ -812,7 +820,13 @@ class MessageDrivenService : IMessageDriven
             var queueId = myQueue.QueueId;
             var exchangeHandlers = this.consumerHandlers[queueId];
             Func<string, RabbitConsumer> consumerBuilder = queueName => new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Message, myQueue.PrefetchCount, exchangeHandlers) { IsLogEnabled = myQueue.IsLogEnabled };
-
+            bool isStarting = false;
+            int workloadTotal = myQueue.WorkloadTotal;
+            if (queueWorkloads.TryGetValue(queueId, out var queueWorkload))
+            {
+                isStarting = queueWorkload.Item1;
+                workloadTotal = queueWorkload.Item2;
+            }
             for (int i = 0; i < myQueue.WorkloadTotal; i++)
             {
                 var queueName = $"{queueId}.{i}";
@@ -821,10 +835,10 @@ class MessageDrivenService : IMessageDriven
                 int needCount = 0;
                 for (int j = 1; j < this.sacCount; j++)
                 {
-                    needCount = await this.CreateConsumer(index, queueName, true, nodeIds, sacCounters, rabbitConsumers, consumerBuilder);
+                    needCount = await this.CreateConsumer(index, queueName, isStarting || i < workloadTotal, workloadTotal, nodeIds, queueCounters, rabbitConsumers, consumerBuilder);
                     index++;
                 }
-                await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
+                if (myQueue.IsSac) await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
                 if (rabbitConsumers.Count == 0)
                     this.consumers.TryRemove(queueName, out _);
             }
@@ -844,7 +858,7 @@ class MessageDrivenService : IMessageDriven
             int needCount = 0;
             for (int i = 0; i < myQueue.WorkloadTotal; i++)
             {
-                needCount = await this.CreateConsumer(index, queueId, true, nodeIds, sacCounters, rabbitConsumers, consumerBuilder);
+                needCount = await this.CreateConsumer(index, queueId, true, 0, nodeIds, queueCounters, rabbitConsumers, consumerBuilder);
                 index++;
             }
             await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
@@ -863,7 +877,7 @@ class MessageDrivenService : IMessageDriven
                 if (!this.transferConsumers.TryGetValue(queueName, out var rabbitConsumers))
                     this.transferConsumers.TryAdd(queueName, rabbitConsumers = new());
                 Func<string, RabbitConsumer> consumerBuilder = queueName => new RabbitConsumer(queueName, this, this.serviceProvider, QueueType.Transfer);
-                var needCount = await this.CreateConsumer(index, queueName, true, nodeIds, sacCounters, rabbitConsumers, consumerBuilder);
+                var needCount = await this.CreateConsumer(index, queueName, true, 0, nodeIds, queueCounters, rabbitConsumers, consumerBuilder);
                 await this.RemoveNeedlessConsumers(needCount, rabbitConsumers);
                 if (rabbitConsumers.Count == 0)
                     this.transferConsumers.TryRemove(queueName, out _);
@@ -872,11 +886,11 @@ class MessageDrivenService : IMessageDriven
         }
         this.lastHashCode = hashCode;
     }
-    private async Task<int> CreateConsumer(int index, string queueName, bool isStarting, List<string> nodeIds, Dictionary<string, int> sacCounters, List<RabbitConsumer> rabbitConsumers, Func<string, RabbitConsumer> consumerBuilder)
+    private async Task<int> CreateConsumer(int index, string queueName, bool isStarting, int waitReplyingCount, List<string> nodeIds, Dictionary<string, int> queueCounters, List<RabbitConsumer> rabbitConsumers, Func<string, RabbitConsumer> consumerBuilder)
     {
         var nodeCount = nodeIds.Count;
         var nodeId = nodeCount > 1 ? nodeIds[index % nodeCount] : this.ServiceId;
-        if (!sacCounters.TryGetValue(queueName, out var needCount))
+        if (!queueCounters.TryGetValue(queueName, out var needCount))
             needCount = 0;
         if (nodeId == this.ServiceId)
         {
@@ -890,8 +904,16 @@ class MessageDrivenService : IMessageDriven
                     await myRabbitConsumer.Shutdown(true);
                 await myRabbitConsumer.Start();
             }
+            else
+            {
+                var queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
+                if (!this.waitStartingConsumers.TryGetValue(queueId, out var waiter))
+                    this.waitStartingConsumers.TryAdd(queueId, waiter = new() { WaitTotal = waitReplyingCount });
+                waiter.Consumers.Add(myRabbitConsumer);
+                Console.WriteLine($"消费者{queueName}等待启动，当前等待启动的消费者数量：{waiter.Consumers.Count}");
+            }
             needCount++;
-            sacCounters[queueName] = needCount;
+            queueCounters[queueName] = needCount;
         }
         return needCount;
     }
@@ -900,6 +922,7 @@ class MessageDrivenService : IMessageDriven
         while (rabbitConsumers.Count > needCount)
         {
             var myRabbitConsumer = rabbitConsumers.Last();
+            //强制关闭消费者，消费者一定要做好幂等处理
             await myRabbitConsumer.Shutdown(true);
             rabbitConsumers.Remove(myRabbitConsumer);
         }

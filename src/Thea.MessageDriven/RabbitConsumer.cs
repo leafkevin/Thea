@@ -235,12 +235,13 @@ class RabbitConsumer
                                 RetryTimes = iLoop,
                                 UpdatedAt = DateTime.Now
                             });
+                            var resultBody = isSuccess ? "success" : "failed";
                             this.logger.LogEntity(new LogEntity
                             {
                                 Id = logId,
                                 ApiType = (int)ApiType.LocalInvoke,
                                 Tag = "RabbitConsumer",
-                                Body = $"consumed failed, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
+                                Body = $"consumed {resultBody}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
                                 LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
                                 Exception = exception,
                                 Parameters = jsonBody,
@@ -265,10 +266,9 @@ class RabbitConsumer
                             throw exception;
                     }
                     break;
-                case MessageType.WaitForStart:
-                case MessageType.WaitForShutdown:
-                    if (message.Type == MessageType.WaitForShutdown)
-                        Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}: {message.Type} - message: {this.QueueName} received!");
+                case MessageType.WaitStarting:
+                case MessageType.WaitShutdowning:
+                    Console.WriteLine($"队列 {this.QueueName} 收到 {message.Type} 标志消息!!");
                     //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
                     await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, message.ToJson());
                     break;
@@ -305,8 +305,8 @@ class RabbitConsumer
                         });
                     }
                     break;
-                case MessageType.WaitForStart:
-                case MessageType.WaitForShutdown:
+                case MessageType.WaitStarting:
+                case MessageType.WaitShutdowning:
                     if (message.From == this.parent.AppId)
                     {
                         var syncMessage = new Message
