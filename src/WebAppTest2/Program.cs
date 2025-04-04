@@ -26,15 +26,14 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 //if (app.Environment.IsDevelopment())
 //{
-    app.UseSwagger();
-    app.UseSwaggerUI();
+app.UseSwagger();
+app.UseSwaggerUI();
 //}
 app.UseMessageDriven(f =>
 {
     f.UseTrolleyRepository("default")
     .UseProducer("cache.refresh", "award.take", "award.issue")
-    .UseProducer("award.take", true)
-    .UseRpcConsumer();
+    .UseProducer("award.take", true);
 });
 app.UseAuthorization();
 

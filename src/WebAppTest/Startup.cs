@@ -58,7 +58,6 @@ public static class Startup
         app.UseMessageDriven(f =>
         {
             f.UseTrolleyRepository("default")
-             //.UseProducer("award.take", true)
              .UseTraceId(() =>
              {
                  var contextAccessor = app.ApplicationServices.GetService<IHttpContextAccessor>();
@@ -66,8 +65,7 @@ public static class Startup
              })
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
              .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
-             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward)
-             .UseRpcConsumer();
+             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward);
         });
     }
 }

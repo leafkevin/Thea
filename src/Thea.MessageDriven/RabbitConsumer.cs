@@ -218,7 +218,6 @@ class RabbitConsumer
                                 exception = ex.InnerException ?? ex;
                             }
                             iLoop++;
-                            //Thread.Sleep(1000);
                         }
                         if (!isSuccess) result = exception.ToString();
                         if (this.IsLogEnabled || !isSuccess)

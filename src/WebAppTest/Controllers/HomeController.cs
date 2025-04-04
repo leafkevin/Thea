@@ -92,7 +92,7 @@ namespace WebAppTest.Controllers
                     {
                         var stopwatch = Stopwatch.StartNew();
                         stopwatch.Start();
-                        this.messageDriven.Request<AwardInfo, AwardInfo>("award.take", message, new AwardInfo { AwardId = message, Quantity = i % 5 });
+                        this.messageDriven.Publish("award.take", message, new AwardInfo { AwardId = message, Quantity = i % 5 });
                         stopwatch.Stop();
                         Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
                     });
@@ -107,7 +107,7 @@ namespace WebAppTest.Controllers
             //await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
             var stopwatch = Stopwatch.StartNew();
             stopwatch.Start();
-            await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+            this.messageDriven.Publish("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
             stopwatch.Stop();
             Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
             return TheaResponse.Succeed("ok");
