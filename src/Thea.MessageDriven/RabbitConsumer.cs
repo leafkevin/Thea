@@ -146,6 +146,7 @@ class RabbitConsumer
         if (isForce || !this.IsRunning)
             await this.Close();
     }
+    public async Task<uint> MessageCount() => await this.channel.MessageCountAsync(this.QueueName);
     private async Task Close()
     {
         if (this.channel != null)

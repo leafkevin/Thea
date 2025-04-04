@@ -185,9 +185,11 @@ class MessageDrivenService : IMessageDriven
                             case MessageType.WaitShutdowning:
                                 queueName = (string)message.Body;
                                 if (this.waitShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
-                                    rabbitConsumers.ForEach(async f => await f.Shutdown());
-                                queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
-                                var queueInfo = this.queues.Find(f => f.QueueId == queueId);
+                                {
+                                    int closedCount = rabbitConsumers.Count;
+                                    rabbitConsumers.ForEach(async f => await f.Shutdown(true));
+                                    Console.WriteLine($"队列{queueName}已收到结束标志消息，关闭消费者{closedCount}个！！");
+                                }
                                 message.Waiter?.TrySetResult(true);
                                 break;
                             case MessageType.Logs:
@@ -789,7 +791,39 @@ class MessageDrivenService : IMessageDriven
                     };
                     //使用默认的交换机，路由键为队列名
                     await this.rabbitProducer.Publish(exchange, queueName, message.ToJson());
-                    Console.WriteLine($"新增队列{workloadTotal} -> {myQueue.WorkloadTotal}, 向队列{queueName}发送结束标志消息");
+                    Console.WriteLine($"扩容队列{workloadTotal} -> {myQueue.WorkloadTotal}, 向队列{queueName}发送结束标志消息");
+                }
+            }
+            else if (workloadTotal > myQueue.WorkloadTotal)
+            {
+                var exchange = Consts.DefaultExchange;
+                for (int j = myQueue.WorkloadTotal; j < workloadTotal; j++)
+                {
+                    var queueName = $"{queueId}.{j}";
+                    if (!this.consumers.TryRemove(queueName, out var rabbitConsumers))
+                        continue;
+
+                    var myRabbitConsumer = rabbitConsumers.First();
+                    if (await myRabbitConsumer.MessageCount() > 0)
+                    {
+                        this.waitShutdownConsumers[queueName] = rabbitConsumers;
+                        var message = new Message
+                        {
+                            MessageId = ObjectId.NewId(),
+                            From = this.AppId,
+                            Type = MessageType.WaitShutdowning,
+                            //已经消费完毕的队列名
+                            Body = queueName
+                        };
+                        //使用默认的交换机，路由键为队列名
+                        await this.rabbitProducer.Publish(exchange, queueName, message.ToJson());
+                        Console.WriteLine($"收缩队列{workloadTotal} -> {myQueue.WorkloadTotal}, 向队列{queueName}发送结束标志消息");
+                    }
+                    else
+                    {
+                        await this.RemoveNeedlessConsumers(0, rabbitConsumers);
+                        Console.WriteLine($"收缩队列{workloadTotal} -> {myQueue.WorkloadTotal}, 队列{queueName}没有消息，直接删除消费者{rabbitConsumers.Count}个");
+                    }
                 }
             }
         }
