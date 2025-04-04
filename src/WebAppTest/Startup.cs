@@ -65,7 +65,9 @@ public static class Startup
              })
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
              .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
-             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward);
+             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward)
+             .UseLoadBalance(true, 1);
+            //.UseRpcConsumer();
         });
     }
 }

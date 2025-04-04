@@ -16,18 +16,19 @@ public class StatefulConsumer
         this.messageDriven = messageDriven;
         this.logger = logger;
     }
-    public Task RemoveCache(string key)
+    public Task<string> RemoveCache(string key)
     {
         Thread.Sleep(20);
         //Console.WriteLine($"RemoveCache: {key}");
         //this.logger.LogInformation("2222222");
-        return Task.CompletedTask;
+        return Task.FromResult(key);
     }
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {
         Thread.Sleep(20);
         //Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");
-        this.messageDriven.Publish("award.issue", awardInfo.AwardId, awardInfo);
+        //this.messageDriven.Request<string, string>("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
+        this.messageDriven.Publish("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
         return Task.FromResult(awardInfo);
     }
     public Task<TheaResponse> IssueAward(AwardInfo awardInfo)

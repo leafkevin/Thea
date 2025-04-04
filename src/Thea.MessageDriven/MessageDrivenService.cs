@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,7 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Thea.Logging;
-using static Thea.ObjectMethodExecutorAwaitable;
 
 namespace Thea.MessageDriven;
 
@@ -44,6 +42,9 @@ class MessageDrivenService : IMessageDriven
     private RabbitConsumer rpcConsumer;
     private Func<string> traceIdFetcher;
     private int lastHashCode = 0;
+    private int sacCount = 2;
+    private bool isForceLoadBalance = false;
+    private TimeSpan forceLoadBalanceInterval = TimeSpan.FromMinutes(10);
 
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
     private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
@@ -53,7 +54,8 @@ class MessageDrivenService : IMessageDriven
     private IMessageDrivenRepository repository;
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
-    private int sacCount = 2;
+    private DateTime lastLoadBalanceTime = DateTime.MinValue;
+
 
     internal RabbitProducer rabbitProducer;
     public string AppId { get; private set; }
@@ -569,6 +571,11 @@ class MessageDrivenService : IMessageDriven
     }
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal void UseTraceIdFetcher(Func<string> traceIdFetcher) => this.traceIdFetcher = traceIdFetcher;
+    internal void UseLoadBalance(bool isForceLoadBalancePerInterval, int intervalMinutes = 10)
+    {
+        this.isForceLoadBalance = isForceLoadBalancePerInterval;
+        this.forceLoadBalanceInterval = TimeSpan.FromMinutes(intervalMinutes);
+    }
     internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message
     {
         Type = MessageType.Logs,
@@ -713,7 +720,8 @@ class MessageDrivenService : IMessageDriven
         nodeIds.Sort((x, y) => x.CompareTo(y));
 
         var hashCode = this.GetHashCode(nodeIds);
-        if (hashCode == this.lastHashCode)
+        if (hashCode == this.lastHashCode && (!this.isForceLoadBalance || this.isForceLoadBalance
+            && DateTime.Now.Subtract(this.lastLoadBalanceTime) < this.forceLoadBalanceInterval))
         {
             Console.WriteLine($"hashCode：{hashCode},lastHashCode：{this.lastHashCode}, same not need build, and return!!!");
             var allQueues = this.queues.FindAll(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled);
@@ -728,9 +736,9 @@ class MessageDrivenService : IMessageDriven
                         await this.CheckActive(queueName, myQueue.IsLogEnabled);
                     }
                 }
-                else await this.CheckActive(queueId, myQueue.IsLogEnabled);
-                return;
+                else await this.CheckActive(queueId, myQueue.IsLogEnabled);              
             }
+            return;
         }
         Console.WriteLine($"hashCode：{hashCode}, need build consumers, and starting!!!");
 
@@ -919,6 +927,7 @@ class MessageDrivenService : IMessageDriven
             }
         }
         this.lastHashCode = hashCode;
+        this.lastLoadBalanceTime = DateTime.Now;
     }
     private async Task<int> CreateConsumer(int index, string queueName, bool isStarting, int waitReplyingCount, List<string> nodeIds, Dictionary<string, int> queueCounters, List<RabbitConsumer> rabbitConsumers, Func<string, RabbitConsumer> consumerBuilder)
     {
