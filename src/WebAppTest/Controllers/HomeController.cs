@@ -34,7 +34,13 @@ namespace WebAppTest.Controllers
         {
             Thread.Sleep(200);
             this.logger.LogTagInformation("Index", "111111------------");
-            await this.messageDriven.PublishAsync("cache.refresh", "1","111");
+            await this.messageDriven.PublishAsync("cache.refresh", "1", "111");
+            return TheaResponse.Success;
+        }
+        [HttpGet]
+        public async Task<TheaResponse> ChangeQueue(string queueId, int workloadTotal)
+        {
+            await this.messageDriven.ChangeQueue(queueId, workloadTotal);
             return TheaResponse.Success;
         }
         [HttpPost]

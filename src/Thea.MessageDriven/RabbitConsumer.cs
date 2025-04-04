@@ -107,6 +107,7 @@ class RabbitConsumer
     }
     public async Task Start()
     {
+        if (this.IsActivated) return;
         this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
@@ -119,6 +120,7 @@ class RabbitConsumer
     }
     public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
     {
+        if (this.IsActivated) return;
         this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
@@ -138,6 +140,7 @@ class RabbitConsumer
     }
     public async Task Shutdown(bool isForce = false)
     {
+        if (this.cancellationSource == null) return;
         this.cancellationSource.Cancel();
         this.isDeferClose = !isForce && !this.IsRunning;
         if (isForce || !this.IsRunning)
@@ -160,9 +163,9 @@ class RabbitConsumer
     }
     private async Task BindUserMessageHandler()
     {
-        var consumer = new AsyncEventingBasicConsumer(channel);
+        this.consumer = new AsyncEventingBasicConsumer(channel);
         //用户消息队列
-        consumer.ReceivedAsync += async (model, ea) =>
+        this.consumer.ReceivedAsync += async (model, ea) =>
         {
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
@@ -278,7 +281,7 @@ class RabbitConsumer
             if (this.isDeferClose)
                 await this.Close();
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, consumer);
+        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindHeartbeatHandler()
     {

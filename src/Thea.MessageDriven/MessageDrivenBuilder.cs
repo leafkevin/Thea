@@ -64,11 +64,4 @@ public class MessageDrivenBuilder
         this.messageDriven.UseTraceIdFetcher(traceIdFetcher);
         return this;
     }
-    public MessageDrivenBuilder UseMonitoringDataPusher(Action<MonitoringData> dataPusher)
-    {
-        if (dataPusher == null)
-            throw new ArgumentNullException(nameof(dataPusher));
-        this.messageDriven.UseMonitoringDataPusher(dataPusher);
-        return this;
-    }
 }

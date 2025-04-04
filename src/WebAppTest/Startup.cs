@@ -44,7 +44,6 @@ public static class Startup
         services.AddTheaWeb();
         services.AddMessageDriven();
         services.AddSingleton<StatefulConsumer>();
-        services.AddSingleton<MonitingDataGetter>();
 
         //var frontendUrl = configuration["FrontendUrl"];
         //string[] urls = new[] { frontendUrl };
@@ -64,11 +63,6 @@ public static class Startup
              {
                  var contextAccessor = app.ApplicationServices.GetService<IHttpContextAccessor>();
                  return contextAccessor.GetTraceId() ?? ObjectId.NewId();
-             })
-             .UseMonitoringDataPusher(f =>
-             {
-                 var dataGetter = app.ApplicationServices.GetService<MonitingDataGetter>();
-                 dataGetter.Data = f;
              })
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
              .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
