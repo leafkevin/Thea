@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Web;
+using Thea.Logging;
 
 namespace Thea.Alarm;
 
@@ -57,7 +58,7 @@ class DingtalkAlarmService : IAlarmService
         }
         catch (Exception ex)
         {
-            this.logger.LogError(ex, $"post dingtalk url error,detail:{ex}");
+            this.logger.LogTagError("DingtalkError", ex, $"post dingtalk url error, Content:{content}, Exception detail:{ex}");
         }
     }
     private string Sign(out long timestamp)

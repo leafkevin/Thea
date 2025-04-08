@@ -97,16 +97,9 @@ public class TheaWebMiddleware
         {
             case (int)ApiType.HttpGet:
             case (int)ApiType.HttpDelete:
-                if (context.Request.Query != null && context.Request.Query.Count > 0)
-                    logEntityInfo.Parameters = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
-                break;
             case (int)ApiType.HttpPost:
             case (int)ApiType.HttpPut:
-                string queryString = null;
-                if (context.Request.Query != null && context.Request.Query.Count > 0)
-                    queryString = HttpUtility.UrlDecode(context.Request.QueryString.ToString());
-                var body = await this.ReadBody(context.Request.Body);
-                logEntityInfo.Parameters = new { QuerySting = queryString, Body = body }.ToJson();
+                logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
                 break;
         }
         logEntityInfo.Headers = context.Request.Headers.ToJson();
@@ -127,8 +120,7 @@ public class TheaWebMiddleware
     {
         try
         {
-            if (stream == null || stream.Length == 0)
-                return string.Empty;
+            if (stream == null) return string.Empty;
             stream.Position = 0;
             var reader = new StreamReader(stream);
             var result = await reader.ReadToEndAsync();
