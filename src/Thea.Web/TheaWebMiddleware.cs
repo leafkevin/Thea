@@ -33,6 +33,7 @@ public class TheaWebMiddleware
 
     public async Task Invoke(HttpContext context)
     {
+        var logLevel = LogLevel.Information;
         var originalStream = context.Response.Body;
         var logEntityInfo = await this.CreateLogEntity(context);
         using (this.logger.BeginScope(logEntityInfo))
@@ -48,9 +49,9 @@ public class TheaWebMiddleware
             {
                 exception = ex.InnerException ?? ex;
                 logEntityInfo.Exception = exception;
-                logEntityInfo.LogLevel = (int)LogLevel.Error;
+                logLevel = LogLevel.Error;
             }
-            logEntityInfo.Response = await this.responseDecorator.ProcessRequest(context, memoryStream, exception);
+            (logLevel, logEntityInfo.Response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
             context.Response.Body = originalStream;
             if (exception != null)
             {
@@ -58,14 +59,14 @@ public class TheaWebMiddleware
                 logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
                 logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
             }
-
+            logEntityInfo.LogLevel = (int)logLevel;
             await context.Response.WriteAsync(logEntityInfo.Response);
             this.logger.LogEntity(logEntityInfo);
         }
     }
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
-        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
+        var logEntityInfo = new LogEntity { Id = ObjectId.NewId() };
         if (context.Request.Headers.TryGetValue("TraceId", out var traceIds))
         {
             var traceId = traceIds.ToString();
@@ -101,7 +102,7 @@ public class TheaWebMiddleware
             case (int)ApiType.HttpPut:
                 logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
                 break;
-        }
+        }		
         logEntityInfo.Headers = context.Request.Headers.ToJson();
         if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
         {

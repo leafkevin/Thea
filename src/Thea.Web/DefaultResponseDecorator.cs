@@ -2,14 +2,16 @@
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
 
 namespace Thea.Web;
 
 class DefaultResponseDecorator : IResponseDecorator
 {
-    public async Task<string> ProcessRequest(HttpContext context, Stream readableStream, Exception exception)
+    public async Task<(LogLevel, string)> ProcessRequest(HttpContext context, Stream readableStream, LogLevel logLevel, Exception exception)
     {
+        var myLogLevel = logLevel;
         string jsonResponse = null;
         TheaResponse response = null;
         var statusCode = context.Response.StatusCode;
@@ -50,6 +52,8 @@ class DefaultResponseDecorator : IResponseDecorator
                 if (!string.IsNullOrEmpty(jsonResponse))
                     response = jsonResponse.JsonTo<TheaResponse>();
                 else response = TheaResponse.Success;
+                if (!response.IsSuccess && myLogLevel < LogLevel.Warning)
+                    myLogLevel = LogLevel.Warning;
                 break;
         }
         if (exception != null)
@@ -68,7 +72,7 @@ class DefaultResponseDecorator : IResponseDecorator
             }, context.Response);
             response = TheaResponse.Fail(statusCode, "内部服务器错误！");
         }
-        return response.ToJson();
+        return (myLogLevel, response.ToJson());
     }
     private async Task<string> ReadBody(Stream stream)
     {
