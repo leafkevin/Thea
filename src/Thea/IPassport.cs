@@ -1,4 +1,6 @@
-﻿public interface IPassport
+﻿namespace Thea;
+
+public interface IPassport
 {
     /// <summary>
     /// 用户ID

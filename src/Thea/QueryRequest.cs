@@ -17,6 +17,7 @@ public class PagedRequest
                 _pageNumber = 1;
             if (value > 1)
                 _pageNumber = value;
+            _pageNumber = value;
         }
     }
     public int PageSize
