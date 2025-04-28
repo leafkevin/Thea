@@ -454,16 +454,20 @@ class MessageDrivenService : IMessageDriven
             {
                 QueueId = queue,
                 QueueName = queue,
+                IsQuorum = this.isQuorum,
                 IsStateful = true,
                 IsSac = true,
                 PrefetchCount = 250,
                 WorkloadTotal = 2,
                 IsEnabled = true,
-                IsLogEnabled = false
+                IsLogEnabled = false,
+                UpdatedBy = "MessageDrivenService",
+                UpdatedAt = DateTime.UtcNow
             });
         }
         else
         {
+            myQueue.IsQuorum = this.isQuorum;
             myQueue.IsStateful = true;
             myQueue.IsSac = true;
             myQueue.PrefetchCount = 250;
@@ -479,7 +483,9 @@ class MessageDrivenService : IMessageDriven
             {
                 ExchangeId = exchange,
                 BindType = Consts.TopicBindingType,
-                QueueId = queue
+                QueueId = queue,
+                UpdatedBy = "MessageDrivenService",
+                UpdatedAt = DateTime.UtcNow
             });
         }
         else myBinding.BindType = Consts.TopicBindingType;
@@ -500,16 +506,20 @@ class MessageDrivenService : IMessageDriven
             {
                 QueueId = queue,
                 QueueName = queue,
+                IsQuorum = this.isQuorum,
                 IsStateful = false,
                 IsSac = false,
                 PrefetchCount = 250,
                 WorkloadTotal = 2,
                 IsEnabled = true,
-                IsLogEnabled = false
+                IsLogEnabled = false,
+                UpdatedBy = "MessageDrivenService",
+                UpdatedAt = DateTime.UtcNow
             });
         }
         else
         {
+            myQueue.IsQuorum = this.isQuorum;
             myQueue.IsStateful = false;
             myQueue.IsSac = false;
             myQueue.PrefetchCount = 250;
@@ -528,7 +538,9 @@ class MessageDrivenService : IMessageDriven
                 QueueId = queue,
                 BindType = bindingType,
                 BindingKey = routingKey,
-                IsDelay = isDelay
+                IsDelay = isDelay,
+                UpdatedBy = "MessageDrivenService",
+                UpdatedAt = DateTime.UtcNow
             });
         }
         else
