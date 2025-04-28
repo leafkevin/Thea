@@ -461,6 +461,8 @@ class MessageDrivenService : IMessageDriven
                 WorkloadTotal = 2,
                 IsEnabled = true,
                 IsLogEnabled = false,
+                CreatedBy = "MessageDrivenService",
+                CreatedAt = DateTime.UtcNow,
                 UpdatedBy = "MessageDrivenService",
                 UpdatedAt = DateTime.UtcNow
             });
@@ -484,6 +486,8 @@ class MessageDrivenService : IMessageDriven
                 ExchangeId = exchange,
                 BindType = Consts.TopicBindingType,
                 QueueId = queue,
+                CreatedBy = "MessageDrivenService",
+                CreatedAt = DateTime.UtcNow,
                 UpdatedBy = "MessageDrivenService",
                 UpdatedAt = DateTime.UtcNow
             });
@@ -513,6 +517,8 @@ class MessageDrivenService : IMessageDriven
                 WorkloadTotal = 2,
                 IsEnabled = true,
                 IsLogEnabled = false,
+                CreatedBy = "MessageDrivenService",
+                CreatedAt = DateTime.UtcNow,
                 UpdatedBy = "MessageDrivenService",
                 UpdatedAt = DateTime.UtcNow
             });
@@ -539,6 +545,8 @@ class MessageDrivenService : IMessageDriven
                 BindType = bindingType,
                 BindingKey = routingKey,
                 IsDelay = isDelay,
+                CreatedBy = "MessageDrivenService",
+                CreatedAt = DateTime.UtcNow,
                 UpdatedBy = "MessageDrivenService",
                 UpdatedAt = DateTime.UtcNow
             });

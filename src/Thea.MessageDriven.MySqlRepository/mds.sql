@@ -8,6 +8,8 @@ CREATE TABLE `mds_binding`
     `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
     `is_need_transfer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否需要转发',
     `is_delay` TINYINT(1) NULL DEFAULT 0 COMMENT '是否延时消费者',
+    `created_by` VARCHAR(50) NULL COMMENT '创建人',
+    `created_at` DATETIME NULL DEFAULT NOW() COMMENT '创建日期',
     `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
     `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
     CONSTRAINT `pk_mds_binding` PRIMARY KEY(`exchange_id`,`queue_id`)
@@ -30,6 +32,8 @@ CREATE TABLE `mds_queue`
     `prefetch_count` INTEGER NULL COMMENT '预取个数',
     `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',
     `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `created_by` VARCHAR(50) NULL COMMENT '创建人',
+    `created_at` DATETIME NULL DEFAULT NOW() COMMENT '创建日期',
     `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
     `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
     CONSTRAINT `pk_mds_queue` PRIMARY KEY(`queue_id`)

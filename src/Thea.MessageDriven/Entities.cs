@@ -32,6 +32,14 @@ public class Binding
     /// </summary>
     public bool IsDelay { get; set; }
     /// <summary>
+    /// 创建人
+    /// </summary>
+    public string CreatedBy { get; set; }
+    /// <summary>
+    /// 创建日期
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
+    /// <summary>
     /// 最后更新人
     /// </summary>
     public string UpdatedBy { get; set; }
@@ -81,6 +89,14 @@ public class Queue
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
+    /// <summary>
+    /// 创建人
+    /// </summary>
+    public string CreatedBy { get; set; }
+    /// <summary>
+    /// 创建日期
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
     /// <summary>
     /// 最后更新人
     /// </summary>
