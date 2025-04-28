@@ -2,7 +2,7 @@
 
 public class TheaResponse<TResult>
 {
-    public bool IsSuccess { get; set; } = true;
+    public bool IsSuccess { get; set; }
     public int Code { get; set; }
     public string Message { get; set; }
     public TResult Data { get; set; }

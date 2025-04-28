@@ -542,7 +542,7 @@ class MessageDrivenService : IMessageDriven
             {
                 var queueName = $"{queueId}.{i}";
                 if (this.isAllowCreateQueue)
-                    await this.rabbitProducer.CreateQueue(queueName, myQueue.IsSac, false);
+                    await this.rabbitProducer.CreateQueue(queueName, myQueue.IsSac, false, true);
                 if (this.isAllowCreateBinding)
                 {
                     foreach (var myBinding in myBindings)
@@ -638,7 +638,7 @@ class MessageDrivenService : IMessageDriven
             //创建转发队列
             queueName = $"{Consts.TransferExchange}.{myBinding.ExchangeId}";
             if (this.isAllowCreateQueue)
-                await this.rabbitProducer.CreateQueue(queueName, true, false);
+                await this.rabbitProducer.CreateQueue(queueName, true, false, true);
 
             //防止每次都更新数据库
             if (!myBinding.IsNeedTransfer)
@@ -680,9 +680,9 @@ class MessageDrivenService : IMessageDriven
             if (queue.IsStateful)
             {
                 for (int i = 0; i < queue.WorkloadTotal; i++)
-                    await this.CreateQueueAndBinding($"{queue.QueueId}.{i}", queue.IsSac, false, i.ToString(), myBindings);
+                    await this.CreateQueueAndBinding($"{queue.QueueId}.{i}", queue.IsSac, false, true, i.ToString(), myBindings);
             }
-            else await this.CreateQueueAndBinding(queue.QueueId, false, false, Consts.FanoutRoutingKey, myBindings);
+            else await this.CreateQueueAndBinding(queue.QueueId, false, false, true, Consts.FanoutRoutingKey, myBindings);
         }
         foreach (var myBinding in myBindings)
         {
@@ -690,7 +690,7 @@ class MessageDrivenService : IMessageDriven
                 continue;
             var queueName = $"{Consts.TransferExchange}.{myBinding.ExchangeId}";
             if (this.isAllowCreateQueue)
-                await this.rabbitProducer.CreateQueue(queueName, true, false);
+                await this.rabbitProducer.CreateQueue(queueName, true, false, true);
         }
     }
     private async Task Initialize()
@@ -736,7 +736,7 @@ class MessageDrivenService : IMessageDriven
                         await this.CheckActive(queueName, myQueue.IsLogEnabled);
                     }
                 }
-                else await this.CheckActive(queueId, myQueue.IsLogEnabled);              
+                else await this.CheckActive(queueId, myQueue.IsLogEnabled);
             }
             return;
         }
@@ -764,7 +764,7 @@ class MessageDrivenService : IMessageDriven
             for (int i = workloadTotal; i < myQueue.WorkloadTotal; i++)
             {
                 var queueName = $"{queueId}.{i}";
-                await this.CreateQueueAndBinding(queueName, myQueue.IsSac, false, i.ToString(), myBindings);
+                await this.CreateQueueAndBinding(queueName, myQueue.IsSac, false, true, i.ToString(), myBindings);
             }
             var isStarting = workloadTotal >= myQueue.WorkloadTotal;
             queueWorkloads.TryAdd(queueId, (isStarting, workloadTotal));
@@ -983,10 +983,10 @@ class MessageDrivenService : IMessageDriven
             await rabbitConsumer.Start();
         }
     }
-    private async Task CreateQueueAndBinding(string queueName, bool isSac, bool isExclusive, string routingKey, List<Binding> myBindings)
+    private async Task CreateQueueAndBinding(string queueName, bool isSac, bool isExclusive, bool isQuorum, string routingKey, List<Binding> myBindings)
     {
         if (this.isAllowCreateQueue)
-            await this.rabbitProducer.CreateQueue(queueName, isSac, isExclusive);
+            await this.rabbitProducer.CreateQueue(queueName, isSac, isExclusive, isQuorum);
         if (this.isAllowCreateBinding)
         {
             foreach (var myBinding in myBindings)

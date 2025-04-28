@@ -111,11 +111,9 @@ public class RedisCache : IDistributedCache
             throw new ArgumentNullException(key);
         var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var result = await database.StringIncrementAsync(key);
-        if (result == 1)
-        {
-            result = defaultVavlue;
-            await this.SetAsync(key, result);
-        }
+		//设置初始值
+        if (result == 1 && defaultVavlue > 1)
+            result = await database.StringIncrementAsync(key, defaultVavlue);
         return result;
     }
     public void Remove(string key)

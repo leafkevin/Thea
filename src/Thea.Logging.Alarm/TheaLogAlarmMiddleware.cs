@@ -60,6 +60,7 @@ public class TheaLogAlarmMiddleware
                     alarmInfo.FiredTimes++;
                     this.Build(logEntityInfo, alarmInfo);
                     await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
+                    //十分钟后移除
                     this.alarmInfos.TryRemove(hashKey, out _);
                 }
                 else alarmInfo.FiredTimes++;
