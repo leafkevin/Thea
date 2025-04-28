@@ -31,6 +31,14 @@ public class Binding
     /// 是否延时消费者
     /// </summary>
     public bool IsDelay { get; set; }
+    /// <summary>
+    /// 最后更新人
+    /// </summary>
+    public string UpdatedBy { get; set; }
+    /// <summary>
+    /// 最后更新日期
+    /// </summary>
+    public DateTime UpdatedAt { get; set; }
 }
 /// <summary>
 /// 队列表，描述所有的队列基本信息
@@ -58,6 +66,10 @@ public class Queue
     /// </summary>
     public bool IsSac { get; set; }
     /// <summary>
+    /// 是否仲裁队列
+    /// </summary>
+    public bool IsQuorum { get; set; }
+    /// <summary>
     /// 预取个数
     /// </summary>
     public int PrefetchCount { get; set; }
@@ -69,6 +81,14 @@ public class Queue
     /// 是否启用
     /// </summary>
     public bool IsEnabled { get; set; }
+    /// <summary>
+    /// 最后更新人
+    /// </summary>
+    public string UpdatedBy { get; set; }
+    /// <summary>
+    /// 最后更新日期
+    /// </summary>
+    public DateTime UpdatedAt { get; set; }
 }
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志
@@ -107,6 +127,10 @@ public class ExecLog
     /// 重试次数
     /// </summary>
     public int RetryTimes { get; set; }
+    /// <summary>
+    /// 最后更新人
+    /// </summary>
+    public string UpdatedBy { get; set; }
     /// <summary>
     /// 最后更新日期
     /// </summary>

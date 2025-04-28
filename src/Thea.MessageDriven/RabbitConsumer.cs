@@ -1,15 +1,15 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -51,7 +51,6 @@ class RabbitConsumer
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
-        var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
         if (exchangeMethodInfos != null)
@@ -92,7 +91,6 @@ class RabbitConsumer
 
         this.factory = new ConnectionFactory
         {
-            Uri = new Uri(url),
             UserName = user,
             Password = password,
             AutomaticRecoveryEnabled = true,
@@ -109,7 +107,7 @@ class RabbitConsumer
     {
         if (this.IsActivated) return;
         this.cancellationSource = new();
-        this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
+        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
         await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
         switch (this.queueType)

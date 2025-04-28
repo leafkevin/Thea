@@ -8,6 +8,8 @@ CREATE TABLE `mds_binding`
     `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
     `is_need_transfer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否需要转发',
     `is_delay` TINYINT(1) NULL DEFAULT 0 COMMENT '是否延时消费者',
+    `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
+    `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
     CONSTRAINT `pk_mds_binding` PRIMARY KEY(`exchange_id`,`queue_id`)
 );
 ALTER TABLE `mds_binding` COMMENT '绑定表，描述交换机与队列的绑定关系';
@@ -24,9 +26,12 @@ CREATE TABLE `mds_queue`
     `is_stateful` TINYINT(1) NULL DEFAULT 0 COMMENT '是否有状态',
     `workload_total` INTEGER NULL COMMENT '工作负荷个数',
     `is_sac` TINYINT(1) NULL DEFAULT 0 COMMENT '是否单一激活消费者',
+    `is_quorum` TINYINT(1) NULL DEFAULT 0 COMMENT '是否仲裁队列',
     `prefetch_count` INTEGER NULL COMMENT '预取个数',
     `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',
     `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
+    `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
     CONSTRAINT `pk_mds_queue` PRIMARY KEY(`queue_id`)
 );
 ALTER TABLE `mds_queue` COMMENT '队列表，描述所有的队列基本信息';
@@ -46,7 +51,8 @@ CREATE TABLE `mds_log`
     `is_success` TINYINT(1) NULL DEFAULT 0 COMMENT '是否成功',
     `result` VARCHAR(4000) NULL COMMENT '执行结果',
     `retry_times` INTEGER NULL COMMENT '重试次数',
-    `updated_at` DATETIME NOT NULL DEFAULT NOW() COMMENT '最后更新日期',
+    `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
+    `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
     CONSTRAINT `pk_mds_log` PRIMARY KEY(`log_id`)
 );
 ALTER TABLE `mds_log` COMMENT '日志表，描述消息队列每个消费者的执行日志';

@@ -21,13 +21,11 @@ class RabbitProducer : IDisposable
     {
         var connectionId = $"producer.{parent.ServiceId}";
         var configuration = serviceProvider.GetService<IConfiguration>();
-        var url = configuration.GetValue<string>("MessageDriven:Url");
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
 
         var factory = new ConnectionFactory
         {
-            Uri = new Uri(url),
             UserName = user,
             Password = password,
             AutomaticRecoveryEnabled = true,
@@ -39,7 +37,7 @@ class RabbitProducer : IDisposable
                 { "client_api", $"Thea.MessageDriven" }
             }
         };
-        var connection = await factory.CreateConnectionAsync(connectionId);
+        var connection = await factory.CreateConnectionAsync(parent.tcpEndPoints, connectionId);
         var channels = new ConcurrentDictionary<int, IChannel>();
         var channelQueue = new BlockingCollection<IChannel>();
         for (int i = 0; i < channelSize; i++)
@@ -64,7 +62,7 @@ class RabbitProducer : IDisposable
         await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
         this.channelQueue.Add(channel);
     }
-    public async Task CreateQueue(string queueName, bool isSac, bool isExclusive, bool isQuorum)
+    public async Task CreateQueue(string queueName, bool isQuorum, bool isSac, bool isExclusive)
     {
         var channel = this.channelQueue.Take();
         IDictionary<string, object> arguments = null;

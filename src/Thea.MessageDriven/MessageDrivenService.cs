@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
 using Thea.Logging;
 
 namespace Thea.MessageDriven;
@@ -50,14 +51,16 @@ class MessageDrivenService : IMessageDriven
     private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
+    private readonly bool isSac;
+    private readonly bool isQuorum;
     private readonly TimeSpan rpcTimeout;
     private IMessageDrivenRepository repository;
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
     private DateTime lastLoadBalanceTime = DateTime.MinValue;
 
-
     internal RabbitProducer rabbitProducer;
+    internal List<AmqpTcpEndpoint> tcpEndPoints;
     public string AppId { get; private set; }
     public string ServiceId { get; private set; }
 
@@ -71,9 +74,16 @@ class MessageDrivenService : IMessageDriven
         var configuration = serviceProvider.GetService<IConfiguration>();
 
         this.AppId = configuration.GetValue<string>("AppId");
+        var endPoints = configuration.GetSection("MessageDriven:EndPoints").Get<string[]>();
+        if (endPoints == null || endPoints.Length == 0)
+            throw new Exception("未设置MessageDriven:EndPoints，无法初始化MessageDrivenService对象");
+
+        this.tcpEndPoints = endPoints.Select(f => AmqpTcpEndpoint.Parse(f)).ToList();
         this.isAllowCreateQueue = configuration.GetValue("MessageDriven:IsAllowCreateQueue", true);
         this.isAllowCreateExchange = configuration.GetValue("MessageDriven:IsAllowCreateExchange", true);
         this.isAllowCreateBinding = configuration.GetValue("MessageDriven:IsAllowCreateBinding", true);
+        this.isSac = configuration.GetValue("MessageDriven:IsSac", true);
+        this.isQuorum = configuration.GetValue("MessageDriven:IsQuorum", true);
         this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
         this.rpcTimeout = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:RpcTimeout", 30));
 
@@ -542,7 +552,7 @@ class MessageDrivenService : IMessageDriven
             {
                 var queueName = $"{queueId}.{i}";
                 if (this.isAllowCreateQueue)
-                    await this.rabbitProducer.CreateQueue(queueName, myQueue.IsSac, false, true);
+                    await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorum, myQueue.IsSac, false);
                 if (this.isAllowCreateBinding)
                 {
                     foreach (var myBinding in myBindings)
@@ -638,7 +648,7 @@ class MessageDrivenService : IMessageDriven
             //创建转发队列
             queueName = $"{Consts.TransferExchange}.{myBinding.ExchangeId}";
             if (this.isAllowCreateQueue)
-                await this.rabbitProducer.CreateQueue(queueName, true, false, true);
+                await this.rabbitProducer.CreateQueue(queueName, this.isQuorum, this.isSac, false);
 
             //防止每次都更新数据库
             if (!myBinding.IsNeedTransfer)
@@ -680,9 +690,9 @@ class MessageDrivenService : IMessageDriven
             if (queue.IsStateful)
             {
                 for (int i = 0; i < queue.WorkloadTotal; i++)
-                    await this.CreateQueueAndBinding($"{queue.QueueId}.{i}", queue.IsSac, false, true, i.ToString(), myBindings);
+                    await this.CreateQueueAndBinding($"{queue.QueueId}.{i}", queue.IsQuorum, queue.IsSac, false, i.ToString(), myBindings);
             }
-            else await this.CreateQueueAndBinding(queue.QueueId, false, false, true, Consts.FanoutRoutingKey, myBindings);
+            else await this.CreateQueueAndBinding(queue.QueueId, queue.IsQuorum, false, false, Consts.FanoutRoutingKey, myBindings);
         }
         foreach (var myBinding in myBindings)
         {
@@ -690,7 +700,7 @@ class MessageDrivenService : IMessageDriven
                 continue;
             var queueName = $"{Consts.TransferExchange}.{myBinding.ExchangeId}";
             if (this.isAllowCreateQueue)
-                await this.rabbitProducer.CreateQueue(queueName, true, false, true);
+                await this.rabbitProducer.CreateQueue(queueName, this.isQuorum, this.isSac, false);
         }
     }
     private async Task Initialize()
@@ -747,7 +757,7 @@ class MessageDrivenService : IMessageDriven
         var queueWorkloads = new Dictionary<string, (bool, int)>();
         //先创建有状态队列SAC激活消费者
         var myQueues = this.queues.Where(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled && f.IsStateful)
-           .OrderBy(f => f.QueueId).ToList();
+            .OrderBy(f => f.QueueId).ToList();
         foreach (var myQueue in myQueues)
         {
             var queueId = myQueue.QueueId;
@@ -764,7 +774,7 @@ class MessageDrivenService : IMessageDriven
             for (int i = workloadTotal; i < myQueue.WorkloadTotal; i++)
             {
                 var queueName = $"{queueId}.{i}";
-                await this.CreateQueueAndBinding(queueName, myQueue.IsSac, false, true, i.ToString(), myBindings);
+                await this.CreateQueueAndBinding(queueName, myQueue.IsQuorum, myQueue.IsSac, false, i.ToString(), myBindings);
             }
             var isStarting = workloadTotal >= myQueue.WorkloadTotal;
             queueWorkloads.TryAdd(queueId, (isStarting, workloadTotal));
@@ -983,10 +993,10 @@ class MessageDrivenService : IMessageDriven
             await rabbitConsumer.Start();
         }
     }
-    private async Task CreateQueueAndBinding(string queueName, bool isSac, bool isExclusive, bool isQuorum, string routingKey, List<Binding> myBindings)
+    private async Task CreateQueueAndBinding(string queueName, bool isQuorum, bool isSac, bool isExclusive, string routingKey, List<Binding> myBindings)
     {
         if (this.isAllowCreateQueue)
-            await this.rabbitProducer.CreateQueue(queueName, isSac, isExclusive, isQuorum);
+            await this.rabbitProducer.CreateQueue(queueName, isQuorum, isSac, isExclusive);
         if (this.isAllowCreateBinding)
         {
             foreach (var myBinding in myBindings)
