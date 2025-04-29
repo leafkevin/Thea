@@ -105,15 +105,15 @@ public class RedisCache : IDistributedCache
         }
         return redisValue.ToString().JsonTo<T>();
     }
-    public async Task<long> IncrementAsync(string key, long defaultVavlue = 1)
+    public async Task<long> IncrementAsync(string key, long initVavlue = 1)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
         var database = connectionPool.GetDatabase(this.databaseSelector(key));
         var result = await database.StringIncrementAsync(key);
-		//设置初始值
-        if (result == 1 && defaultVavlue > 1)
-            result = await database.StringIncrementAsync(key, defaultVavlue);
+        //设置初始值
+        if (initVavlue > result)
+            result = await database.StringIncrementAsync(key, initVavlue - result);
         return result;
     }
     public void Remove(string key)
