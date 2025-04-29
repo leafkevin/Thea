@@ -120,7 +120,7 @@ class RabbitConsumer
     {
         if (this.IsActivated) return;
         this.cancellationSource = new();
-        this.connection = await this.factory.CreateConnectionAsync(this.connectionId);
+        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.connectionId);
         this.channel = await this.connection.CreateChannelAsync();
 
         if (this.queueType == QueueType.Heartbeat || this.queueType == QueueType.RpcResult)

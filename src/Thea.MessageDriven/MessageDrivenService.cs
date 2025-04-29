@@ -1028,7 +1028,7 @@ class MessageDrivenService : IMessageDriven
         var myStatefulQueues = this.queues.Where(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled && f.IsStateful)
             .OrderBy(f => f.QueueId).Select(f => $"{f.QueueId}-{f.IsSac}-{f.WorkloadTotal}").ToList();
         var myExchanges = this.bindings.FindAll(f => f.IsNeedTransfer && this.localQueueIds.Contains(f.QueueId))
-            .Select(f => f.ExchangeId).Distinct().OrderBy(f => f).ToList();
+            .Select(f => new { f.ExchangeId, f.IsNeedTransfer }).Distinct().OrderBy(f => f.ExchangeId).ToList();
         var mySubscriberQueues = this.queues.Where(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled && !f.IsStateful)
             .OrderBy(f => f.QueueId).Select(f => $"{f.QueueId}-{f.WorkloadTotal}").ToList();
 
@@ -1042,7 +1042,7 @@ class MessageDrivenService : IMessageDriven
         hashCode.Add(myExchanges.Count);
         if (myExchanges.Count == 0)
             hashCode.Add(0);
-        else mySubscriberQueues.ForEach(f => hashCode.Add(f));
+        else myExchanges.ForEach(f => hashCode.Add(f));
         hashCode.Add(mySubscriberQueues.Count);
         if (mySubscriberQueues.Count == 0)
             hashCode.Add(0);
