@@ -1,25 +1,60 @@
-﻿using System;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using StackExchange.Redis;
+using System;
+using System.Linq;
+using System.Net;
+using System.Threading.Tasks;
 
 namespace Thea.Cache;
 
 public class RedisCache : IDistributedCache
 {
-    private readonly int databaseIndex = 0;
-    private readonly string url;
+    private readonly string appId;
     private readonly ConnectionMultiplexer connectionPool;
     private Func<string, int> databaseSelector;
 
     public RedisCache(IConfiguration configuration)
     {
-        this.url = configuration.GetValue<string>("Redis:Url");
-        if (string.IsNullOrEmpty(this.url))
-            throw new ArgumentNullException("缺少配置Redis:Url");
-        this.databaseIndex = configuration.GetValue("Redis:Database", -1);
-        this.connectionPool = ConnectionMultiplexer.Connect(url);
-        this.databaseSelector = f => this.databaseIndex;
+        this.appId = configuration.GetValue<string>("AppId");
+        var endPoints = configuration.GetSection("Redis:EndPoints").Get<string[]>();
+        var password = configuration.GetValue<string>("Redis:Password");
+        var timeout = configuration.GetValue("Redis:Timeout", 10);
+        var syncTimeout = configuration.GetValue("Redis:SyncTimeout", 10);
+        var workerCount = configuration.GetValue("Redis:WorkerCount", 300);
+        var keepAlive = configuration.GetValue("Redis:KeepAlive", 300);
+        var databaseIndex = configuration.GetValue("Redis:Database", -1);
+        this.databaseSelector = f => databaseIndex;
+
+        var ipEndPoints = new EndPointCollection();
+        foreach (var endPoint in endPoints)
+        {
+            var values = endPoint.Split(":").ToList();
+            int port = int.Parse(values[1]);
+            if (!IPAddress.TryParse(values[0], out var ipAddress))
+            {
+                var addresses = Dns.GetHostAddresses(values[0]);
+                if (addresses != null)
+                {
+                    foreach (var address in addresses)
+                    {
+                        ipEndPoints.Add(new IPEndPoint(address, port));
+                    }
+                }
+            }
+            else ipEndPoints.Add(new IPEndPoint(ipAddress, int.Parse(values[1])));
+        }
+        this.connectionPool = ConnectionMultiplexer.Connect(new ConfigurationOptions
+        {
+            EndPoints = ipEndPoints,
+            Password = password,
+            ConnectTimeout = timeout * 1000,
+            SyncTimeout = syncTimeout * 1000,
+            AbortOnConnectFail = false,
+            KeepAlive = keepAlive,
+            AllowAdmin = true,
+            DefaultDatabase = databaseIndex,
+            SocketManager = new SocketManager(this.appId, workerCount, true)
+        });
     }
     public void UserDatabase(Func<string, int> databaseSelector)
         => this.databaseSelector = databaseSelector;
