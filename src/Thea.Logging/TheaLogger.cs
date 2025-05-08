@@ -113,8 +113,3 @@ public class TheaLogger : ILogger
         return null;
     }
 }
-public class TheaLogger<T> : TheaLogger
-{
-    public TheaLogger(string name, IConfiguration configuration, IHostEnvironment hostEnvironment, ILoggerProcessor processor)
-        : base(name, configuration, hostEnvironment, processor) { }
-}
