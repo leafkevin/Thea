@@ -20,9 +20,9 @@ public class TheaWebMiddleware
     private readonly IResponseDecorator responseDecorator;
     private readonly ILogger<TheaWebMiddleware> logger;
 
-    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuation, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuration, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
     {
-        this.appId = configuation.GetValue<string>("AppId");
+        this.appId = configuration.GetValue<string>("AppId");
         if (string.IsNullOrEmpty(this.appId))
             throw new ArgumentNullException("AppId is required in configuration.");
 
@@ -51,16 +51,29 @@ public class TheaWebMiddleware
                 logEntityInfo.Exception = exception;
                 logLevel = LogLevel.Error;
             }
-            (logLevel, logEntityInfo.Response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
-            context.Response.Body = originalStream;
-            if (exception != null)
+
+            bool isJson = context.Response.ContentType?.ToLower().Contains("application/json") ?? true;
+            if (isJson)
             {
-                logEntityInfo.StatusCode = context.Response.StatusCode;
-                logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
-                logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
+                (logLevel, logEntityInfo.Response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
+                if (exception != null)
+                {
+                    logEntityInfo.StatusCode = context.Response.StatusCode;
+                    logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
+                    logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
+                }
+                context.Response.Body = originalStream;
+                await context.Response.WriteAsync(logEntityInfo.Response);
+            }
+            else
+            {
+                memoryStream.Position = 0;
+                await memoryStream.CopyToAsync(originalStream);
+                context.Response.Body = originalStream;
             }
             logEntityInfo.LogLevel = (int)logLevel;
-            await context.Response.WriteAsync(logEntityInfo.Response);
+            if (string.IsNullOrEmpty(logEntityInfo.Tag))
+                logEntityInfo.Tag = "TheaWebMiddleware";
             this.logger.LogEntity(logEntityInfo);
         }
     }
@@ -100,7 +113,7 @@ public class TheaWebMiddleware
             case (int)ApiType.HttpDelete:
             case (int)ApiType.HttpPost:
             case (int)ApiType.HttpPut:
-                logEntityInfo.Parameters = await this.ReadBody(context.Request.Body);
+                logEntityInfo.Request = await this.ReadBody(context.Request.Body);
                 break;
         }		
         logEntityInfo.Headers = context.Request.Headers.ToJson();

@@ -243,7 +243,7 @@ class RabbitConsumer
                                 Body = $"consumed {resultBody}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
                                 LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
                                 Exception = exception,
-                                Parameters = jsonBody,
+                                Request = jsonBody,
                                 Response = result,
                                 Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
                             });
@@ -317,6 +317,7 @@ class RabbitConsumer
                         };
                         this.parent.ProcessMessage(syncMessage);
                         await syncMessage.Waiter.Task;
+                        syncMessage.Waiter = null;
                     }
                     break;
                 default: throw new Exception("Unknown message type");

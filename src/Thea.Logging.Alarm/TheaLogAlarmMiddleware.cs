@@ -101,7 +101,8 @@ public class TheaLogAlarmMiddleware
             .AppendLine($"> Headers：{logEntityInfo.Headers}  ")
             .AppendLine($"> 耗  时：{logEntityInfo.Elapsed} ms  ")
             .AppendLine($"> Api地址：{logEntityInfo.ApiUrl}  ")
-            .AppendLine($"> 请求参数：{logEntityInfo.Parameters}  ");
+            .AppendLine($"> 认证信息：{logEntityInfo.Authorization}  ")
+            .AppendLine($"> 请求参数：{logEntityInfo.Request}  ");
         if (logEntityInfo.Exception == null)
             contentBuilder.AppendLine($"> 响应内容：{logEntityInfo.Response}  ");
         contentBuilder.AppendLine($"> 发生时间：{logEntityInfo.LogTime:yyyy-MM-dd HH:mm:ss}  ")

@@ -63,12 +63,10 @@ public class TheaLogger : ILogger
             if (string.IsNullOrEmpty(logEntityInfo.Authorization) && !string.IsNullOrEmpty(stateScope.Authorization))
                 logEntityInfo.Authorization = stateScope.Authorization;
 
-            if (string.IsNullOrEmpty(logEntityInfo.ApiUrl) && !string.IsNullOrEmpty(stateScope.ApiUrl))
-                logEntityInfo.ApiUrl = stateScope.ApiUrl;
             if (string.IsNullOrEmpty(logEntityInfo.Headers) && !string.IsNullOrEmpty(stateScope.Headers))
                 logEntityInfo.Headers = stateScope.Headers;
-            if (string.IsNullOrEmpty(logEntityInfo.Parameters) && !string.IsNullOrEmpty(stateScope.Parameters))
-                logEntityInfo.Parameters = stateScope.Parameters;
+            if (string.IsNullOrEmpty(logEntityInfo.Request) && !string.IsNullOrEmpty(stateScope.Request))
+                logEntityInfo.Request = stateScope.Request;
 
             if (string.IsNullOrEmpty(logEntityInfo.Host) && !string.IsNullOrEmpty(stateScope.Host))
                 logEntityInfo.Host = stateScope.Host;
@@ -86,12 +84,10 @@ public class TheaLogger : ILogger
                 stateScope.UserName = logEntityInfo.UserName;
             if (!string.IsNullOrEmpty(logEntityInfo.Authorization))
                 stateScope.Authorization = logEntityInfo.Authorization;
-            if (!string.IsNullOrEmpty(logEntityInfo.ApiUrl))
-                stateScope.ApiUrl = logEntityInfo.ApiUrl;
             if (!string.IsNullOrEmpty(logEntityInfo.Headers))
                 stateScope.Headers = logEntityInfo.Headers;
-            if (!string.IsNullOrEmpty(logEntityInfo.Parameters))
-                stateScope.Parameters = logEntityInfo.Parameters;
+            if (!string.IsNullOrEmpty(logEntityInfo.Request))
+                stateScope.Request = logEntityInfo.Request;
         }
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;

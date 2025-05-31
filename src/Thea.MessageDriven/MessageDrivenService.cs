@@ -122,6 +122,7 @@ class MessageDrivenService : IMessageDriven
                     {
                         var waiters = this.rpcWaiters.Values.Where(f => DateTime.Now.Subtract(f.CreatedAt) > this.rpcTimeout).ToList();
                         waiters.ForEach(f => f.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{DateTime.Now.Subtract(f.CreatedAt).TotalSeconds}s")));
+                        waiters.Clear();
                     }
                     if (this.messageQueue.TryDequeue(out var message))
                     {
@@ -245,7 +246,7 @@ class MessageDrivenService : IMessageDriven
             rabbitConsumers.ForEach(async f => await f.Shutdown());
         foreach (var rpcWaiter in this.rpcWaiters.Values)
             rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
-
+        this.rpcWaiters.Clear();
         if (this.task != null)
             this.task.Wait();
         this.cancellationSource.Dispose();
@@ -351,6 +352,7 @@ class MessageDrivenService : IMessageDriven
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
         this.messageQueue.Enqueue(theaMessage);
         var rpcMessage = rpcWaiter.Waiter.Task.Result;
+        rpcWaiter.Waiter = null;
         if (rpcMessage.Type == MessageType.RpcFailure)
             throw new Exception(rpcMessage.Body);
         return rpcMessage.Body.JsonTo<TResponse>();

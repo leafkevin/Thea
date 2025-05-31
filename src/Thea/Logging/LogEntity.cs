@@ -14,7 +14,7 @@ public class LogEntity
     public string ClientIp { get; set; }
     public string Host { get; set; }
     public string Headers { get; set; }
-    public string Parameters { get; set; }
+    public string Request { get; set; }
 
     public string UserId { get; set; }
     public string UserName { get; set; }
