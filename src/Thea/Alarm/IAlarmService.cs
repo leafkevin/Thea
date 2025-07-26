@@ -4,5 +4,6 @@ namespace Thea.Alarm;
 
 public interface IAlarmService
 {
-    Task PostAsync(string sceneKey, string title, string content);
+    Task PostAsync(string title, string content);
+    string Escape(string message);
 }

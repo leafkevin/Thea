@@ -20,6 +20,7 @@ class DingtalkAlarmService : IAlarmService
     private readonly IHttpClientFactory clientFactory;
     private readonly string token;
     private readonly string secret;
+    private readonly bool isEnabled;
 
     public DingtalkAlarmService(IConfiguration configuration, IHttpClientFactory clientFactory, ILogger<DingtalkAlarmService> logger)
     {
@@ -27,16 +28,17 @@ class DingtalkAlarmService : IAlarmService
         this.apiUrl = configuration.GetValue("Alarm:Url", "https://oapi.dingtalk.com/robot/send?access_token=");
         this.token = configuration.GetValue("Alarm:Token", string.Empty);
         this.secret = configuration.GetValue("Alarm:Secret", string.Empty);
+        this.isEnabled = configuration.GetValue("Alarm:IsEnabled", true);
         if (string.IsNullOrEmpty(token))
             throw new Exception("配置项Alarm:Token不能为null");
         this.logger = logger;
     }
-    public async Task PostAsync(string sceneKey, string title, string content)
+    public async Task PostAsync(string title, string content)
     {
         try
         {
+            if (!this.isEnabled) return;
             var builder = new StringBuilder();
-            content = content.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("`", "'");
             builder.Append("{\"msgtype\": \"markdown\",");
             builder.Append("\"markdown\":{\"title\":\"");
             builder.Append(title);
@@ -61,6 +63,8 @@ class DingtalkAlarmService : IAlarmService
             this.logger.LogTagError("DingtalkError", ex, $"post dingtalk url error, Content:{content}, Exception detail:{ex}");
         }
     }
+    public string Escape(string message)
+        => message.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("`", "'");
     private string Sign(out long timestamp)
     {
         timestamp = (DateTime.Now.ToUniversalTime().Ticks - 621355968000000000) / 10000;

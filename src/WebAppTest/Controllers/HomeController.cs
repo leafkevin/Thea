@@ -28,7 +28,16 @@ namespace WebAppTest.Controllers
             this.messageDriven = messageDriven;
             this.logger = logger;
         }
-
+        [HttpGet]
+        public async Task<TheaResponse> TestTimeout()
+        {
+            var cts = new TaskCompletionSource<string>();
+            await cts.WithTimeout(TimeSpan.FromSeconds(2));
+            Thread.Sleep(2500);
+            //this.logger.LogTagInformation("Index", "111111------------");
+            //await this.messageDriven.PublishAsync("cache.refresh", "1", "111");
+            return TheaResponse.Success;
+        }
         [HttpGet]
         public async Task<TheaResponse> Index()
         {

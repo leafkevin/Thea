@@ -33,11 +33,11 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(exchange, isUseRpc);
         return this;
     }
-    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector)
+    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isNeedTransfer = false)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo);
+        this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo, isNeedTransfer);
         return this;
     }
     public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)

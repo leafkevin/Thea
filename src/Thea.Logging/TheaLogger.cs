@@ -13,11 +13,13 @@ public class TheaLogger : ILogger
     private readonly LogLevel logLevel;
     private readonly LogLevel aspnetLogLevel;
     private readonly ILoggerProcessor processor;
+    private readonly bool isEnabled;
 
     public TheaLogger(string name, IConfiguration configuration, IHostEnvironment hostEnvironment, ILoggerProcessor processor)
     {
         if (name == null) throw new ArgumentNullException(nameof(name));
         this.appId = configuration["AppId"];
+        this.isEnabled = configuration.GetValue("Logging:IsEnabled", false);
         this.logLevel = configuration.GetValue("Logging:LogLevel:Default", LogLevel.Information);
         this.aspnetLogLevel = configuration.GetValue("Logging:LogLevel:Microsoft.AspNetCore", LogLevel.Error);
         if (appId == null) throw new ArgumentNullException(nameof(appId));
@@ -28,6 +30,7 @@ public class TheaLogger : ILogger
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
     {
+        if (!this.isEnabled) return;
         if (!this.IsEnabled(logLevel)) return;
         if (formatter == null)
             throw new ArgumentNullException(nameof(formatter));
@@ -89,6 +92,7 @@ public class TheaLogger : ILogger
             if (!string.IsNullOrEmpty(logEntityInfo.Request))
                 stateScope.Request = logEntityInfo.Request;
         }
+        //有手动传进来的耗时，不再计算
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
         this.processor.Execute(logEntityInfo);

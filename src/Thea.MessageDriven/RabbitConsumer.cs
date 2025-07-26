@@ -20,7 +20,7 @@ class RabbitConsumer
     private readonly MessageDrivenService parent;
     private readonly Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
-    private readonly string connectionId;
+    //private readonly string connectionId;
     private readonly QueueType queueType;
     private readonly int prefetchCount;
     private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
@@ -38,16 +38,18 @@ class RabbitConsumer
     public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false);
     public bool IsRunning => this.consumer?.IsRunning ?? false;
 
-    public RabbitConsumer(string queueName, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
+    public RabbitConsumer(string queueName, string consumerId, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
         this.parent = parent;
-        this.ConsumerId = ObjectId.NewId();
         this.QueueName = queueName;
-        this.connectionId = queueName;
+        this.ConsumerId = consumerId;
+        //if (queueType == QueueType.Message || queueType == QueueType.Transfer)
+        //    this.ConsumerId += $".{parent.ServiceId}.{workloadIndex}";
+        //this.connectionId = queueName;
         this.prefetchCount = prefetchCount;
         this.queueType = queueType;
-        if (queueType == QueueType.Message)
-            this.connectionId += $".{parent.ServiceId}";
+        //if (queueType == QueueType.Message)
+        //    this.connectionId += $".{parent.ServiceId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -98,7 +100,7 @@ class RabbitConsumer
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             ClientProperties = new Dictionary<string, object>()
             {
-                { "connection_name", this.connectionId},
+                { "connection_name", this.ConsumerId},
                 { "client_api", "Thea.MessageDriven" }
             }
         };
@@ -107,7 +109,7 @@ class RabbitConsumer
     {
         if (this.IsActivated) return;
         this.cancellationSource = new();
-        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.connectionId);
+        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
         this.channel = await this.connection.CreateChannelAsync();
         await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
         switch (this.queueType)
@@ -120,7 +122,7 @@ class RabbitConsumer
     {
         if (this.IsActivated) return;
         this.cancellationSource = new();
-        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.connectionId);
+        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
         this.channel = await this.connection.CreateChannelAsync();
 
         if (this.queueType == QueueType.Heartbeat || this.queueType == QueueType.RpcResult)
@@ -128,7 +130,6 @@ class RabbitConsumer
             await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
             await this.channel.QueueBindAsync(this.QueueName, exclusiveExchange, exclusiveBindingKey);
         }
-
         await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
         switch (this.queueType)
         {
@@ -203,6 +204,7 @@ class RabbitConsumer
                                 var parameters = TheaJsonSerializer.Deserialize(message.Body, parameterType);
                                 if (message.Type == MessageType.RpcMessage)
                                 {
+                                    Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                     //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
                                     var rpcResult = await typedHandler.Invoke(parameters);
                                     result = rpcResult.ToJson();
@@ -254,10 +256,12 @@ class RabbitConsumer
                             var rpcMessage = new Message
                             {
                                 MessageId = message.MessageId,
+                                From = message.From,
                                 Type = messageType,
                                 TraceId = message.TraceId,
                                 Body = result
                             };
+                            Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                             await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.From, rpcMessage.ToJson());
                         }
                         //RPC消息直接跳过，因为异常已经返回到前端了
@@ -296,7 +300,7 @@ class RabbitConsumer
                 case MessageType.Heartbeat:
                     if (message.From == this.parent.AppId)
                     {
-                        this.parent.ProcessMessage(new Message
+                        this.parent.TransferMessage(new Message
                         {
                             MessageId = message.MessageId,
                             Type = message.Type,
@@ -315,7 +319,7 @@ class RabbitConsumer
                             Body = message.Body,
                             Waiter = new()
                         };
-                        this.parent.ProcessMessage(syncMessage);
+                        this.parent.TransferMessage(syncMessage);
                         await syncMessage.Waiter.Task;
                         syncMessage.Waiter = null;
                     }
@@ -337,8 +341,10 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
+
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message<string>>();
+            Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             this.parent.SetRpcResult(message.MessageId, message);
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止
@@ -352,14 +358,34 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            //先暂停消费
-            if (this.cancellationSource.IsCancellationRequested)
-                return;
-            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            var message = jsonBody.JsonTo<Message>();
-            message.Waiter = new();
-            this.parent.ProcessMessage(message);
-            await message.Waiter.Task;
+            int retryTimes = 0;
+            while (retryTimes < 3)
+            {
+                if (this.cancellationSource.IsCancellationRequested)
+                    return;
+                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+                var message = jsonBody.JsonTo<Message>();
+                try
+                {
+                    message.Waiter = new();
+                    this.parent.TransferMessage(message);
+                    await message.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                }
+                catch (TimeoutException ex)
+                {
+                    this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message timeout 30s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    Console.WriteLine($"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    retryTimes++;
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    Console.WriteLine($"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    retryTimes++;
+                    continue;
+                }
+            }
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止
             if (this.isDeferClose)

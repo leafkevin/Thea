@@ -40,7 +40,7 @@ public class TheaLogAlarmMiddleware
             if (logEntityInfo.LogLevel < this.alarmLevel)
                 return;
 
-            var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, logEntityInfo.Body);
+            var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, logEntityInfo.Exception);
             if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))
             {
                 this.alarmInfos.TryAdd(hashKey, alarmInfo = new AlarmInfo
@@ -50,7 +50,7 @@ public class TheaLogAlarmMiddleware
                 });
                 this.Build(logEntityInfo, alarmInfo);
                 alarmInfo.SenceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
-                await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
+                await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
             }
             else
             {
@@ -59,7 +59,7 @@ public class TheaLogAlarmMiddleware
                 {
                     alarmInfo.FiredTimes++;
                     this.Build(logEntityInfo, alarmInfo);
-                    await this.alarmService.PostAsync(alarmInfo.SenceKey, alarmInfo.Header, alarmInfo.Content);
+                    await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
                     //十分钟后移除
                     this.alarmInfos.TryRemove(hashKey, out _);
                 }
@@ -85,31 +85,29 @@ public class TheaLogAlarmMiddleware
         var body = logEntityInfo.Body;
         if (logEntityInfo.Exception is Exception exception && exception != null)
             body = exception.Message;
-
+        Func<string, string> escape = mesage => this.alarmService.Escape(mesage);
         alarmInfo.Header = "告警";
         if (logEntityInfo.LogLevel > (int)LogLevel.Warning)
             alarmInfo.Header = "异常告警";
 
-        var logViewUrl = $"{this.logVisitUrl}thealogs-{logEntityInfo.LogTime.Date:yyyyMMdd}/{logEntityInfo.Id}";
         var contentBuilder = new StringBuilder()
-            .AppendLine($"[查看]({logViewUrl})  ")
-            .AppendLine("**日志信息**  ")
-            .AppendLine($"> TraceId：{logEntityInfo.TraceId}  ")
-            .AppendLine($"> 环  境：{logEntityInfo.Environment}  ")
-            .AppendLine($"> 应用ID：{logEntityInfo.AppId}  ")
-            .AppendLine($"> 用户ID：{logEntityInfo.UserId}  ")
-            .AppendLine($"> Headers：{logEntityInfo.Headers}  ")
-            .AppendLine($"> 耗  时：{logEntityInfo.Elapsed} ms  ")
-            .AppendLine($"> Api地址：{logEntityInfo.ApiUrl}  ")
-            .AppendLine($"> 认证信息：{logEntityInfo.Authorization}  ")
-            .AppendLine($"> 请求参数：{logEntityInfo.Request}  ");
+            .AppendLine("**日志信息** ")
+            .AppendLine($"> TraceId：{logEntityInfo.TraceId}")
+            .AppendLine($"> 环  境：{logEntityInfo.Environment}")
+            .AppendLine($"> 应用ID：{logEntityInfo.AppId}")
+            .AppendLine($"> 用户ID：{logEntityInfo.UserId}")
+            .AppendLine($"> Headers：{escape(logEntityInfo.Headers)}")
+            .AppendLine($"> 耗  时：{logEntityInfo.Elapsed} ms")
+            .AppendLine($"> Api地址：{escape(logEntityInfo.ApiUrl)}")
+            .AppendLine($"> 认证信息：{escape(logEntityInfo.Authorization)}")
+            .AppendLine($"> 请求参数：{escape(logEntityInfo.Request)}");
         if (logEntityInfo.Exception == null)
-            contentBuilder.AppendLine($"> 响应内容：{logEntityInfo.Response}  ");
-        contentBuilder.AppendLine($"> 发生时间：{logEntityInfo.LogTime:yyyy-MM-dd HH:mm:ss}  ")
-            .AppendLine($"> 触发次数：{alarmInfo.FiredTimes}  ").AppendLine();
+            contentBuilder.AppendLine($"> 响应内容：{escape(logEntityInfo.Response)}");
+        contentBuilder.AppendLine($"> 发生时间：{logEntityInfo.LogTime:yyyy-MM-dd HH:mm:ss}")
+            .AppendLine($"> 触发次数：{alarmInfo.FiredTimes}").AppendLine();
         if (logEntityInfo.Exception != null)
-            contentBuilder.AppendLine("**异常内容**  ").AppendLine($"> {logEntityInfo.Exception}  ");
-        else contentBuilder.AppendLine("**详细内容**  ").AppendLine($"> {body}  ");
+            contentBuilder.AppendLine("**异常内容**").AppendLine($"{escape(logEntityInfo.Exception.ToString())}");
+        else contentBuilder.AppendLine("**详细内容**").AppendLine($"{escape(body)}");
         alarmInfo.Content = contentBuilder.ToString();
     }
     class AlarmInfo

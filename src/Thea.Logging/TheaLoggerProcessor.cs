@@ -89,7 +89,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
                         this.lastPushedTime = DateTime.Now;
                     }
                     if (this.messageQueue.Count <= 0)
-                        Thread.Sleep(100);
+                        Thread.Sleep(1);
                 }
                 catch (Exception ex)
                 {
@@ -143,6 +143,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
     }
     private async Task SendToAsync(List<LogEntity> logs)
     {
+		if (!this.isEnabled) return;
         if (logs.Count <= 0) return;
         foreach (var logEntity in logs)
         {
@@ -158,8 +159,8 @@ public class TheaLoggerProcessor : ILoggerProcessor
         var result = await this.client.IndexManyAsync(logs, esIndex);
         if (!result.IsValidResponse)
         {
-            Console.WriteLine(result.DebugInformation);
-            Console.WriteLine(result.ElasticsearchServerError);
+            //Console.WriteLine(result.DebugInformation);
+            //Console.WriteLine(result.ElasticsearchServerError);
         }
     }
 }

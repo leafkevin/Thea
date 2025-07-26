@@ -64,9 +64,8 @@ public static class Startup
                  return contextAccessor.GetTraceId() ?? ObjectId.NewId();
              })
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
-             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
-             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward)
-             .UseLoadBalance(true, 1);
+             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward, true)
+             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward, true);
             //.UseRpcConsumer();
         });
     }

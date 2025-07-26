@@ -18,22 +18,22 @@ public class StatefulConsumer
     }
     public Task<string> RemoveCache(string key)
     {
-        Thread.Sleep(20);
+        //Thread.Sleep(10);
         //Console.WriteLine($"RemoveCache: {key}");
         //this.logger.LogInformation("2222222");
         return Task.FromResult(key);
     }
     public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {
-        Thread.Sleep(20);
+        //Thread.Sleep(10);
         //Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");
         //this.messageDriven.Request<string, string>("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
         this.messageDriven.Publish("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
         return Task.FromResult(awardInfo);
     }
-    public Task<TheaResponse> IssueAward(AwardInfo awardInfo)
+    public Task<TheaResponse<AwardInfo>> IssueAward(AwardInfo awardInfo)
     {
-        Thread.Sleep(20);
+        //Thread.Sleep(10);
         //Console.WriteLine($"IssueAward: 我已领取 {awardInfo.ToJson()}");
         return Task.FromResult(TheaResponse.Succeed(awardInfo));
     }

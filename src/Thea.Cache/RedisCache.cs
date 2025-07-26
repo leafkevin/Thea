@@ -1,4 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System;
 using System.Linq;
@@ -10,20 +12,24 @@ namespace Thea.Cache;
 public class RedisCache : IDistributedCache
 {
     private readonly string appId;
-    private readonly ConnectionMultiplexer connectionPool;
     private Func<string, int> databaseSelector;
+    private readonly ILogger<RedisCache> logger;
+    private readonly ConnectionMultiplexer connection;
 
-    public RedisCache(IConfiguration configuration)
+    public RedisCache(IServiceProvider serviceProvider)
     {
+        var configuration = serviceProvider.GetService<IConfiguration>();
+        var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
+        this.logger = loggerFactory.CreateLogger<RedisCache>();
         this.appId = configuration.GetValue<string>("AppId");
         var endPoints = configuration.GetSection("Redis:EndPoints").Get<string[]>();
         var password = configuration.GetValue<string>("Redis:Password");
-        var timeout = configuration.GetValue("Redis:Timeout", 10);
-        var syncTimeout = configuration.GetValue("Redis:SyncTimeout", 10);
-        var workerCount = configuration.GetValue("Redis:WorkerCount", 300);
+        var timeout = configuration.GetValue("Redis:Timeout", 10000);
+        var syncTimeout = configuration.GetValue("Redis:SyncTimeout", 10000);
+        var workerCount = configuration.GetValue("Redis:WorkerCount", 500);
         var keepAlive = configuration.GetValue("Redis:KeepAlive", 300);
-        var databaseIndex = configuration.GetValue("Redis:Database", -1);
-        this.databaseSelector = f => databaseIndex;
+        var databaseIndex = configuration.GetValue("Redis:Database", 0);
+        this.databaseSelector = f => 0;
 
         var ipEndPoints = new EndPointCollection();
         foreach (var endPoint in endPoints)
@@ -43,12 +49,13 @@ public class RedisCache : IDistributedCache
             }
             else ipEndPoints.Add(new IPEndPoint(ipAddress, int.Parse(values[1])));
         }
-        this.connectionPool = ConnectionMultiplexer.Connect(new ConfigurationOptions
+
+        this.connection = ConnectionMultiplexer.Connect(new ConfigurationOptions
         {
             EndPoints = ipEndPoints,
             Password = password,
-            ConnectTimeout = timeout * 1000,
-            SyncTimeout = syncTimeout * 1000,
+            ConnectTimeout = timeout,
+            SyncTimeout = syncTimeout,
             AbortOnConnectFail = false,
             KeepAlive = keepAlive,
             AllowAdmin = true,
@@ -65,7 +72,7 @@ public class RedisCache : IDistributedCache
         if (value == null)
             throw new ArgumentNullException(key);
 
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+        var database = connection.GetDatabase(this.databaseSelector(key));
         var randomSeconds = Random.Shared.Next(-60, 60);
         var expires = TimeSpan.FromMinutes(lifetimeMinutes).Add(TimeSpan.FromSeconds(randomSeconds));
         database.StringSet(key, value.ToJson(), expires);
@@ -76,7 +83,8 @@ public class RedisCache : IDistributedCache
             throw new ArgumentNullException(key);
         if (value == null)
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
         if (lifetimeMinutes == -1)
             await database.StringSetAsync(key, value.ToJson());
         else
@@ -91,7 +99,8 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
         var redisValue = database.StringGet(key);
         if (redisValue.IsNull)
         {
@@ -120,7 +129,8 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
         var redisValue = await database.StringGetAsync(key);
         if (redisValue.IsNull) return (false, default);
         return (true, redisValue.ToString().JsonTo<T>());
@@ -129,7 +139,8 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
         var redisValue = await database.StringGetAsync(key);
         if (redisValue.IsNull)
         {
@@ -144,7 +155,8 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
         var result = await database.StringIncrementAsync(key);
         //设置初始值
         if (initVavlue > result)
@@ -155,14 +167,15 @@ public class RedisCache : IDistributedCache
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+        var database = connection.GetDatabase(this.databaseSelector(key));
         database.KeyDelete(key);
     }
     public async Task RemoveAsync(string key)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        var database = connectionPool.GetDatabase(this.databaseSelector(key));
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
         await database.KeyDeleteAsync(key);
     }
 }
