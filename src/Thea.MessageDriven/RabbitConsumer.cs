@@ -1,15 +1,15 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
 using Thea.Json;
 using Thea.Logging;
 
@@ -20,7 +20,6 @@ class RabbitConsumer
     private readonly MessageDrivenService parent;
     private readonly Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
-    //private readonly string connectionId;
     private readonly QueueType queueType;
     private readonly int prefetchCount;
     private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
@@ -43,13 +42,8 @@ class RabbitConsumer
         this.parent = parent;
         this.QueueName = queueName;
         this.ConsumerId = consumerId;
-        //if (queueType == QueueType.Message || queueType == QueueType.Transfer)
-        //    this.ConsumerId += $".{parent.ServiceId}.{workloadIndex}";
-        //this.connectionId = queueName;
         this.prefetchCount = prefetchCount;
         this.queueType = queueType;
-        //if (queueType == QueueType.Message)
-        //    this.connectionId += $".{parent.ServiceId}";
         this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -300,7 +294,7 @@ class RabbitConsumer
                 case MessageType.Heartbeat:
                     if (message.From == this.parent.AppId)
                     {
-                        this.parent.TransferMessage(new Message
+                        this.parent.ProcessMessage(new Message
                         {
                             MessageId = message.MessageId,
                             Type = message.Type,
@@ -319,8 +313,30 @@ class RabbitConsumer
                             Body = message.Body,
                             Waiter = new()
                         };
-                        this.parent.TransferMessage(syncMessage);
-                        await syncMessage.Waiter.Task;
+                        int retryTimes = 0;
+                        while (retryTimes < 3)
+                        {
+                            try
+                            {
+                                this.parent.ProcessMessage(syncMessage);
+                                await syncMessage.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                                break;
+                            }
+                            catch (TimeoutException ex)
+                            {
+                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{message.Type} message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                Console.WriteLine($"{message.Type} message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                retryTimes++;
+                                continue;
+                            }
+                            catch (Exception ex)
+                            {
+                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{message.Type} message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                Console.WriteLine($"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                retryTimes++;
+                                continue;
+                            }
+                        }
                         syncMessage.Waiter = null;
                     }
                     break;
@@ -368,13 +384,13 @@ class RabbitConsumer
                 try
                 {
                     message.Waiter = new();
-                    this.parent.TransferMessage(message);
+                    this.parent.ProcessMessage(message);
                     await message.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
                     break;
                 }
                 catch (TimeoutException ex)
                 {
-                    this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message timeout 30s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                     Console.WriteLine($"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                     retryTimes++;
                     continue;
