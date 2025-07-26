@@ -320,20 +320,19 @@ class RabbitConsumer
                             {
                                 this.parent.ProcessMessage(syncMessage);
                                 await syncMessage.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                                retryTimes++;
                                 break;
                             }
                             catch (TimeoutException ex)
                             {
                                 this.logger.LogTagError("BindHeartbeatHandler", ex, $"{message.Type} message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                 Console.WriteLine($"{message.Type} message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                retryTimes++;
                                 continue;
                             }
                             catch (Exception ex)
                             {
                                 this.logger.LogTagError("BindHeartbeatHandler", ex, $"{message.Type} message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                 Console.WriteLine($"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                retryTimes++;
                                 continue;
                             }
                         }
@@ -386,20 +385,19 @@ class RabbitConsumer
                     message.Waiter = new();
                     this.parent.ProcessMessage(message);
                     await message.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                    retryTimes++;
                     break;
                 }
                 catch (TimeoutException ex)
                 {
                     this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                     Console.WriteLine($"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                    retryTimes++;
                     continue;
                 }
                 catch (Exception ex)
                 {
                     this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                     Console.WriteLine($"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                    retryTimes++;
                     continue;
                 }
             }
