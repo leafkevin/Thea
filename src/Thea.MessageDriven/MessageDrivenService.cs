@@ -623,10 +623,7 @@ class MessageDrivenService : IMessageDriven
         Type = MessageType.Logs,
         Body = logInfo
     });
-    internal void TransferMessage(Message message)
-    {
-        this.messageQueue.Enqueue(message);
-    }
+    internal void TransferMessage(Message message) => this.messageQueue.Enqueue(message);
     internal void SetRpcResult(string messageId, Message<string> result)
     {
         if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
