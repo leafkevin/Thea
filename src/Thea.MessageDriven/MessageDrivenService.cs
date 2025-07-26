@@ -806,6 +806,10 @@ class MessageDrivenService : IMessageDriven
                     }
                     continue;
                 }
+                //新扩容的队列，还在等待之前队列的消息消费完成，还未启动
+                if (this.waitStartingConsumers.TryGetValue(queueId, out var existingWaiter)
+                    && existingWaiter.Consumers.Exists(f => f.ConsumerId == consumerId))
+                    continue;
 
                 if (lastWorkloadTotal > 0 && i > lastWorkloadTotal)
                 {

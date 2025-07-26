@@ -370,6 +370,7 @@ class RabbitConsumer
                     message.Waiter = new();
                     this.parent.TransferMessage(message);
                     await message.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                    break;
                 }
                 catch (TimeoutException ex)
                 {
