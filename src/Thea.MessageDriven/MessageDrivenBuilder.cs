@@ -64,9 +64,4 @@ public class MessageDrivenBuilder
         this.messageDriven.UseTraceIdFetcher(traceIdFetcher);
         return this;
     }
-    public MessageDrivenBuilder UseLoadBalance(bool isForcePerInterval, int intervalMinutes = 10)
-    {
-        this.messageDriven.UseLoadBalance(isForcePerInterval, intervalMinutes);
-        return this;
-    }
 }

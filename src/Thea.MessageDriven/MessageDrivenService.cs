@@ -42,10 +42,8 @@ class MessageDrivenService : IMessageDriven
     private RabbitConsumer heartbeatConsumer;
     private RabbitConsumer rpcConsumer;
     private Func<string> traceIdFetcher;
-    private int lastHashCode = 0;
+    private string lastNodeIds = null;
     private int sacCount = 2;
-    private bool isForceLoadBalance = false;
-    private TimeSpan forceLoadBalanceInterval = TimeSpan.FromMinutes(10);
 
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
     private readonly Dictionary<string, Func<string, object, string>> exchangeSelectors = new();
@@ -613,11 +611,6 @@ class MessageDrivenService : IMessageDriven
     }
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal void UseTraceIdFetcher(Func<string> traceIdFetcher) => this.traceIdFetcher = traceIdFetcher;
-    internal void UseLoadBalance(bool isForceLoadBalancePerInterval, int intervalMinutes = 10)
-    {
-        this.isForceLoadBalance = isForceLoadBalancePerInterval;
-        this.forceLoadBalanceInterval = TimeSpan.FromMinutes(intervalMinutes);
-    }
     internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message
     {
         Type = MessageType.Logs,
@@ -746,7 +739,9 @@ class MessageDrivenService : IMessageDriven
             removedKeys.ForEach(f => this.heartbeats.TryRemove(f, out _));
         var nodeIds = this.heartbeats.Keys.ToList();
         nodeIds.Sort((x, y) => x.CompareTo(y));
-        Console.WriteLine($"可用节点：{string.Join(",", nodeIds)}");
+        var currentNodeIds = string.Join(",", nodeIds);
+        if (currentNodeIds != this.lastNodeIds)
+            Console.WriteLine($"可用节点：{currentNodeIds}");
 
         //先创建有状态队列SAC激活消费者
         var myQueues = this.queues.Where(f => this.localQueueIds.Contains(f.QueueId) && f.IsEnabled && f.IsStateful)
@@ -1084,7 +1079,7 @@ class MessageDrivenService : IMessageDriven
                 Console.WriteLine($"多余消费者{myRrabbitConsumer.ConsumerId}已关闭");
             }
         }
-        this.lastLoadBalanceTime = DateTime.Now;
+        this.lastNodeIds = currentNodeIds;
     }
     private async Task CreateQueueAndBinding(string queueName, bool isQuorum, bool isSac, bool isExclusive, string routingKey, List<Binding> myBindings)
     {
