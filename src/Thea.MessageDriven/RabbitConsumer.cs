@@ -198,7 +198,7 @@ class RabbitConsumer
                                 var parameters = TheaJsonSerializer.Deserialize(message.Body, parameterType);
                                 if (message.Type == MessageType.RpcMessage)
                                 {
-                                    Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                    //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                     //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
                                     var rpcResult = await typedHandler.Invoke(parameters);
                                     result = rpcResult.ToJson();
@@ -255,7 +255,7 @@ class RabbitConsumer
                                 TraceId = message.TraceId,
                                 Body = result
                             };
-                            Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                            //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                             await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.From, rpcMessage.ToJson());
                         }
                         //RPC消息直接跳过，因为异常已经返回到前端了
