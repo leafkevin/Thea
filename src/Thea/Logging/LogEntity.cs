@@ -9,6 +9,7 @@ public class LogEntity
     public string AppId { get; set; }
     public string Environment { get; set; }
     public int LogLevel { get; set; }
+    public string Source { get; set; }
     public int ApiType { get; set; }
     public string ApiUrl { get; set; }
     public string ClientIp { get; set; }

@@ -54,7 +54,9 @@ public sealed class TheaHttpMessageHandler : DelegatingHandler
         if (!request.Headers.Contains("TraceId"))
         {
             var context = this.contextAccessor.HttpContext;
-            var traceId = StateScope.State?.TraceId ?? context?.TraceIdentifier;
+            var traceId = context?.TraceIdentifier;
+            if (ScopeState.TryGetState(out var scopeState))
+                traceId = scopeState.TraceId;
             if (!string.IsNullOrEmpty(traceId))
                 request.Headers.Add("TraceId", traceId);
         }

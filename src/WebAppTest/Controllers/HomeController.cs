@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Thea;
@@ -20,13 +22,17 @@ namespace WebAppTest.Controllers
     public class HomeController : ControllerBase
     {
         private readonly IOrmDbFactory dbFactory;
+        private readonly IHttpClientFactory clientFactory;
         private readonly IMessageDriven messageDriven;
         private readonly ILogger logger;
-        public HomeController(IOrmDbFactory dbFactory, IMessageDriven messageDriven, ILogger<HomeController> logger)
+
+        public HomeController(IOrmDbFactory dbFactory, IMessageDriven messageDriven, IHttpClientFactory clientFactory, ILogger<HomeController> logger)
         {
             this.dbFactory = dbFactory;
+            this.clientFactory = clientFactory;
             this.messageDriven = messageDriven;
             this.logger = logger;
+            Console.WriteLine($"ILogger<HomeController> create instance");
         }
         [HttpGet]
         public async Task<TheaResponse> TestTimeout()
@@ -121,5 +127,42 @@ namespace WebAppTest.Controllers
             Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
             return TheaResponse.Succeed("ok");
         }
+        [HttpPost]
+        public async Task<TheaResponse> Test1(RequestParameters1 parameters)
+        {
+            var client = this.clientFactory.CreateClient();
+            var requestUrl = "http://localhost:5000/Home/Test2";
+            parameters.Index++;
+            var respMessage = await client.PostAsJsonAsync(requestUrl, new RequestParameters2
+            {
+                Index = 2,
+                Details = "call Test2",
+            });
+            var jsonResp = await respMessage.Content.ReadAsStringAsync();
+            return jsonResp.JsonTo<TheaResponse>();
+        }
+
+        [HttpPost]
+        public TheaResponse Test2(RequestParameters2 parameters)
+        {
+            //this.logger.BeginScope(new LogEntity
+            //{
+            //    TenantId = 123,
+            //    UserId = "UserId",
+            //    GameId = 456
+            //});
+            this.logger.LogInformation("In Test2, parameters: {parameters}", parameters.ToJson());
+            return TheaResponse.Succeed("call Test2, return response from Test2");
+        }
+    }
+    public class RequestParameters1
+    {
+        public int Index { get; set; }
+        public string Parameters { get; set; }
+    }
+    public class RequestParameters2
+    {
+        public int Index { get; set; }
+        public string Details { get; set; }
     }
 }

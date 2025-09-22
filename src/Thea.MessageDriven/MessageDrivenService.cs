@@ -130,17 +130,8 @@ class MessageDrivenService : IMessageDriven
                         {
                             case MessageType.Message:
                             case MessageType.RpcMessage:
-                                object theaMessage = new
-                                {
-                                    message.MessageId,
-                                    message.From,
-                                    message.Type,
-                                    message.TraceId,
-                                    message.Body,
-                                    message.ScheduleTimeUtc
-                                };
                                 if (message.ScheduleTimeUtc.HasValue)
-                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, theaMessage.ToJson());
+                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, message.ToJson());
                                 else
                                 {
                                     var myBindings = this.bindings.FindAll(f => f.ExchangeId == message.Exchange);
@@ -157,12 +148,13 @@ class MessageDrivenService : IMessageDriven
                                                     var hashKey = Farmhash.Hash32(message.RoutingKey);
                                                     routingKey = (uint)(hashKey % myQueue.WorkloadTotal);
                                                 }
-                                                await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), theaMessage.ToJson());
+                                                message.RoutingKey = routingKey.ToString();
+                                                await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), message.ToJson());
                                             }
                                             //转发时，要带上Exchange,RoutingKey
                                             else await this.rabbitProducer.Publish(Consts.DefaultExchange, $"{Consts.TransferExchange}.{message.Exchange}", message.ToJson());
                                         }
-                                        else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, theaMessage.ToJson());
+                                        else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
                                     }
                                 }
                                 //防止条件问题阻塞后续消费
@@ -270,11 +262,14 @@ class MessageDrivenService : IMessageDriven
             throw new ArgumentNullException(nameof(message));
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
             exchange = exchangeSelector.Invoke(exchange, message);
+        var traceId = string.Empty;
+        if (ScopeState.TryGetState(out var scopeState))
+            traceId = scopeState.TraceId;
         this.messageQueue.Enqueue(new Message
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Message,
-            TraceId = this.traceIdFetcher?.Invoke(),
+            TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -303,12 +298,16 @@ class MessageDrivenService : IMessageDriven
             serviceId = this.ServiceId;
         if (string.IsNullOrEmpty(messageId))
             messageId = ObjectId.NewId();
+
+        var traceId = string.Empty;
+        if (ScopeState.TryGetState(out var scopeState))
+            traceId = scopeState.TraceId;
         var theaMessage = new Message
         {
             MessageId = messageId,
             From = serviceId,
             Type = MessageType.RpcMessage,
-            TraceId = this.traceIdFetcher?.Invoke(),
+            TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -339,12 +338,16 @@ class MessageDrivenService : IMessageDriven
 
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
             exchange = exchangeSelector.Invoke(exchange, message);
+
+        var traceId = string.Empty;
+        if (ScopeState.TryGetState(out var scopeState))
+            traceId = scopeState.TraceId;
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
             From = this.ServiceId,
             Type = MessageType.RpcMessage,
-            TraceId = this.traceIdFetcher?.Invoke(),
+            TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -379,12 +382,15 @@ class MessageDrivenService : IMessageDriven
 
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
             exchange = exchangeSelector.Invoke(exchange, message);
+        var traceId = string.Empty;
+        if (ScopeState.TryGetState(out var scopeState))
+            traceId = scopeState.TraceId;
         var theaMessage = new Message
         {
             MessageId = ObjectId.NewId(),
             From = this.ServiceId,
             Type = MessageType.RpcMessage,
-            TraceId = this.traceIdFetcher?.Invoke(),
+            TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
             Body = message.ToJson()
@@ -412,11 +418,14 @@ class MessageDrivenService : IMessageDriven
 
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
             exchange = exchangeSelector.Invoke(exchange, message);
+        var traceId = string.Empty;
+        if (ScopeState.TryGetState(out var scopeState))
+            traceId = scopeState.TraceId;
         this.messageQueue.Enqueue(new Message
         {
             MessageId = ObjectId.NewId(),
             Type = MessageType.Message,
-            TraceId = this.traceIdFetcher?.Invoke(),
+            TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
             ScheduleTimeUtc = enqueueTimeUtc,
@@ -799,6 +808,7 @@ class MessageDrivenService : IMessageDriven
                         await myRabbitConsumer.Shutdown(true);
                         await myRabbitConsumer.Start();
                     }
+                    myRabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
                     continue;
                 }
                 //新扩容的队列，还在等待之前队列的消息消费完成，还未启动
@@ -947,6 +957,7 @@ class MessageDrivenService : IMessageDriven
                         await myRabbitConsumer.Shutdown(true);
                         await myRabbitConsumer.Start();
                     }
+                    myRabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
                     continue;
                 }
 
@@ -995,6 +1006,7 @@ class MessageDrivenService : IMessageDriven
                             await myRabbitConsumer.Shutdown(true);
                             await myRabbitConsumer.Start();
                         }
+                        myRabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
                         continue;
                     }
 

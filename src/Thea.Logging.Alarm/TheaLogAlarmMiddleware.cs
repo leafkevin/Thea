@@ -82,9 +82,6 @@ public class TheaLogAlarmMiddleware
     }
     private void Build(LogEntity logEntityInfo, AlarmInfo alarmInfo)
     {
-        var body = logEntityInfo.Body;
-        if (logEntityInfo.Exception is Exception exception && exception != null)
-            body = exception.Message;
         Func<string, string> escape = mesage => this.alarmService.Escape(mesage);
         alarmInfo.Header = "告警";
         if (logEntityInfo.LogLevel > (int)LogLevel.Warning)
@@ -107,7 +104,7 @@ public class TheaLogAlarmMiddleware
             .AppendLine($"> 触发次数：{alarmInfo.FiredTimes}").AppendLine();
         if (logEntityInfo.Exception != null)
             contentBuilder.AppendLine("**异常内容**").AppendLine($"{escape(logEntityInfo.Exception.ToString())}");
-        else contentBuilder.AppendLine("**详细内容**").AppendLine($"{escape(body)}");
+        else contentBuilder.AppendLine("**详细内容**").AppendLine($"{escape(logEntityInfo.Body)}");
         alarmInfo.Content = contentBuilder.ToString();
     }
     class AlarmInfo
