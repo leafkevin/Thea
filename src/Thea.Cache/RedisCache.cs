@@ -13,16 +13,14 @@ namespace Thea.Cache;
 public class RedisCache : IDistributedCache
 {
     private readonly string appId;
-    private Func<string, int> databaseSelector;
-    private readonly ILogger<RedisCache> logger;
+    private Func<string, int> databaseSelector; 
     private readonly ConnectionMultiplexer connection;
     private readonly ConcurrentDictionary<string, ConcurrentQueue<TaskCompletionSource<object>>> valueWaiters = new();
 
     public RedisCache(IServiceProvider serviceProvider)
     {
         var configuration = serviceProvider.GetService<IConfiguration>();
-        var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
-        this.logger = loggerFactory.CreateLogger<RedisCache>();
+        var loggerFactory = serviceProvider.GetService<ILoggerFactory>(); 
         this.appId = configuration.GetValue<string>("AppId");
         var endPoints = configuration.GetSection("Redis:EndPoints").Get<string[]>();
         var password = configuration.GetValue<string>("Redis:Password");
