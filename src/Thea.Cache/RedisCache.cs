@@ -4,13 +4,9 @@ using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Net;
-using System.Threading;
 using System.Threading.Tasks;
-using Thea.Logging;
 
 namespace Thea.Cache;
 
@@ -125,6 +121,7 @@ public class RedisCache : IDistributedCache
     {
         if (!this.TryGet<T>(key, out var result))
         {
+            //防止单进程缓存穿透
             var myWaiters = this.valueWaiters.GetOrAdd(key, f => new ConcurrentQueue<TaskCompletionSource<object>>());
             var myWaiter = new TaskCompletionSource<object>();
             myWaiters.Enqueue(myWaiter);
@@ -157,6 +154,7 @@ public class RedisCache : IDistributedCache
         var redisValue = await database.StringGetAsync(key);
         if (redisValue.IsNull)
         {
+            //防止单进程缓存穿透
             var myWaiters = this.valueWaiters.GetOrAdd(key, f => new ConcurrentQueue<TaskCompletionSource<object>>());
             var myWaiter = new TaskCompletionSource<object>();
             myWaiters.Enqueue(myWaiter);
