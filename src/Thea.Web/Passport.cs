@@ -17,10 +17,6 @@ class Passport : IPassport
     /// </summary>
     public string UserName { get; set; }
     /// <summary>
-    /// 租户类型
-    /// </summary>
-    public virtual string TenantType { get; set; }
-    /// <summary>
     /// 租户ID
     /// </summary>
     public virtual string TenantId { get; set; }
@@ -43,7 +39,6 @@ class Passport : IPassport
             this.UserId = user.FindFirst("sub")?.Value ?? user.FindFirst(netId)?.Value;
             this.UserAccount = user.FindFirst("acc")?.Value;
             this.UserName = user.FindFirst("name")?.Value;
-            this.TenantType = user.FindFirst("tenant_type")?.Value;
             this.TenantId = user.FindFirst("tenant")?.Value;
             var netEmail = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress";
             this.Email = user.FindFirst("email")?.Value ?? user.FindFirst(netEmail)?.Value;

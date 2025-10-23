@@ -15,10 +15,6 @@ public interface IPassport
     /// </summary>
     string UserAccount { get; }
     /// <summary>
-    /// 租户类型
-    /// </summary>
-    string TenantType { get; }
-    /// <summary>
     /// 租户ID
     /// </summary>
     string TenantId { get; }

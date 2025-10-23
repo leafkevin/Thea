@@ -252,6 +252,8 @@ class RabbitConsumer
                                 MessageId = message.MessageId,
                                 From = message.From,
                                 Type = messageType,
+                                Exchange = message.Exchange,
+                                RoutingKey = message.RoutingKey,
                                 TraceId = message.TraceId,
                                 Body = result
                             };
@@ -359,7 +361,7 @@ class RabbitConsumer
 
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
             var message = jsonBody.JsonTo<Message<string>>();
-            Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             this.parent.SetRpcResult(message.MessageId, message);
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止

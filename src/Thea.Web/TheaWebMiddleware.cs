@@ -19,6 +19,7 @@ public class TheaWebMiddleware
     private readonly RequestDelegate next;
     private readonly IResponseDecorator responseDecorator;
     private readonly ILogger<TheaWebMiddleware> logger;
+    private readonly List<string> skipUrls;
 
     public TheaWebMiddleware(RequestDelegate next, IConfiguration configuration, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
     {
@@ -26,6 +27,9 @@ public class TheaWebMiddleware
         if (string.IsNullOrEmpty(this.appId))
             throw new ArgumentNullException("AppId is required in configuration.");
 
+        this.skipUrls = configuration.GetSection("WebApi:SkipUrls").Get<List<string>>();
+        if (this.skipUrls != null && this.skipUrls.Count > 0)
+            this.skipUrls = this.skipUrls.ConvertAll(u => u.ToLower());
         this.next = next;
         this.responseDecorator = responseDecorator;
         this.logger = logger;
@@ -33,6 +37,12 @@ public class TheaWebMiddleware
 
     public async Task Invoke(HttpContext context)
     {
+        var url = context.Request.Path.Value?.ToLower();
+        if (this.skipUrls != null && this.skipUrls.Count > 0 && this.skipUrls.Contains(url))
+        {
+            await this.next(context);
+            return;
+        }
         var logLevel = LogLevel.Information;
         var originalStream = context.Response.Body;
         var logEntityInfo = await this.CreateLogEntity(context);
@@ -55,15 +65,20 @@ public class TheaWebMiddleware
             bool isJson = context.Response.ContentType?.ToLower().Contains("application/json") ?? true;
             if (isJson)
             {
-                (logLevel, logEntityInfo.Response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
+                (logLevel, var response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
                 if (exception != null)
                 {
                     logEntityInfo.StatusCode = context.Response.StatusCode;
                     logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
                     logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
                 }
+                else
+                {
+                    logEntityInfo.Body = response;
+                    logEntityInfo.Response = response;
+                }
                 context.Response.Body = originalStream;
-                await context.Response.WriteAsync(logEntityInfo.Response);
+                await context.Response.WriteAsync(response);
             }
             else
             {

@@ -1,7 +1,7 @@
-﻿using System;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System;
 
 namespace Thea.Logging;
 
@@ -27,13 +27,25 @@ public class TheaLogger : ILogger
         this.environment = hostEnvironment.EnvironmentName;
         this.processor = processor;
     }
+    public IDisposable BeginScope<TState>(TState state)
+    {
+        if (state == null || state is not LogEntity logEntityInfo)
+            return null;
 
+        ScopeState.Push(this.Initialize(logEntityInfo));
+        return new ScopeStateHolder(ScopeState.Pop);
+    }
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
     {
         if (!this.isEnabled) return;
         if (!this.IsEnabled(logLevel)) return;
         if (formatter == null)
             throw new ArgumentNullException(nameof(formatter));
+
+        //忽略 Microsoft 内部日志
+        var stateType = state.GetType();
+        if (stateType.FullName.StartsWith("Microsoft.Extensions.Logging.LoggerMessage"))
+            return;
 
         var logEntityInfo = state as LogEntity;
         if (logEntityInfo == null)
@@ -49,49 +61,7 @@ public class TheaLogger : ILogger
         }
         logEntityInfo.AppId = this.appId;
         logEntityInfo.Environment = this.environment;
-        if (StateScope.State != null)
-        {
-            var stateScope = StateScope.State;
-            if (string.IsNullOrEmpty(logEntityInfo.TraceId) && !string.IsNullOrEmpty(stateScope.TraceId))
-                logEntityInfo.TraceId = stateScope.TraceId;
-            if (string.IsNullOrEmpty(logEntityInfo.Tag) && !string.IsNullOrEmpty(stateScope.Tag))
-                logEntityInfo.Tag = stateScope.Tag;
-
-            if (string.IsNullOrEmpty(logEntityInfo.TenantId) && !string.IsNullOrEmpty(stateScope.TenantId))
-                logEntityInfo.TenantId = stateScope.TenantId;
-            if (string.IsNullOrEmpty(logEntityInfo.UserId) && !string.IsNullOrEmpty(stateScope.UserId))
-                logEntityInfo.UserId = stateScope.UserId;
-            if (string.IsNullOrEmpty(logEntityInfo.UserName) && !string.IsNullOrEmpty(stateScope.UserName))
-                logEntityInfo.UserName = stateScope.UserName;
-            if (string.IsNullOrEmpty(logEntityInfo.Authorization) && !string.IsNullOrEmpty(stateScope.Authorization))
-                logEntityInfo.Authorization = stateScope.Authorization;
-
-            if (string.IsNullOrEmpty(logEntityInfo.Headers) && !string.IsNullOrEmpty(stateScope.Headers))
-                logEntityInfo.Headers = stateScope.Headers;
-            if (string.IsNullOrEmpty(logEntityInfo.Request) && !string.IsNullOrEmpty(stateScope.Request))
-                logEntityInfo.Request = stateScope.Request;
-
-            if (string.IsNullOrEmpty(logEntityInfo.Host) && !string.IsNullOrEmpty(stateScope.Host))
-                logEntityInfo.Host = stateScope.Host;
-            if (string.IsNullOrEmpty(logEntityInfo.ClientIp) && !string.IsNullOrEmpty(stateScope.ClientIp))
-                logEntityInfo.ClientIp = stateScope.ClientIp;
-
-            //设置基础信息，不设置Tag
-            if (!string.IsNullOrEmpty(logEntityInfo.TraceId))
-                stateScope.TraceId = logEntityInfo.TraceId;
-            if (!string.IsNullOrEmpty(logEntityInfo.TenantId))
-                stateScope.TenantId = logEntityInfo.TenantId;
-            if (!string.IsNullOrEmpty(logEntityInfo.UserId))
-                stateScope.UserId = logEntityInfo.UserId;
-            if (!string.IsNullOrEmpty(logEntityInfo.UserName))
-                stateScope.UserName = logEntityInfo.UserName;
-            if (!string.IsNullOrEmpty(logEntityInfo.Authorization))
-                stateScope.Authorization = logEntityInfo.Authorization;
-            if (!string.IsNullOrEmpty(logEntityInfo.Headers))
-                stateScope.Headers = logEntityInfo.Headers;
-            if (!string.IsNullOrEmpty(logEntityInfo.Request))
-                stateScope.Request = logEntityInfo.Request;
-        }
+        this.Initialize(logEntityInfo);
         //有手动传进来的耗时，不再计算
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
@@ -100,16 +70,46 @@ public class TheaLogger : ILogger
 
     public bool IsEnabled(LogLevel logLevel)
     {
-        if (this.name.Contains("Microsoft.AspNetCore") && logLevel < this.aspnetLogLevel)
+        if (logLevel < this.aspnetLogLevel)
             return false;
         return logLevel >= this.logLevel;
     }
-    public IDisposable BeginScope<TState>(TState state)
+    private LogEntity Initialize(LogEntity logEntityInfo)
     {
-        if (state == null)
-            throw new ArgumentNullException(nameof(state));
-        if (state is LogEntity logEntity)
-            return StateScope.Push(logEntity);
-        return null;
+        if (!ScopeState.TryGetState(out var lastScopeState))
+            return logEntityInfo;
+
+        if (string.IsNullOrEmpty(logEntityInfo.TraceId) && !string.IsNullOrEmpty(lastScopeState.TraceId))
+            logEntityInfo.TraceId = lastScopeState.TraceId;
+        if (string.IsNullOrEmpty(logEntityInfo.Tag) && !string.IsNullOrEmpty(lastScopeState.Tag))
+            logEntityInfo.Tag = lastScopeState.Tag;
+
+        if (string.IsNullOrEmpty(logEntityInfo.TenantId) && !string.IsNullOrEmpty(lastScopeState.TenantId))
+            logEntityInfo.TenantId = lastScopeState.TenantId;
+        if (string.IsNullOrEmpty(logEntityInfo.UserId) && !string.IsNullOrEmpty(lastScopeState.UserId))
+            logEntityInfo.UserId = lastScopeState.UserId;
+        if (string.IsNullOrEmpty(logEntityInfo.UserName) && !string.IsNullOrEmpty(lastScopeState.UserName))
+            logEntityInfo.UserName = lastScopeState.UserName;
+        if (string.IsNullOrEmpty(logEntityInfo.Authorization) && !string.IsNullOrEmpty(lastScopeState.Authorization))
+            logEntityInfo.Authorization = lastScopeState.Authorization;
+
+        if (string.IsNullOrEmpty(logEntityInfo.ApiUrl) && !string.IsNullOrEmpty(lastScopeState.ApiUrl))
+            logEntityInfo.ApiUrl = lastScopeState.ApiUrl;
+        if (string.IsNullOrEmpty(logEntityInfo.Headers) && !string.IsNullOrEmpty(lastScopeState.Headers))
+            logEntityInfo.Headers = lastScopeState.Headers;
+        if (string.IsNullOrEmpty(logEntityInfo.Request) && !string.IsNullOrEmpty(lastScopeState.Request))
+            logEntityInfo.Request = lastScopeState.Request;
+
+        if (string.IsNullOrEmpty(logEntityInfo.Host) && !string.IsNullOrEmpty(lastScopeState.Host))
+            logEntityInfo.Host = lastScopeState.Host;
+        if (string.IsNullOrEmpty(logEntityInfo.ClientIp) && !string.IsNullOrEmpty(lastScopeState.ClientIp))
+            logEntityInfo.ClientIp = lastScopeState.ClientIp;
+        return logEntityInfo;
+    }
+    private struct ScopeStateHolder : IDisposable
+    {
+        private readonly Action onDispose;
+        public ScopeStateHolder(Action onDispose) => this.onDispose = onDispose;
+        public void Dispose() => this.onDispose.Invoke();
     }
 }
