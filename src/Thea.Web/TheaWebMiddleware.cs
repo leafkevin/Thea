@@ -94,7 +94,7 @@ public class TheaWebMiddleware
     }
     private async Task<LogEntity> CreateLogEntity(HttpContext context)
     {
-        var logEntityInfo = new LogEntity { Id = ObjectId.NewId() };
+        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
         if (context.Request.Headers.TryGetValue("TraceId", out var traceIds))
         {
             var traceId = traceIds.ToString();
@@ -130,7 +130,7 @@ public class TheaWebMiddleware
             case (int)ApiType.HttpPut:
                 logEntityInfo.Request = await this.ReadBody(context.Request.Body);
                 break;
-        }		
+        }
         logEntityInfo.Headers = context.Request.Headers.ToJson();
         if (context.Request.Headers.TryGetValue("Authorization", out var authorization))
         {
@@ -151,7 +151,7 @@ public class TheaWebMiddleware
         {
             if (stream == null) return string.Empty;
             stream.Position = 0;
-            var reader = new StreamReader(stream);
+            var reader = new StreamReader(stream, leaveOpen: true);
             var result = await reader.ReadToEndAsync();
             stream.Position = 0;
             return result;

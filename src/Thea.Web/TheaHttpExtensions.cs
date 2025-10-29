@@ -29,6 +29,13 @@ public static class TheaHttpExtensions
         httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         return httpClient;
     }
+    public static string GetAuthorization(this IHttpContextAccessor contextAccessor)
+    {
+        if (contextAccessor == null)
+            throw new ArgumentNullException(nameof(contextAccessor));
+        return contextAccessor.HttpContext.Request.Headers.Authorization;
+    }
+
     public static void WithToken(this HttpContent content, string token)
     {
         if (string.IsNullOrEmpty(token))
