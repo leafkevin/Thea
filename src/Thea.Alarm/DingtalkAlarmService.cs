@@ -64,7 +64,10 @@ class DingtalkAlarmService : IAlarmService
         }
     }
     public string Escape(string message)
-        => message.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("`", "'");
+    {
+        if (message == null) return string.Empty;
+        return message.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("`", "'");
+    }
     private string Sign(out long timestamp)
     {
         timestamp = (DateTime.Now.ToUniversalTime().Ticks - 621355968000000000) / 10000;
