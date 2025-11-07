@@ -1,15 +1,14 @@
-﻿using System;
-using System.Collections.Concurrent;
+﻿using Elastic.Clients.Elasticsearch;
+using Elastic.Transport;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using Elastic.Clients.Elasticsearch;
-using Elastic.Transport;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Thea.Logging;
 
@@ -143,13 +142,14 @@ public class TheaLoggerProcessor : ILoggerProcessor
     }
     public void Dispose()
     {
+        this.channel.Writer.Complete();
         this.stopTokenSource.Cancel();
         if (this.task != null) this.task.Wait();
         this.stopTokenSource.Dispose();
     }
     private async Task SendToAsync(List<LogEntity> logs)
     {
-		if (!this.isEnabled) return;
+        if (!this.isEnabled) return;
         if (logs.Count <= 0) return;
         foreach (var logEntity in logs)
         {
