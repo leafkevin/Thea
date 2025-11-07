@@ -59,7 +59,7 @@ class ConsumerWaiter
 class RpcWaiter
 {
     public string MessageId { get; set; }
-    public TaskCompletionSource<Message<string>> Waiter { get; set; } = new();
+    public TaskCompletionSource<Message<string>> Waiter { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public int TimeoutSeconds { get; set; } = 30;
 }

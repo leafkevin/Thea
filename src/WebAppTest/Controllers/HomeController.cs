@@ -41,9 +41,9 @@ namespace WebAppTest.Controllers
             int current = 0;
             for (int i = 0; i < totalCont; i++)
             {
-                _ = Task.Run(async () =>
+                _ = Task.Run(() =>
                 {
-                    await this.messageDriven.RequestAsync<string, long>("sequence", "1", "1");
+                    _ = this.messageDriven.RequestAsync<string, long>("sequence", "1", "1", 5);
                     Interlocked.Increment(ref current);
                     Console.WriteLine(Volatile.Read(ref current));
                 });
