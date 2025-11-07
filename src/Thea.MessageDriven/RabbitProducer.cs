@@ -105,7 +105,7 @@ class RabbitProducer : IDisposable
         }
         this.channelQueue.Add(channel);
     }
-    public async Task Publish(string exchange, string routingKey, string message)
+    public async Task PublishAsync(string exchange, string routingKey, BasicProperties properties, string message)
     {
         var channel = this.channelQueue.Take();
         var body = Encoding.UTF8.GetBytes(message);
@@ -127,7 +127,7 @@ class RabbitProducer : IDisposable
     }
     public async Task Shutdown()
     {
-        if (this.channels != null && this.channels.Count > 0)
+        if (this.channels != null && this.channels.IsEmpty)
         {
             foreach (var channel in this.channels.Values)
                 await channel.CloseAsync();

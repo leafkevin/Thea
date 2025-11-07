@@ -9,18 +9,12 @@ enum MessageType
 {
     Message,
     RpcMessage,
-    RpcResponse,
+    DelayedMessage,
     RpcFailure,
     Heartbeat,
     WaitStarting,
     WaitShutdowning,
     Logs
-}
-enum ChangeType
-{
-    None,
-    AddQueue,
-    RemoveQueue
 }
 enum QueueType
 {
@@ -32,7 +26,7 @@ enum QueueType
 class Message
 {
     public string MessageId { get; set; }
-    public MessageType Type { get; set; }
+    public string Type { get; set; }
     public string TraceId { get; set; }
     /// <summary>
     /// 心跳时是AppId，RpcMessage时，是NodeId
@@ -49,7 +43,7 @@ class Message<TBody>
 {
     public string MessageId { get; set; }
     public string From { get; set; }
-    public MessageType Type { get; set; }
+    public string Type { get; set; }
     public string TraceId { get; set; }
     public string Exchange { get; set; }
     public string RoutingKey { get; set; }

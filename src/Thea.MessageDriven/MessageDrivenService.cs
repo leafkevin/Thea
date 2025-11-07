@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Thea.Logging;
 
@@ -26,7 +27,7 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> transferWaiters = new();
-    private readonly ConcurrentQueue<Message> messageQueue = new();
+    private readonly Channel<Message> channel = Channel.CreateBounded<Message>(1000);
 
     private bool hasConsumer = false;
     private bool isAllowCreateQueue = false;
@@ -122,18 +123,36 @@ class MessageDrivenService : IMessageDriven
                         waiters.ForEach(f => f.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{DateTime.Now.Subtract(f.CreatedAt).TotalSeconds}s")));
                         waiters.Clear();
                     }
-                    if (this.messageQueue.TryDequeue(out var message))
+                    if (this.channel.Reader.TryRead(out var message))
                     {
                         string queueId = null;
                         string queueName = null;
                         switch (message.Type)
                         {
-                            case MessageType.Message:
-                            case MessageType.RpcMessage:
+                            case Consts.UserMessage:
+                            case Consts.RpcMessage:
+                                var properties = new BasicProperties
+                                {
+                                    Persistent = true,
+                                    Type = message.Type.ToString(),
+                                    DeliveryMode = DeliveryModes.Persistent,
+                                    AppId = this.AppId,
+                                    MessageId = message.MessageId,
+                                    Headers = new Dictionary<string, object> { { "TraceId", message.TraceId } }
+                                };
                                 if (message.ScheduleTimeUtc.HasValue)
-                                    this.rabbitProducer.Schedule(message.Exchange, message.RoutingKey, message.ScheduleTimeUtc.Value, message.ToJson());
+                                {
+                                    var delayMilliseconds = (long)message.ScheduleTimeUtc.Value.Subtract(DateTime.UtcNow).TotalMilliseconds;
+                                    properties.Headers.Add("x-delay", delayMilliseconds);
+                                }
                                 else
                                 {
+                                    if (message.Type == Consts.RpcMessage)
+                                    {
+                                        //RPC消息，设置回复队列和过期时间
+                                        properties.ReplyTo = $"{Consts.RpcExchange}.result.{message.From}";
+                                        properties.CorrelationId = message.MessageId;
+                                    }
                                     var myBindings = this.bindings.FindAll(f => f.ExchangeId == message.Exchange);
                                     foreach (var myBinding in myBindings)
                                     {
@@ -148,25 +167,24 @@ class MessageDrivenService : IMessageDriven
                                                     var hashKey = Farmhash.Hash32(message.RoutingKey);
                                                     routingKey = (uint)(hashKey % myQueue.WorkloadTotal);
                                                 }
-                                                message.RoutingKey = routingKey.ToString();
-                                                await this.rabbitProducer.Publish(message.Exchange, routingKey.ToString(), message.ToJson());
+                                                await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, message.Body.ToJson());
                                             }
                                             //转发时，要带上Exchange,RoutingKey
-                                            else await this.rabbitProducer.Publish(Consts.DefaultExchange, $"{Consts.TransferExchange}.{message.Exchange}", message.ToJson());
+                                            else await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, $"{Consts.TransferExchange}.{message.Exchange}", properties, message.Body.ToJson());
                                         }
-                                        else await this.rabbitProducer.Publish(message.Exchange, message.RoutingKey, message.ToJson());
+                                        else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, message.Body.ToJson());
                                     }
                                 }
                                 //防止条件问题阻塞后续消费
                                 message.Waiter?.TrySetResult(true);
                                 break;
-                            case MessageType.Heartbeat:
+                            case Consts.Heartbeat:
                                 //用户消息堆积，心跳消息也会阻塞，此节点会被认为是异常节点，将会从可用节点中移除
                                 var nodeId = (string)message.Body;
                                 this.heartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
                                 message.Waiter?.TrySetResult(true);
                                 break;
-                            case MessageType.WaitStarting:
+                            case Consts.WaitStarting:
                                 queueName = (string)message.Body;
                                 queueId = queueName.Substring(0, queueName.LastIndexOf('.'));
                                 if (this.waitStartingConsumers.TryGetValue(queueId, out var consumerWaiter))
@@ -189,7 +207,7 @@ class MessageDrivenService : IMessageDriven
                                 }
                                 message.Waiter?.TrySetResult(true);
                                 break;
-                            case MessageType.WaitShutdowning:
+                            case Consts.WaitShutdowning:
                                 queueName = (string)message.Body;
                                 if (this.waitShutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
                                 {
@@ -199,7 +217,7 @@ class MessageDrivenService : IMessageDriven
                                 }
                                 message.Waiter?.TrySetResult(true);
                                 break;
-                            case MessageType.Logs:
+                            case Consts.Logs:
                                 logs.Add(message.Body as ExecLog);
                                 break;
                         }
@@ -244,13 +262,7 @@ class MessageDrivenService : IMessageDriven
         this.cancellationSource.Dispose();
     }
 
-    public async Task PublishOrgAsync(string exchange, string queue, object orgMessage)
-    {
-        if (orgMessage == null)
-            throw new ArgumentNullException(nameof(orgMessage));
-        await this.rabbitProducer.Publish(exchange, queue, orgMessage.ToJson());
-    }
-    public void Publish<TMessage>(string exchange, string routingKey, TMessage message)
+    public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
@@ -265,34 +277,20 @@ class MessageDrivenService : IMessageDriven
         var traceId = string.Empty;
         if (ScopeState.TryGetState(out var scopeState))
             traceId = scopeState.TraceId;
-        this.messageQueue.Enqueue(new Message
+        await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = ObjectId.NewId(),
-            Type = MessageType.Message,
+            Type = Consts.UserMessage,
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = message.ToJson()
-        });
+            Body = message
+        }, cancellationToken);
     }
-    public Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message)
+    public async Task PublishRpcAsync<TMessage>(string serviceId, string messageId, string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
-        this.Publish(exchange, routingKey, message);
-        return Task.CompletedTask;
-    }
-    public void PublishRpc<TMessage>(string serviceId, string messageId, string exchange, string routingKey, TMessage message)
-    {
-        if (!this.bindings.Exists(f => f.ExchangeId == exchange))
-        {
-            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
-            this.logger.LogTagError("MessageDriven", errMessage);
-            throw new Exception(errMessage);
-        }
         if (message == null)
             throw new ArgumentNullException(nameof(message));
-
-        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
-            exchange = exchangeSelector.Invoke(exchange, message);
 
         if (string.IsNullOrEmpty(serviceId))
             serviceId = this.ServiceId;
@@ -302,24 +300,18 @@ class MessageDrivenService : IMessageDriven
         var traceId = string.Empty;
         if (ScopeState.TryGetState(out var scopeState))
             traceId = scopeState.TraceId;
-        var theaMessage = new Message
+        await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = messageId,
             From = serviceId,
-            Type = MessageType.RpcMessage,
+            Type = Consts.RpcMessage,
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = message.ToJson()
-        };
-        this.messageQueue.Enqueue(theaMessage);
+            Body = message
+        }, cancellationToken);
     }
-    public Task PublishRpcAsync<TMessage, TResponse>(string serviceId, string messageId, string exchange, string routingKey, TMessage message)
-    {
-        this.PublishRpc(serviceId, messageId, exchange, routingKey, message);
-        return Task.CompletedTask;
-    }
-    public TResponse Request<TMessage, TResponse>(string exchange, string routingKey, TMessage message, int timeoutSeconds = 30)
+    public async Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest request, int timeoutSeconds = 30, CancellationToken cancellationToken = default)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
         {
@@ -333,11 +325,11 @@ class MessageDrivenService : IMessageDriven
             this.logger.LogTagError("MessageDriven", errMessage);
             throw new Exception(errMessage);
         }
-        if (message == null)
-            throw new ArgumentNullException(nameof(message));
+        if (request == null)
+            throw new ArgumentNullException(nameof(request));
 
         if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
-            exchange = exchangeSelector.Invoke(exchange, message);
+            exchange = exchangeSelector.Invoke(exchange, request);
 
         var traceId = string.Empty;
         if (ScopeState.TryGetState(out var scopeState))
@@ -346,64 +338,23 @@ class MessageDrivenService : IMessageDriven
         {
             MessageId = ObjectId.NewId(),
             From = this.ServiceId,
-            Type = MessageType.RpcMessage,
+            Type = Consts.RpcMessage,
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = message.ToJson()
+            Body = request
         };
         var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId, TimeoutSeconds = timeoutSeconds };
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
-        this.messageQueue.Enqueue(theaMessage);
-        Console.WriteLine($"RpcMessage,Request Message, MessageId: {theaMessage.MessageId}, From:{this.ServiceId}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-
-        var rpcMessage = rpcWaiter.Waiter.Task.Result;
+        await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
+        //Console.WriteLine($"RpcMessage,Request Message, MessageId: {theaMessage.MessageId}, From:{this.ServiceId}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        var rpcMessage = await rpcWaiter.Waiter.WithTimeout(TimeSpan.FromSeconds(timeoutSeconds));
         rpcWaiter.Waiter = null;
-        if (rpcMessage.Type == MessageType.RpcFailure)
+        if (rpcMessage.Type == Consts.RpcFailure)
             throw new Exception(rpcMessage.Body);
         return rpcMessage.Body.JsonTo<TResponse>();
     }
-    public async Task<TResponse> RequestAsync<TMessage, TResponse>(string exchange, string routingKey, TMessage message, int timeoutSeconds = 30)
-    {
-        if (!this.bindings.Exists(f => f.ExchangeId == exchange))
-        {
-            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
-            this.logger.LogTagError("MessageDriven", errMessage);
-            throw new Exception(errMessage);
-        }
-        if (!this.isRpcConsumer)
-        {
-            var errMessage = $"未配置RPC消费者，请使用方法：UseRpcConsumer()配置RPC消费者";
-            this.logger.LogTagError("MessageDriven", errMessage);
-            throw new Exception(errMessage);
-        }
-        if (message == null)
-            throw new ArgumentNullException(nameof(message));
-
-        if (this.exchangeSelectors.TryGetValue(exchange, out var exchangeSelector))
-            exchange = exchangeSelector.Invoke(exchange, message);
-        var traceId = string.Empty;
-        if (ScopeState.TryGetState(out var scopeState))
-            traceId = scopeState.TraceId;
-        var theaMessage = new Message
-        {
-            MessageId = ObjectId.NewId(),
-            From = this.ServiceId,
-            Type = MessageType.RpcMessage,
-            TraceId = traceId,
-            Exchange = exchange,
-            RoutingKey = routingKey,
-            Body = message.ToJson()
-        };
-        var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId, TimeoutSeconds = timeoutSeconds };
-        this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
-        this.messageQueue.Enqueue(theaMessage);
-        var rpcMessage = await rpcWaiter.Waiter.Task;
-        if (rpcMessage.Type == MessageType.RpcFailure)
-            throw new Exception(rpcMessage.Body);
-        return rpcMessage.Body.JsonTo<TResponse>();
-    }
-    public void Schedule<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc)
+    public async Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, CancellationToken cancellationToken = default)
     {
         if (enqueueTimeUtc < DateTime.UtcNow)
             throw new Exception($"入队时间晚于现在时间，只能选择未来时间");
@@ -421,21 +372,16 @@ class MessageDrivenService : IMessageDriven
         var traceId = string.Empty;
         if (ScopeState.TryGetState(out var scopeState))
             traceId = scopeState.TraceId;
-        this.messageQueue.Enqueue(new Message
+        await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = ObjectId.NewId(),
-            Type = MessageType.Message,
+            Type = Consts.UserMessage,
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
             ScheduleTimeUtc = enqueueTimeUtc,
             Body = message.ToJson()
-        });
-    }
-    public Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc)
-    {
-        this.Schedule(exchange, routingKey, message, enqueueTimeUtc);
-        return Task.CompletedTask;
+        }, cancellationToken);
     }
     public void UseProducer(params string[] exchanges)
     {
@@ -620,12 +566,12 @@ class MessageDrivenService : IMessageDriven
     }
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal void UseTraceIdFetcher(Func<string> traceIdFetcher) => this.traceIdFetcher = traceIdFetcher;
-    internal void AddLogs(ExecLog logInfo) => this.messageQueue.Enqueue(new Message
+    internal void AddLogs(ExecLog logInfo) => this.channel.Writer.WriteAsync(new Message
     {
-        Type = MessageType.Logs,
+        Type = Consts.Logs,
         Body = logInfo
     });
-    internal void ProcessMessage(Message message) => this.messageQueue.Enqueue(message);
+    internal void ProcessMessage(Message message) => this.channel.Writer.WriteAsync(message);
     internal void SetRpcResult(string messageId, Message<string> result)
     {
         if (this.rpcWaiters.TryRemove(messageId, out var rpcWaiter))
@@ -731,13 +677,14 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task SendHeartbeat()
     {
-        await this.rabbitProducer.Publish(Consts.HeartbeatExchange, this.ServiceId, new Message
+        await this.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, this.ServiceId, new BasicProperties
         {
-            MessageId = ObjectId.NewId(),
-            Type = MessageType.Heartbeat,
-            From = this.AppId,
-            Body = this.ServiceId
-        }.ToJson());
+            Persistent = true,
+            Type = Consts.Heartbeat,
+            DeliveryMode = DeliveryModes.Persistent,
+            AppId = this.AppId,
+            MessageId = ObjectId.NewId()
+        }, this.ServiceId);
     }
     private async Task StartConsumers()
     {
@@ -845,16 +792,15 @@ class MessageDrivenService : IMessageDriven
                     for (int j = 0; j < lastWorkloadTotal; j++)
                     {
                         var queueName = $"{queueId}.{j}";
-                        var message = new Message
+                        var properties = new BasicProperties
                         {
-                            MessageId = ObjectId.NewId(),
-                            From = this.AppId,
-                            Type = MessageType.WaitStarting,
-                            //已经消费完毕的队列名
-                            Body = queueName
+                            Persistent = true,
+                            AppId = this.AppId,
+                            Type = Consts.WaitStarting,
+                            DeliveryMode = DeliveryModes.Persistent,
+                            MessageId = ObjectId.NewId()
                         };
-                        //使用默认的交换机，路由键为队列名
-                        await this.rabbitProducer.Publish(Consts.DefaultExchange, queueName, message.ToJson());
+                        await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, queueName, properties, queueName);
                         Console.WriteLine($"扩容队列{lastWorkloadTotal} -> {myQueue.WorkloadTotal}, 向队列{queueName}发送结束标志消息");
                     }
                 }
@@ -874,16 +820,16 @@ class MessageDrivenService : IMessageDriven
                         if (hasMessage)
                         {
                             this.waitShutdownConsumers[queueName] = rabbitConsumers;
-                            var message = new Message
-                            {
-                                MessageId = ObjectId.NewId(),
-                                From = this.AppId,
-                                Type = MessageType.WaitShutdowning,
-                                //已经消费完毕的队列名
-                                Body = queueName
-                            };
                             //使用默认的交换机，路由键为队列名
-                            await this.rabbitProducer.Publish(Consts.DefaultExchange, queueName, message.ToJson());
+                            var properties = new BasicProperties
+                            {
+                                Persistent = true,
+                                AppId = this.AppId,
+                                Type = Consts.WaitShutdowning,
+                                DeliveryMode = DeliveryModes.Persistent,
+                                MessageId = ObjectId.NewId()
+                            };
+                            await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, queueName, properties, queueName);
                             Console.WriteLine($"收缩队列{lastWorkloadTotal} -> {myQueue.WorkloadTotal}, 向队列{queueName}发送结束标志消息");
                         }
                         else

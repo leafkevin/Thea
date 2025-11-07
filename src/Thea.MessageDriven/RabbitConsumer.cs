@@ -170,33 +170,29 @@ class RabbitConsumer
             bool isSuccess = true;
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
 
-            var message = jsonBody.JsonTo<Message<string>>();
-            //兼容现非框架队列消息
-            if (message.MessageId == null)
-            {
-                message.MessageId = ObjectId.NewId();
-                message.Type = MessageType.Message;
-                message.Body = jsonBody;
-            }
             //内部消息，交给消息总分发处处理
             string result = null;
             var createdAt = DateTime.Now;
-            switch (message.Type)
+            var messageType = ea.BasicProperties.Type;
+            string traceId = null;
+            if (ea.BasicProperties.Headers != null && ea.BasicProperties.Headers.TryGetValue("TraceId", out var objValue))
+                traceId = Encoding.UTF8.GetString((byte[])ea.BasicProperties.Headers["TraceId"]);
+            switch (messageType)
             {
-                case MessageType.Message:
-                case MessageType.RpcMessage:
+                case Consts.UserMessage:
+                case Consts.RpcMessage:
                     {
                         //赋值TraceId，用于日志跟踪
-                        if (!string.IsNullOrEmpty(message.TraceId))
-                            this.logger.BeginScope(new LogEntity { TraceId = message.TraceId });
+                        if (!string.IsNullOrEmpty(traceId))
+                            this.logger.BeginScope(new LogEntity { TraceId = traceId });
 
                         while (iLoop < 3)
                         {
                             try
                             {
                                 (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
-                                var parameters = TheaJsonSerializer.Deserialize(message.Body, parameterType);
-                                if (message.Type == MessageType.RpcMessage)
+                                var parameters = TheaJsonSerializer.Deserialize(jsonBody, parameterType);
+                                if (messageType == Consts.RpcMessage)
                                 {
                                     //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                     //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
@@ -235,6 +231,7 @@ class RabbitConsumer
                             {
                                 Id = logId,
                                 ApiType = (int)ApiType.LocalInvoke,
+                                TraceId = traceId,
                                 Tag = "RabbitConsumer",
                                 Body = $"consumed {resultBody}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
                                 LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
@@ -244,32 +241,40 @@ class RabbitConsumer
                                 Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
                             });
                         }
-                        if (message.Type == MessageType.RpcMessage)
+                        if (messageType == Consts.RpcMessage)
                         {
-                            var messageType = isSuccess ? MessageType.RpcResponse : MessageType.RpcFailure;
-                            var rpcMessage = new Message
-                            {
-                                MessageId = message.MessageId,
-                                From = message.From,
-                                Type = messageType,
-                                Exchange = message.Exchange,
-                                RoutingKey = message.RoutingKey,
-                                TraceId = message.TraceId,
-                                Body = result
-                            };
                             //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                            await this.parent.rabbitProducer.Publish(Consts.RpcExchange, message.From, rpcMessage.ToJson());
+                            var replyToQueue = ea.BasicProperties.ReplyTo;
+                            var rpcType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
+                            var properties = new BasicProperties
+                            {
+                                Persistent = true,
+                                Type = rpcType,
+                                AppId = this.parent.AppId,
+                                DeliveryMode = DeliveryModes.Persistent,                            
+                                MessageId = ea.BasicProperties.MessageId,
+                                Headers = new Dictionary<string, object> { { "TraceId", traceId } }
+                            };
+                            await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, properties, result);
                         }
                         //RPC消息直接跳过，因为异常已经返回到前端了
-                        if (!isSuccess && message.Type == MessageType.Message)
+                        if (!isSuccess && messageType == Consts.UserMessage)
                             throw exception;
                     }
                     break;
-                case MessageType.WaitStarting:
-                case MessageType.WaitShutdowning:
-                    Console.WriteLine($"队列 {this.QueueName} 收到 {message.Type} 标志消息!!");
+                case Consts.WaitStarting:
+                case Consts.WaitShutdowning:
+                    Console.WriteLine($"队列 {this.QueueName} 收到 {messageType} 标志消息!!");
                     //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
-                    await this.parent.rabbitProducer.Publish(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, message.ToJson());
+                    await this.parent.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, new BasicProperties
+                    {
+                        Persistent = true,
+                        Type = messageType,
+                        DeliveryMode = DeliveryModes.Persistent,
+                        AppId = this.parent.AppId,
+                        MessageId = ea.BasicProperties.MessageId,
+                        Headers = new Dictionary<string, object> { { "TraceId", traceId } }
+                    }, jsonBody);
                     break;
                 default: throw new Exception("Unknown message type");
             }
@@ -289,30 +294,32 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            var message = jsonBody.JsonTo<Message<string>>();
-            switch (message.Type)
+            var body = Encoding.UTF8.GetString(ea.Body.Span);
+            var messageType = ea.BasicProperties.Type;
+            var appId = ea.BasicProperties.AppId;
+            var messageId = ea.BasicProperties.MessageId;
+            switch (messageType)
             {
-                case MessageType.Heartbeat:
-                    if (message.From == this.parent.AppId)
+                case Consts.Heartbeat:
+                    if (appId == this.parent.AppId)
                     {
                         this.parent.ProcessMessage(new Message
                         {
-                            MessageId = message.MessageId,
-                            Type = message.Type,
-                            Body = message.Body
+                            MessageId = messageId,
+                            Type = messageType,
+                            Body = body
                         });
                     }
                     break;
-                case MessageType.WaitStarting:
-                case MessageType.WaitShutdowning:
-                    if (message.From == this.parent.AppId)
+                case Consts.WaitStarting:
+                case Consts.WaitShutdowning:
+                    if (appId == this.parent.AppId)
                     {
                         var syncMessage = new Message
                         {
-                            MessageId = message.MessageId,
-                            Type = message.Type,
-                            Body = message.Body,
+                            MessageId = messageId,
+                            Type = messageType,
+                            Body = body,
                             Waiter = new()
                         };
                         int retryTimes = 0;
@@ -327,14 +334,14 @@ class RabbitConsumer
                             }
                             catch (TimeoutException ex)
                             {
-                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{message.Type} message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                Console.WriteLine($"{message.Type} message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{messageType} message timeout 15s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                Console.WriteLine($"{messageType} message timeout 15s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                 continue;
                             }
                             catch (Exception ex)
                             {
-                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{message.Type} message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                Console.WriteLine($"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{messageType} message exception, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                Console.WriteLine($"Transfer message exception, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                 continue;
                             }
                         }
@@ -359,10 +366,9 @@ class RabbitConsumer
             if (this.cancellationSource.IsCancellationRequested)
                 return;
 
-            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            var message = jsonBody.JsonTo<Message<string>>();
+            var body = Encoding.UTF8.GetString(ea.Body.Span);
             //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            this.parent.SetRpcResult(message.MessageId, message);
+            this.parent.SetRpcResult(ea.BasicProperties.MessageId, new Message<string> { Type = ea.BasicProperties.Type, Body = body });
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止
             if (this.isDeferClose)

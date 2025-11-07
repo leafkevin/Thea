@@ -34,6 +34,23 @@ namespace WebAppTest.Controllers
             this.logger = logger;
             Console.WriteLine($"ILogger<HomeController> create instance");
         }
+        [HttpPost]
+        public async Task<TheaResponse> TestSequences()
+        {
+            int totalCont = 999999;
+            int current = 0;
+            for (int i = 0; i < totalCont; i++)
+            {
+                _ = Task.Run(async () =>
+                {
+                    await this.messageDriven.RequestAsync<string, long>("sequence", "1", "1");
+                    Interlocked.Increment(ref current);
+                    Console.WriteLine(Volatile.Read(ref current));
+                });
+            }
+            SpinWait.SpinUntil(() => current == totalCont, TimeSpan.FromSeconds(1));
+            return TheaResponse.Success;
+        }
         [HttpGet]
         public async Task<TheaResponse> TestTimeout()
         {
@@ -90,7 +107,7 @@ namespace WebAppTest.Controllers
         public async Task<TheaResponse> TakeAward(string awardId)
         {
             var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
-            Console.WriteLine($"rpc.result:{result}");
+            Console.WriteLine($"TakeAward {result} completed");
             return TheaResponse.Succeed(result);
         }
         [HttpGet]
@@ -103,11 +120,11 @@ namespace WebAppTest.Controllers
                     var message = $"message-{i}-{j}";
                     //_ = this.messageDriven.PublishAsync("cache.refresh", "1", message);
                     //_ = this.messageDriven.PublishAsync("award.take", i.ToString(), new { AwardId = message, Quantity = i % 5 });
-                    _ = Task.Run(() =>
+                    _ = Task.Run(async () =>
                     {
                         var stopwatch = Stopwatch.StartNew();
                         stopwatch.Start();
-                        this.messageDriven.Publish("award.take", message, new AwardInfo { AwardId = message, Quantity = i % 5 });
+                        await this.messageDriven.PublishAsync("award.take", message, new AwardInfo { AwardId = message, Quantity = i % 5 });
                         stopwatch.Stop();
                         Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
                     });
@@ -122,7 +139,7 @@ namespace WebAppTest.Controllers
             //await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
             var stopwatch = Stopwatch.StartNew();
             stopwatch.Start();
-            this.messageDriven.Publish("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+            await this.messageDriven.PublishAsync("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
             stopwatch.Stop();
             Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
             return TheaResponse.Succeed("ok");
