@@ -14,7 +14,7 @@ public interface IMessageDriven
     Task RemoveQueue(string queueId, int minIndex, int maxIndex);
 
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default);
-    Task PublishRpcAsync<TMessage>(string serviceId, string messageId, string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default);
-    Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest message, int timeoutSeconds = 30, CancellationToken cancellationToken = default);
+    Task PublishRpcAsync<TRequest>(string serviceId, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default);
+    Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest request, int timeoutSeconds = 30, CancellationToken cancellationToken = default);
     Task ScheduleAsync<TMessage>(string exchange, string routingKey, TMessage message, DateTime enqueueTimeUtc, CancellationToken cancellationToken = default);
 }

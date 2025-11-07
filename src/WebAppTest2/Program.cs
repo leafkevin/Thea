@@ -32,7 +32,7 @@ app.UseSwaggerUI();
 app.UseMessageDriven(f =>
 {
     f.UseTrolleyRepository("default")
-    .UseProducer("cache.refresh", "award.take", "award.issue")
+    .UseProducer("cache.refresh", "award.issue")
     .UseProducer("award.take", true);
 });
 app.UseAuthorization();

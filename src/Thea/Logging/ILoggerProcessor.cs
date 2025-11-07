@@ -15,7 +15,7 @@ public class LoggerHandlerContext
 }
 public interface ILoggerProcessor
 {
-    void Execute(LogEntity logEntity);
+    Task ExecuteAsync(LogEntity logEntity);
     ILoggerProcessor AddHandler(Func<LoggerHandlerDelegate, LoggerHandlerDelegate> middleware);
     ILoggerProcessor AddHandler<TMiddleware>(params object[] args);
     void Build(LoggerHandlerDelegate first = null);

@@ -65,7 +65,7 @@ public class TheaLogger : ILogger
         //有手动传进来的耗时，不再计算
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
-        this.processor.Execute(logEntityInfo);
+        _ = this.processor.ExecuteAsync(logEntityInfo);
     }
 
     public bool IsEnabled(LogLevel logLevel)

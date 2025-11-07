@@ -26,23 +26,23 @@ public class HomeController : ControllerBase
             {
                 var message = $"message-{i}-{j}";
                 await this.messageDriven.PublishAsync("cache.refresh", "1", message);
-                await this.messageDriven.PublishAsync("award.take", i.ToString(), new AwardInfo { AwardId = message, Quantity = i % 5 });
-                Console.WriteLine($"Request time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+                var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", i.ToString(), new AwardInfo { AwardId = message, Quantity = i % 5 });
+                Console.WriteLine($"Request {result.ToJson()}, time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
             }
             Thread.Sleep(1000);
         }
         return TheaResponse.Succeed("ok");
     }
     [HttpGet]
-    public async Task<TheaResponse> PublishMessage(int awardId)
+    public async Task<TheaResponse> RequestMessage(int awardId)
     {
         //await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
         var stopwatch = Stopwatch.StartNew();
         stopwatch.Start();
-        await this.messageDriven.PublishAsync("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+        var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
         stopwatch.Stop();
         Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
-        return TheaResponse.Succeed("ok");
+        return TheaResponse.Succeed(result);
     }
     public class AwardInfo
     {

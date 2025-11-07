@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
@@ -17,7 +18,12 @@ public class TheaLoggerProcessor : ILoggerProcessor
     private readonly Task task;
     private LoggerHandlerDelegate next;
     private readonly CancellationTokenSource stopTokenSource = new();
-    private readonly ConcurrentQueue<LogEntity> messageQueue = new();
+    private readonly Channel<LogEntity> channel = Channel.CreateBounded<LogEntity>(new BoundedChannelOptions(200)
+    {
+        FullMode = BoundedChannelFullMode.Wait,
+        SingleWriter = false,
+        SingleReader = true
+    });
     private readonly List<Func<LoggerHandlerDelegate, LoggerHandlerDelegate>> components = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ElasticsearchClient client;
@@ -58,7 +64,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
             {
                 try
                 {
-                    if (this.messageQueue.TryDequeue(out var logEntityInfo))
+                    if (this.channel.Reader.TryRead(out var logEntityInfo))
                         logEntities.Add(logEntityInfo);
 
                     if (logEntities.Count >= batchCount
@@ -88,7 +94,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
                         logEntities.Clear();
                         this.lastPushedTime = DateTime.Now;
                     }
-                    if (this.messageQueue.Count <= 0)
+                    if (this.channel.Reader.Count <= 0)
                         Thread.Sleep(1);
                 }
                 catch (Exception ex)
@@ -100,7 +106,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
             }
         }, this.stopTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
-    public void Execute(LogEntity logEntity) => this.messageQueue.Enqueue(logEntity);
+    public async Task ExecuteAsync(LogEntity logEntity) => await this.channel.Writer.WriteAsync(logEntity);
     public ILoggerProcessor AddHandler(Func<LoggerHandlerDelegate, LoggerHandlerDelegate> middleware)
     {
         components.Add(middleware);

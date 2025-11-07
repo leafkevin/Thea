@@ -20,7 +20,6 @@ public class RedisCache : IDistributedCache
     public RedisCache(IServiceProvider serviceProvider)
     {
         var configuration = serviceProvider.GetService<IConfiguration>();
-        var loggerFactory = serviceProvider.GetService<ILoggerFactory>(); 
         this.appId = configuration.GetValue<string>("AppId");
         var endPoints = configuration.GetSection("Redis:EndPoints").Get<string[]>();
         var password = configuration.GetValue<string>("Redis:Password");
@@ -166,6 +165,18 @@ public class RedisCache : IDistributedCache
             return value;
         }
         return redisValue.ToString().JsonTo<T>();
+    }
+    public long Increment(string key, long initVavlue = 1)
+    {
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentNullException(key);
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
+        var result = database.StringIncrement(key);
+        //设置初始值
+        if (initVavlue > result)
+            result = database.StringIncrement(key, initVavlue - result);
+        return result;
     }
     public async Task<long> IncrementAsync(string key, long initVavlue = 1)
     {

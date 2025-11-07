@@ -1,5 +1,5 @@
-﻿using System;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
+using System;
 
 namespace Thea.MessageDriven;
 
@@ -50,11 +50,6 @@ public class MessageDrivenBuilder
     public MessageDrivenBuilder UseRpcConsumer()
     {
         this.messageDriven.UseRpcConsumer();
-        return this;
-    }
-    public MessageDrivenBuilder UseStrategy(string exchange, Func<string, object, string> exchangeSelector)
-    {
-        this.messageDriven.UseStrategy(exchange, exchangeSelector);
         return this;
     }
 }

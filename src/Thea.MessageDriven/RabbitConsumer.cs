@@ -18,7 +18,6 @@ namespace Thea.MessageDriven;
 class RabbitConsumer
 {
     private readonly MessageDrivenService parent;
-    private readonly Action<ExecLog> addLogsHandler;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
     private readonly int prefetchCount;
@@ -44,7 +43,6 @@ class RabbitConsumer
         this.ConsumerId = consumerId;
         this.prefetchCount = prefetchCount;
         this.queueType = queueType;
-        this.addLogsHandler = parent.AddLogs;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         var user = configuration.GetValue<string>("MessageDriven:User");
@@ -173,6 +171,7 @@ class RabbitConsumer
             //内部消息，交给消息总分发处处理
             string result = null;
             var createdAt = DateTime.Now;
+            var messageId = ea.BasicProperties.MessageId;
             var messageType = ea.BasicProperties.Type;
             string traceId = null;
             if (ea.BasicProperties.Headers != null && ea.BasicProperties.Headers.TryGetValue("TraceId", out var objValue))
@@ -214,17 +213,23 @@ class RabbitConsumer
                         if (this.IsLogEnabled || !isSuccess)
                         {
                             var logId = ObjectId.NewId();
-                            this.addLogsHandler.Invoke(new ExecLog
+                            await this.parent.ProcessMessage(new Message
                             {
-                                LogId = logId,
-                                ExchangeId = ea.Exchange,
-                                RoutingKey = ea.RoutingKey,
-                                Queue = this.QueueName,
-                                Body = jsonBody,
-                                IsSuccess = isSuccess,
-                                Result = result,
-                                RetryTimes = iLoop,
-                                UpdatedAt = DateTime.Now
+                                MessageId = messageId,
+                                Type = Consts.Logs,
+                                TraceId = traceId,
+                                Body = new ExecLog
+                                {
+                                    LogId = logId,
+                                    ExchangeId = ea.Exchange,
+                                    RoutingKey = ea.RoutingKey,
+                                    Queue = this.QueueName,
+                                    Body = jsonBody,
+                                    IsSuccess = isSuccess,
+                                    Result = result,
+                                    RetryTimes = iLoop,
+                                    UpdatedAt = DateTime.Now
+                                }
                             });
                             var resultBody = isSuccess ? "success" : "failed";
                             this.logger.LogEntity(new LogEntity
@@ -244,18 +249,17 @@ class RabbitConsumer
                         if (messageType == Consts.RpcMessage)
                         {
                             //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                            var replyToQueue = ea.BasicProperties.ReplyTo;
+                            var replyToQueue = $"{Consts.RpcExchange}.result.{ea.BasicProperties.ReplyTo}"; ;
                             var rpcType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
-                            var properties = new BasicProperties
+                            await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
                             {
                                 Persistent = true,
                                 Type = rpcType,
                                 AppId = this.parent.AppId,
-                                DeliveryMode = DeliveryModes.Persistent,                            
+                                DeliveryMode = DeliveryModes.Persistent,
                                 MessageId = ea.BasicProperties.MessageId,
                                 Headers = new Dictionary<string, object> { { "TraceId", traceId } }
-                            };
-                            await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, properties, result);
+                            }, result);
                         }
                         //RPC消息直接跳过，因为异常已经返回到前端了
                         if (!isSuccess && messageType == Consts.UserMessage)
@@ -272,8 +276,7 @@ class RabbitConsumer
                         Type = messageType,
                         DeliveryMode = DeliveryModes.Persistent,
                         AppId = this.parent.AppId,
-                        MessageId = ea.BasicProperties.MessageId,
-                        Headers = new Dictionary<string, object> { { "TraceId", traceId } }
+                        MessageId = ea.BasicProperties.MessageId
                     }, jsonBody);
                     break;
                 default: throw new Exception("Unknown message type");
@@ -295,15 +298,15 @@ class RabbitConsumer
             if (this.cancellationSource.IsCancellationRequested)
                 return;
             var body = Encoding.UTF8.GetString(ea.Body.Span);
+            var messageId = ea.BasicProperties.MessageId;
             var messageType = ea.BasicProperties.Type;
             var appId = ea.BasicProperties.AppId;
-            var messageId = ea.BasicProperties.MessageId;
             switch (messageType)
             {
                 case Consts.Heartbeat:
                     if (appId == this.parent.AppId)
                     {
-                        this.parent.ProcessMessage(new Message
+                        await this.parent.ProcessMessage(new Message
                         {
                             MessageId = messageId,
                             Type = messageType,
@@ -327,7 +330,7 @@ class RabbitConsumer
                         {
                             try
                             {
-                                this.parent.ProcessMessage(syncMessage);
+                                await this.parent.ProcessMessage(syncMessage);
                                 await syncMessage.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
                                 retryTimes++;
                                 break;
@@ -368,7 +371,7 @@ class RabbitConsumer
 
             var body = Encoding.UTF8.GetString(ea.Body.Span);
             //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            this.parent.SetRpcResult(ea.BasicProperties.MessageId, new Message<string> { Type = ea.BasicProperties.Type, Body = body });
+            this.parent.SetRpcResult(ea.BasicProperties.MessageId, new Message<string> { Body = body });
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止
             if (this.isDeferClose)
@@ -381,17 +384,36 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
+            if (this.cancellationSource.IsCancellationRequested)
+                return;
+
+            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+            string exchange = null, routingKey = null, traceId = null;
+            if (ea.BasicProperties.Headers.TryGetValue("Exchange", out var exchangeBytes))
+                exchange = Encoding.UTF8.GetString((byte[])exchangeBytes);
+            if (ea.BasicProperties.Headers.TryGetValue("RoutingKey", out var routingKeyBytes))
+                routingKey = Encoding.UTF8.GetString((byte[])routingKeyBytes);
+            if (ea.BasicProperties.Headers.TryGetValue("TraceId", out var traceIdBytes))
+                traceId = Encoding.UTF8.GetString((byte[])traceIdBytes);
+
+            var message = new Message
+            {
+                MessageId = ea.BasicProperties.MessageId,
+                Type = ea.BasicProperties.Type,
+                Exchange = exchange,
+                RoutingKey = routingKey,
+                TraceId = traceId,
+                From = ea.BasicProperties.ReplyTo,
+                Body = jsonBody.JsonTo<object>()
+            };
+
             int retryTimes = 0;
             while (retryTimes < 3)
             {
-                if (this.cancellationSource.IsCancellationRequested)
-                    return;
-                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-                var message = jsonBody.JsonTo<Message>();
                 try
                 {
-                    message.Waiter = new();
-                    this.parent.ProcessMessage(message);
+                    message.Waiter = new TaskCompletionSource<bool>();
+                    await this.parent.ProcessMessage(message);
                     await message.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
                     retryTimes++;
                     break;
