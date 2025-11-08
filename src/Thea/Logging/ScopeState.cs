@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Threading;
-using Thea.Logging;
+
+namespace Thea.Logging;
 
 public class ScopeState
 {

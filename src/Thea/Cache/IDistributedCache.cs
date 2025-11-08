@@ -12,6 +12,7 @@ public interface IDistributedCache
     T GetOrCreate<T>(string key, Func<T> cacheGetter, int lifetimeMinutes = 120);
     Task<(bool, T)> GetAsync<T>(string key);
     Task<T> GetOrCreateAsync<T>(string key, Func<Task<T>> cacheGetter, int lifetimeMinutes = 120);
+    long Increment(string key, long initVavlue = 1);
     Task<long> IncrementAsync(string key, long initVavlue = 1);
     void Remove(string key);
     Task RemoveAsync(string key);
