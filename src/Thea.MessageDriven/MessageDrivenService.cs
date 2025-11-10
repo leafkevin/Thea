@@ -294,21 +294,17 @@ class MessageDrivenService : IMessageDriven
             Body = message
         }, cancellationToken);
     }
-    public async Task PublishRpcAsync<TRequest>(string serviceId, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default)
+    public async Task PublishRpcAsync<TRequest>(string replyToQueue, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default)
     {
         if (!this.bindings.Exists(f => f.ExchangeId == exchange))
-        {
-            var errMessage = $"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册";
-            this.logger.LogTagError("MessageDriven", errMessage);
-            throw new Exception(errMessage);
-        }
+            throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
-        if (string.IsNullOrEmpty(serviceId))
-            serviceId = this.ServiceId;
+        if (string.IsNullOrEmpty(replyToQueue))
+            throw new ArgumentNullException(nameof(replyToQueue));
         if (string.IsNullOrEmpty(messageId))
-            messageId = ObjectId.NewId();
+            throw new ArgumentNullException(nameof(messageId));
 
         var traceId = string.Empty;
         if (ScopeState.TryGetState(out var scopeState))
@@ -316,7 +312,7 @@ class MessageDrivenService : IMessageDriven
         await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = messageId,
-            From = serviceId,
+            From = replyToQueue,
             Type = Consts.RpcMessage,
             TraceId = traceId,
             Exchange = exchange,
@@ -351,7 +347,7 @@ class MessageDrivenService : IMessageDriven
         await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = messageId,
-            From = this.ServiceId,
+            From = $"rpc.result.{this.ServiceId}",
             Type = Consts.RpcMessage,
             TraceId = traceId,
             Exchange = exchange,

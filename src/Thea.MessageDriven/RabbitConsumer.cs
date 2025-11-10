@@ -249,7 +249,7 @@ class RabbitConsumer
                         if (messageType == Consts.RpcMessage)
                         {
                             //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                            var replyToQueue = $"{Consts.RpcExchange}.result.{ea.BasicProperties.ReplyTo}";
+                            var replyToQueue = ea.BasicProperties.ReplyTo;
                             var rpcType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
                             await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
                             {
