@@ -1,23 +1,28 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using RabbitMQ.Client;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
 
 class RabbitProducer : IDisposable
 {
-    private static BasicProperties properties = new BasicProperties { Persistent = true };
     private IConnection connection;
-    private ConcurrentDictionary<int, IChannel> channels;
-    private BlockingCollection<IChannel> channelQueue;
+    private Channel<IChannel> channel;
     public string ConnectionName { get; private set; }
 
-    public static async Task<RabbitProducer> Create(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 10)
+    private RabbitProducer(Channel<IChannel> channel, IConnection connection, string connectionName)
+    {
+        this.channel = channel;
+        this.connection = connection;
+        this.ConnectionName = connectionName;
+    }
+
+    public static async Task<RabbitProducer> CreateAsync(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 15)
     {
         var connectionId = $"producer.{parent.ServiceId}";
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -38,36 +43,33 @@ class RabbitProducer : IDisposable
             }
         };
         var connection = await factory.CreateConnectionAsync(parent.tcpEndPoints, connectionId);
-        var channels = new ConcurrentDictionary<int, IChannel>();
-        var channelQueue = new BlockingCollection<IChannel>();
+        var myChannel = Channel.CreateBounded<IChannel>(new BoundedChannelOptions(channelSize)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleWriter = true,
+            SingleReader = true
+        });
         for (int i = 0; i < channelSize; i++)
         {
             var channel = await connection.CreateChannelAsync();
-            channels.TryAdd(i, channel);
-            channelQueue.Add(channel);
+            await myChannel.Writer.WriteAsync(channel);
         }
-        return new RabbitProducer
-        {
-            connection = connection,
-            channels = channels,
-            channelQueue = channelQueue,
-            ConnectionName = connectionId
-        };
+        return new RabbitProducer(myChannel, connection, connectionId);
     }
     public async Task CreateExchange(string exchangeName, string bindType, bool isDelay = false)
     {
-        var channel = this.channelQueue.Take();
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
         Dictionary<string, object> arguments = null;
         if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
-        await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
-        this.channelQueue.Add(channel);
+        await rabbitChannel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
+        await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task CreateQueue(string queueName, bool isQuorum, bool isSac, bool isExclusive)
     {
-        var channel = this.channelQueue.Take();
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
         IDictionary<string, object> arguments = null;
 
-        if (isExclusive) await channel.QueueDeclareAsync(queueName, false, true, false);
+        if (isExclusive) await rabbitChannel.QueueDeclareAsync(queueName, false, true, false);
         else
         {
             if (isSac || isQuorum) arguments = new Dictionary<string, object>();
@@ -75,68 +77,51 @@ class RabbitProducer : IDisposable
                 if (isSac) arguments.Add("x-single-active-consumer", true);
                 if (isQuorum) arguments.Add("x-queue-type", "quorum");
             }
-            await channel.QueueDeclareAsync(queueName, true, false, false, arguments);
+            await rabbitChannel.QueueDeclareAsync(queueName, true, false, false, arguments);
         }
-        this.channelQueue.Add(channel);
+        await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task BindExchange(string exchange, string toExchange, string routingKey)
     {
-        var channel = this.channelQueue.Take();
-        await channel.ExchangeBindAsync(toExchange, exchange, routingKey);
-        this.channelQueue.Add(channel);
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
+        await rabbitChannel.ExchangeBindAsync(toExchange, exchange, routingKey);
+        await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task BindQueue(string exchange, string queueName, string routingKey)
     {
-        var channel = this.channelQueue.Take();
-        await channel.QueueBindAsync(queueName, exchange, routingKey);
-        this.channelQueue.Add(channel);
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
+        await rabbitChannel.QueueBindAsync(queueName, exchange, routingKey);
+        await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task RemoveQueue(string queueName)
     {
-        var channel = this.channelQueue.Take();
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
         try
         {
-            await channel.QueuePurgeAsync(queueName);
-            await channel.QueueDeleteAsync(queueName);
+            await rabbitChannel.QueuePurgeAsync(queueName);
+            await rabbitChannel.QueueDeleteAsync(queueName);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"RemoveQueue error: {ex}");
         }
-        this.channelQueue.Add(channel);
+        await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task PublishAsync(string exchange, string routingKey, BasicProperties properties, string message)
     {
-        var channel = this.channelQueue.Take();
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
         var body = Encoding.UTF8.GetBytes(message);
-        await channel.BasicPublishAsync(exchange, routingKey, true, properties, body);
-        this.channelQueue.Add(channel);
-    }
-    public async void Schedule(string exchange, string routingKey, DateTime scheduleTimeUtc, string message)
-    {
-        var channel = this.channelQueue.Take();
-        var body = Encoding.UTF8.GetBytes(message);
-        var delayMilliseconds = scheduleTimeUtc.Subtract(DateTime.UtcNow).TotalMilliseconds;
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            Headers = new Dictionary<string, object> { { "x-delay", (long)delayMilliseconds } }
-        };
-        await channel.BasicPublishAsync(exchange, routingKey, true, properties, body);
-        this.channelQueue.Add(channel);
+        await rabbitChannel.BasicPublishAsync(exchange, routingKey, true, properties, body);
+        await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task Shutdown()
     {
-        if (this.channels != null && this.channels.IsEmpty)
+        if (this.channel != null)
         {
-            foreach (var channel in this.channels.Values)
-                await channel.CloseAsync();
-            this.channels.Clear();
+            while (this.channel.Reader.TryRead(out var rabbitChannel))
+                await rabbitChannel.CloseAsync();
         }
-        this.channels = null;
-        if (this.channelQueue != null && this.channelQueue.Count > 0)
-            while (this.channelQueue.TryTake(out _)) ;
-        this.channelQueue = null;
+        this.channel.Writer.TryComplete();
         if (this.connection != null)
             await this.connection.CloseAsync();
         this.connection = null;

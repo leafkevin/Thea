@@ -250,14 +250,13 @@ class MessageDrivenService : IMessageDriven
     }
     public void Shutdown()
     {
-        this.channel.Writer.Complete();
+        this.channel.Writer.TryComplete();
         this.cancellationSource.Cancel();
         this.rabbitProducer.Shutdown().Wait();
         foreach (var rabbitConsumers in this.consumers.Values)
             rabbitConsumers.ForEach(async f => await f.Shutdown());
         this.consumers.Clear();
         this.heartbeats.Clear();
-        this.rabbitProducer.Shutdown().Wait();
         this.heartbeatConsumer?.Shutdown().Wait();
         this.rpcConsumer?.Shutdown();
         this.waitStartingConsumers.Clear();
@@ -268,7 +267,6 @@ class MessageDrivenService : IMessageDriven
         this.rpcWaiters.Clear();
         if (this.task != null)
             this.task.Wait();
-        this.cancellationSource.Dispose();
     }
 
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
@@ -594,7 +592,7 @@ class MessageDrivenService : IMessageDriven
 
         //创建交换机和队列及绑定
         string queueName = null;
-        this.rabbitProducer = await RabbitProducer.Create(this, this.serviceProvider);
+        this.rabbitProducer = await RabbitProducer.CreateAsync(this, this.serviceProvider);
         if (this.isAllowCreateQueue)
         {
             foreach (var myQueue in this.queues)
