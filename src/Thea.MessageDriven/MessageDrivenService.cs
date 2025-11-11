@@ -401,7 +401,7 @@ class MessageDrivenService : IMessageDriven
             this.localExchanges.Add(exchange);
         if (isUseRpc && !this.rpcExchanges.Contains(exchange))
             this.rpcExchanges.Add(exchange);
-        this.UseRpcConsumer();
+        if (isUseRpc) this.UseRpcConsumer();
     }
     public void UseStatefulConsumer(string exchange, string queue, MethodInfo methodInfo, bool isNeedTransfer = false)
     {
