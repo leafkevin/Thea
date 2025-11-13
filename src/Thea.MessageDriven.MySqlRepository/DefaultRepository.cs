@@ -26,34 +26,32 @@ public class DefaultRepository : IMessageDrivenRepository
     {
         var cacheKey = $"{this.appId}.settings.all";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        var settings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
             var result = await repository.QueryAsync<Setting>(f => f.IsEnabled);
             if (result.Count <= 0) return null;
             return result;
         });
-        return settings;
     }
-    public virtual async Task<bool> Register(List<Setting> settings)
+    public virtual async Task Register(List<Setting> settings)
     {
-        bool refresh = false;
         var repository = this.dbFactory.Create(this.dbKey);
-        if (settings != null && settings.Count > 0)
-        {
-            await repository.Create<Setting>()
-                .IgnoreInto().WithBulk(settings)
-                .ExecuteAsync();
-            refresh = true;
-        }
+        await repository.Create<Setting>()
+            .IgnoreInto().WithBulk(settings)
+            .ExecuteAsync();
         //这里不能更新缓存，一更新缓存，只有生产者的组件，在队列没有创建好前，获得了这个配置，
-        //消息会被发送到一个不存在的队列，导致消息丢失
-        return refresh;
+        //消息会被发送到一个不存在的队列，导致消息丢失   
     }
-    public virtual async Task Change(string queueId, int workloadTotal)
+    public virtual async Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null)
     {
         var repository = this.dbFactory.Create(this.dbKey);
-        await repository.UpdateAsync<Setting>(new { QueueId = queueId, WorkloadTotal = workloadTotal });
+        await repository.Update<Setting>()
+            .Set(new { WorkloadTotal = workloadTotal })
+            .Set(prefetchCount.HasValue, f => f.PrefetchCount, prefetchCount)
+            .Set(isLogEnabled.HasValue, f => f.IsLogEnabled, isLogEnabled)
+            .Where(f => f.Queue == queue)
+            .ExecuteAsync();
         var cacheKey = $"{this.appId}.settings.all";
         await this.redisCache.RemoveAsync(cacheKey);
     }

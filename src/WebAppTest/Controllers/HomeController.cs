@@ -72,7 +72,7 @@ namespace WebAppTest.Controllers
         [HttpGet]
         public async Task<TheaResponse> ChangeQueue(string queueId, int workloadTotal)
         {
-            await this.messageDriven.ChangeQueue(queueId, workloadTotal);
+            await this.messageDriven.Change(queueId, workloadTotal);
             return TheaResponse.Success;
         }
         [HttpPost]

@@ -33,18 +33,18 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(exchange, isUseRpc);
         return this;
     }
-    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isNeedTransfer = false)
+    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isNeedTransfer = false, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo, isNeedTransfer);
+        this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo, isNeedTransfer, isSingleActiveConsumer, isQuorumQueue);
         return this;
     }
-    public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false)
+    public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, string routingKey = "#", bool isDelay = false, bool isQuorumQueue = true)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseSubscriber(exchange, queue, methodInfo, routingKey, isDelay);
+        this.messageDriven.UseSubscriber(exchange, queue, methodInfo, routingKey, isDelay, isQuorumQueue);
         return this;
     }
     public MessageDrivenBuilder UseRpcConsumer()

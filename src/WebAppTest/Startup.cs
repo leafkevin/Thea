@@ -53,7 +53,7 @@ public static class Startup
     public static void UseDomainServices(this IApplicationBuilder app, IConfiguration configuration)
     {
         app.UseTheaWeb();
-        var memoryCache = app.ApplicationServices.GetService<IMemoryCache>();
+        //var memoryCache = app.ApplicationServices.GetService<IMemoryCache>();
         //内存缓存更新
         app.UseMessageDriven(f =>
         {

@@ -10,7 +10,7 @@ public interface IMessageDriven
     void Start();
     void Shutdown();
 
-    Task ChangeQueue(string queueId, int workloadTotal);
+    Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null);
     Task RemoveQueue(string queueId, int minIndex, int maxIndex);
 
     Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default);

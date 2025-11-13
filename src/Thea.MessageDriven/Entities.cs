@@ -29,13 +29,13 @@ public class Setting
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
-    /// 是否有状态
-    /// </summary>
-    public bool IsStateful { get; set; }
-    /// <summary>
     /// 是否仲裁队列
     /// </summary>
     public bool IsQuorumQueue { get; set; }
+    /// <summary>
+    /// 是否有状态
+    /// </summary>
+    public bool IsStateful { get; set; }
     /// <summary>
     /// 是否需要转发
     /// </summary>

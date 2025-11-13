@@ -64,7 +64,7 @@ class RabbitProducer : IDisposable
         await rabbitChannel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
         await this.channel.Writer.WriteAsync(rabbitChannel);
     }
-    public async Task CreateQueue(string queueName, bool isQuorum, bool isSac, bool isExclusive)
+    public async Task CreateQueue(string queueName, bool isQuorumQueue, bool isSingleActiveConsumer, bool isExclusive)
     {
         var rabbitChannel = await this.channel.Reader.ReadAsync();
         IDictionary<string, object> arguments = null;
@@ -72,10 +72,10 @@ class RabbitProducer : IDisposable
         if (isExclusive) await rabbitChannel.QueueDeclareAsync(queueName, false, true, false);
         else
         {
-            if (isSac || isQuorum) arguments = new Dictionary<string, object>();
+            if (isSingleActiveConsumer || isQuorumQueue) arguments = new Dictionary<string, object>();
             {
-                if (isSac) arguments.Add("x-single-active-consumer", true);
-                if (isQuorum) arguments.Add("x-queue-type", "quorum");
+                if (isSingleActiveConsumer) arguments.Add("x-single-active-consumer", true);
+                if (isQuorumQueue) arguments.Add("x-queue-type", "quorum");
             }
             await rabbitChannel.QueueDeclareAsync(queueName, true, false, false, arguments);
         }
