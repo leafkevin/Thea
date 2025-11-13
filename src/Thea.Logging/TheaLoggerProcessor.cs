@@ -142,7 +142,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
     }
     public void Dispose()
     {
-        this.channel.Writer.Complete();
+        this.channel.Writer.TryComplete();
         this.stopTokenSource.Cancel();
         if (this.task != null) this.task.Wait();
         this.stopTokenSource.Dispose();

@@ -1,20 +1,25 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace Thea.MessageDriven;
 
 /// <summary>
-/// 绑定表，描述交换机与队列的绑定关系
+/// 配置表，描述所有的队列、交换机的配置信息
 /// </summary>
-public class Binding
+public class Setting
 {
     /// <summary>
-    /// 信箱ID
+    /// 配置ID
     /// </summary>
-    public string ExchangeId { get; set; }
+    public string SettingId { get; set; }
     /// <summary>
-    /// 队列ID
+    /// 队列
     /// </summary>
-    public string QueueId { get; set; }
+    public string Queue { get; set; }
+    /// <summary>
+    /// 交换机
+    /// </summary>
+    public List<string> Exchanges { get; set; }
     /// <summary>
     /// 绑定类型
     /// </summary>
@@ -24,6 +29,14 @@ public class Binding
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
+    /// 是否有状态
+    /// </summary>
+    public bool IsStateful { get; set; }
+    /// <summary>
+    /// 是否仲裁队列
+    /// </summary>
+    public bool IsQuorumQueue { get; set; }
+    /// <summary>
     /// 是否需要转发
     /// </summary>
     public bool IsNeedTransfer { get; set; }
@@ -32,51 +45,13 @@ public class Binding
     /// </summary>
     public bool IsDelay { get; set; }
     /// <summary>
-    /// 创建人
+    /// 是否单一激活消费者
     /// </summary>
-    public string CreatedBy { get; set; }
-    /// <summary>
-    /// 创建日期
-    /// </summary>
-    public DateTime CreatedAt { get; set; }
-    /// <summary>
-    /// 最后更新人
-    /// </summary>
-    public string UpdatedBy { get; set; }
-    /// <summary>
-    /// 最后更新日期
-    /// </summary>
-    public DateTime UpdatedAt { get; set; }
-}
-/// <summary>
-/// 队列表，描述所有的队列基本信息
-/// </summary>
-public class Queue
-{
-    /// <summary>
-    /// 队列ID
-    /// </summary>
-    public string QueueId { get; set; }
-    /// <summary>
-    /// 队列名称
-    /// </summary>
-    public string QueueName { get; set; }
-    /// <summary>
-    /// 是否有状态
-    /// </summary>
-    public bool IsStateful { get; set; }
+    public bool IsSingleActiveConsumer { get; set; }
     /// <summary>
     /// 工作负荷个数
     /// </summary>
     public int WorkloadTotal { get; set; }
-    /// <summary>
-    /// 是否单一激活消费者
-    /// </summary>
-    public bool IsSac { get; set; }
-    /// <summary>
-    /// 是否仲裁队列
-    /// </summary>
-    public bool IsQuorum { get; set; }
     /// <summary>
     /// 预取个数
     /// </summary>

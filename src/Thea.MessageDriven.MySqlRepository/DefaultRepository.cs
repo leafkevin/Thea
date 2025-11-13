@@ -22,43 +22,27 @@ public class DefaultRepository : IMessageDrivenRepository
         this.appId = configuration.GetValue<string>("AppId");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
-    public virtual async Task<(List<Queue>, List<Binding>)> GetConfigInfo(bool useCache = true)
+    public virtual async Task<List<Setting>> GetSettings(bool useCache = true)
     {
-        var cacheKey = $"{this.appId}.queue.all";
+        var cacheKey = $"{this.appId}.settings.all";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        var settings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
-            var result = await repository.QueryAsync<Queue>(f => f.IsEnabled);
+            var result = await repository.QueryAsync<Setting>(f => f.IsEnabled);
             if (result.Count <= 0) return null;
             return result;
         });
-        cacheKey = $"{this.appId}.binding.all";
-        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
-        {
-            var repository = this.dbFactory.Create(this.dbKey);
-            var result = await repository.QueryAsync<Binding>();
-            if (result.Count <= 0) return null;
-            return result;
-        });
-        return (queues, bindings);
+        return settings;
     }
-    public virtual async Task<bool> Register(List<Queue> queues, List<Binding> bindings)
+    public virtual async Task<bool> Register(List<Setting> settings)
     {
         bool refresh = false;
         var repository = this.dbFactory.Create(this.dbKey);
-        if (queues != null && queues.Count > 0)
+        if (settings != null && settings.Count > 0)
         {
-            await repository.Create<Queue>()
-                .IgnoreInto().WithBulk(queues)
-                .ExecuteAsync();
-            refresh = true;
-        }
-        if (bindings != null && bindings.Count > 0)
-        {
-            await repository.Create<Binding>()
-                .IgnoreInto().WithBulk(bindings)
+            await repository.Create<Setting>()
+                .IgnoreInto().WithBulk(settings)
                 .ExecuteAsync();
             refresh = true;
         }
@@ -66,25 +50,11 @@ public class DefaultRepository : IMessageDrivenRepository
         //消息会被发送到一个不存在的队列，导致消息丢失
         return refresh;
     }
-    public virtual async Task ChangeQueue(string queueId, int workloadTotal)
+    public virtual async Task Change(string queueId, int workloadTotal)
     {
         var repository = this.dbFactory.Create(this.dbKey);
-        await repository.UpdateAsync<Queue>(new { QueueId = queueId, WorkloadTotal = workloadTotal });
-        var cacheKey = $"{this.appId}.queue.all";
-        await this.redisCache.RemoveAsync(cacheKey);
-    }
-    public virtual async Task ChangeBindings(List<Binding> bindings)
-    {
-        var repository = this.dbFactory.Create(this.dbKey);
-        await repository.UpdateAsync<Binding>(bindings);
-        var cacheKey = $"{this.appId}.binding.all";
-        await this.redisCache.RemoveAsync(cacheKey);
-    }
-    public virtual async Task UpdateCache()
-    {
-        var cacheKey = $"{this.appId}.queue.all";
-        await this.redisCache.RemoveAsync(cacheKey);
-        cacheKey = $"{this.appId}.binding.all";
+        await repository.UpdateAsync<Setting>(new { QueueId = queueId, WorkloadTotal = workloadTotal });
+        var cacheKey = $"{this.appId}.settings.all";
         await this.redisCache.RemoveAsync(cacheKey);
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
