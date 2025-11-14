@@ -309,125 +309,55 @@ COMMENT ON TABLE "sys_lookup_value" IS  '参数值表，描述系统中所有的
 
 
 
-----------------TABLE [mds_cluster] BEGIN----------------
---DROP TABLE IF EXISTS "mds_cluster";
-CREATE TABLE "mds_cluster"
+-- -------------- TABLE [mds_setting] BEGIN----------------
+-- DROP TABLE IF EXISTS `mds_setting`;
+CREATE TABLE `mds_setting`
 (
-    "cluster_id" VARCHAR(50) NOT NULL,
-    "cluster_name" VARCHAR(50) NULL,
-    "url" VARCHAR(100) NULL,
-    "user" VARCHAR(100) NULL,
-    "password" VARCHAR(100) NULL,
-    "bind_type" VARCHAR(50) NULL,
-    "is_stateful" BOOLEAN NULL DEFAULT 'f',
-    "is_log_enabled" BOOLEAN NULL DEFAULT 'f',
-    "is_enabled" BOOLEAN NOT NULL DEFAULT 't',
-    "created_by" VARCHAR(50) NOT NULL,
-    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_by" VARCHAR(50) NOT NULL,
-    "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_mds_cluster PRIMARY KEY("cluster_id")
+    `setting_id` VARCHAR(50) NOT NULL COMMENT '配置ID',
+    `queue` VARCHAR(50) NULL COMMENT '队列名称',
+    `exchanges` VARCHAR(300) NULL COMMENT '交换机',
+    `bind_type` VARCHAR(50) NULL COMMENT '绑定类型',
+    `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
+    `is_quorum_queue` TINYINT(1) NULL DEFAULT 1 COMMENT '是否仲裁队列',
+    `is_stateful` TINYINT(1) NULL DEFAULT 0 COMMENT '是否有状态',
+    `is_single_active_consumer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否单一激活消费者',
+    `is_need_transfer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否需要转发',
+    `is_delay` TINYINT(1) NULL DEFAULT 0 COMMENT '是否延迟消息',
+    `workload_total` INT NULL COMMENT '工作负荷个数',
+    `prefetch_count` INT NULL DEFAULT 250 COMMENT '预取个数',
+    `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',
+    `is_enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `created_by` VARCHAR(50) NULL COMMENT '创建人',
+    `created_at` DATETIME NULL DEFAULT NOW() COMMENT '创建日期',
+    `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
+    `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
+    CONSTRAINT `pk_mds_setting` PRIMARY KEY(`setting_id`)
 );
-
-COMMENT ON COLUMN "mds_cluster"."cluster_id" IS '集群ID';
-COMMENT ON COLUMN "mds_cluster"."cluster_name" IS '集群名称';
-COMMENT ON COLUMN "mds_cluster"."url" IS '连接URL';
-COMMENT ON COLUMN "mds_cluster"."user" IS '用户名';
-COMMENT ON COLUMN "mds_cluster"."password" IS '密码';
-COMMENT ON COLUMN "mds_cluster"."bind_type" IS '绑定类型';
-COMMENT ON COLUMN "mds_cluster"."is_stateful" IS '是否有状态';
-COMMENT ON COLUMN "mds_cluster"."is_log_enabled" IS '是否开启日志';
-COMMENT ON COLUMN "mds_cluster"."is_enabled" IS '是否启用';
-COMMENT ON COLUMN "mds_cluster"."created_by" IS '创建人';
-COMMENT ON COLUMN "mds_cluster"."created_at" IS '创建日期';
-COMMENT ON COLUMN "mds_cluster"."updated_by" IS '最后更新人';
-COMMENT ON COLUMN "mds_cluster"."updated_at" IS '最后更新日期';
-COMMENT ON TABLE "mds_cluster" IS  '集群表，描述消息队列的一个集群基本信息';
-----------------TABLE [mds_cluster] END----------------
+ALTER TABLE `mds_setting` COMMENT '配置表，描述所有的队列、交换机绑定等信息';
+-- -------------- TABLE [mds_setting] END----------------
 
 
 
 
-----------------TABLE [mds_binding] BEGIN----------------
---DROP TABLE IF EXISTS "mds_binding";
-CREATE TABLE "mds_binding"
+-- -------------- TABLE [mds_log] BEGIN----------------
+-- DROP TABLE IF EXISTS `mds_log`;
+CREATE TABLE `mds_log`
 (
-    "binding_id" VARCHAR(50) NOT NULL,
-    "cluster_id" VARCHAR(50) NULL,
-    "exchange" VARCHAR(50) NULL,
-    "queue" VARCHAR(50) NULL,
-    "bind_type" VARCHAR(50) NULL,
-    "binding_key" VARCHAR(50) NULL,
-    "host_name" VARCHAR(100) NULL,
-    "prefetch_count" INTEGER NULL,
-    "is_single_active_consumer" BOOLEAN NOT NULL DEFAULT 'f',
-    "is_reply" BOOLEAN NOT NULL DEFAULT 'f',
-    "is_delay" BOOLEAN NOT NULL DEFAULT 'f',
-    "is_enabled" BOOLEAN NOT NULL DEFAULT 't',
-    "created_by" VARCHAR(50) NOT NULL,
-    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_by" VARCHAR(50) NOT NULL,
-    "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_mds_binding PRIMARY KEY("binding_id")
+    `log_id` VARCHAR(50) NOT NULL COMMENT '日志ID',
+    `trace_id` VARCHAR(50) NULL COMMENT '跟踪ID',
+    `exchange` VARCHAR(50) NULL COMMENT '交换机',
+    `queue` VARCHAR(50) NULL COMMENT '队列名称',
+    `routing_key` VARCHAR(50) NULL COMMENT '路由KEY',
+    `body` VARCHAR(50) NULL COMMENT '消息内容',
+    `is_success` TINYINT(1) NULL DEFAULT 0 COMMENT '是否成功',
+    `result` VARCHAR(4000) NULL COMMENT '执行结果',
+    `retry_times` INT NULL COMMENT '重试次数',
+    `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
+    `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
+    CONSTRAINT `pk_mds_log` PRIMARY KEY(`log_id`)
 );
-
-COMMENT ON COLUMN "mds_binding"."binding_id" IS '绑定ID';
-COMMENT ON COLUMN "mds_binding"."cluster_id" IS '集群ID';
-COMMENT ON COLUMN "mds_binding"."exchange" IS '信箱';
-COMMENT ON COLUMN "mds_binding"."queue" IS '队列';
-COMMENT ON COLUMN "mds_binding"."bind_type" IS '绑定类型';
-COMMENT ON COLUMN "mds_binding"."binding_key" IS '绑定KEY';
-COMMENT ON COLUMN "mds_binding"."host_name" IS '主机名称';
-COMMENT ON COLUMN "mds_binding"."prefetch_count" IS '预取个数';
-COMMENT ON COLUMN "mds_binding"."is_single_active_consumer" IS '是否单一激活消费者';
-COMMENT ON COLUMN "mds_binding"."is_reply" IS '是否应答队列';
-COMMENT ON COLUMN "mds_binding"."is_delay" IS '是否延时消费者';
-COMMENT ON COLUMN "mds_binding"."is_enabled" IS '是否启用';
-COMMENT ON COLUMN "mds_binding"."created_by" IS '创建人';
-COMMENT ON COLUMN "mds_binding"."created_at" IS '创建日期';
-COMMENT ON COLUMN "mds_binding"."updated_by" IS '最后更新人';
-COMMENT ON COLUMN "mds_binding"."updated_at" IS '最后更新日期';
-COMMENT ON TABLE "mds_binding" IS  '绑定信息表，描述消息队列每个消费者的绑定关系';
-----------------TABLE [mds_binding] END----------------
-
-
-
-
-----------------TABLE [mds_log] BEGIN----------------
---DROP TABLE IF EXISTS "mds_log";
-CREATE TABLE "mds_log"
-(
-    "log_id" VARCHAR(50) NOT NULL,
-    "cluster_id" VARCHAR(50) NULL,
-    "routing_key" VARCHAR(50) NULL,
-    "queue" VARCHAR(50) NULL,
-    "body" VARCHAR(50) NULL,
-    "is_success" BOOLEAN NULL DEFAULT 'f',
-    "result" VARCHAR(4000) NULL,
-    "retry_times" INTEGER NULL,
-    "is_enabled" BOOLEAN NOT NULL DEFAULT 't',
-    "created_by" VARCHAR(50) NOT NULL,
-    "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_by" VARCHAR(50) NOT NULL,
-    "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_mds_log PRIMARY KEY("log_id")
-);
-
-COMMENT ON COLUMN "mds_log"."log_id" IS '日志ID';
-COMMENT ON COLUMN "mds_log"."cluster_id" IS '集群ID';
-COMMENT ON COLUMN "mds_log"."routing_key" IS '路由KEY';
-COMMENT ON COLUMN "mds_log"."queue" IS '队列';
-COMMENT ON COLUMN "mds_log"."body" IS '消息内容';
-COMMENT ON COLUMN "mds_log"."is_success" IS '是否成功';
-COMMENT ON COLUMN "mds_log"."result" IS '执行结果';
-COMMENT ON COLUMN "mds_log"."retry_times" IS '重试次数';
-COMMENT ON COLUMN "mds_log"."is_enabled" IS '是否启用';
-COMMENT ON COLUMN "mds_log"."created_by" IS '创建人';
-COMMENT ON COLUMN "mds_log"."created_at" IS '创建日期';
-COMMENT ON COLUMN "mds_log"."updated_by" IS '最后更新人';
-COMMENT ON COLUMN "mds_log"."updated_at" IS '最后更新日期';
-COMMENT ON TABLE "mds_log" IS  '日志表，描述消息队列每个消费者的执行日志';
-----------------TABLE [mds_log] END----------------
+ALTER TABLE `mds_log` COMMENT '日志表，描述消息队列每个消费者的执行日志';
+-- -------------- TABLE [mds_log] END----------------
 
 
 
