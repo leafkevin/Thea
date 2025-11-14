@@ -221,13 +221,15 @@ class RabbitConsumer
                                 Body = new ExecLog
                                 {
                                     LogId = logId,
-                                    ExchangeId = ea.Exchange,
+                                    TraceId = traceId,
+                                    Exchange = ea.Exchange,
                                     RoutingKey = ea.RoutingKey,
                                     Queue = this.QueueName,
                                     Body = jsonBody,
                                     IsSuccess = isSuccess,
                                     Result = result,
                                     RetryTimes = iLoop,
+                                    UpdatedBy = "MessageDrivenService",
                                     UpdatedAt = DateTime.Now
                                 }
                             });

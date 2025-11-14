@@ -27,7 +27,7 @@
     var manager = Manager.Create(Host, GenerationEnvironment);
 
     var databaseName = "thea";
-    var tableNames = new[]{"mds_exchange","mds_queue","mds_log"};
+    var tableNames = new[]{"mds_setting","mds_log"};
     var removePrefixes = new[]{"mds_"};
     var separator = '_';
     var tableList = dbProvider.GetTableList(databaseName, tableNames);

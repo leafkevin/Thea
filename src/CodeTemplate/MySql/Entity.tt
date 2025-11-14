@@ -46,6 +46,8 @@ public class <#=className#>
 {
 <#foreach(ColumnInfo columnInfo in columnList){
 var propertyName = columnInfo.ColumnName;
+var segments = propertyName.Split('_');
+propertyName = string.Join("", segments.Select(f => dbProvider.ToBigCamel(f)));
 var memberInfo = dbProvider.MapMember(columnInfo);
 if(!String.IsNullOrEmpty(columnInfo.Description))
 {#>

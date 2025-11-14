@@ -512,7 +512,10 @@ class MessageDrivenService : IMessageDriven
         var dbSettings = await this.repository.GetSettings(false);
         List<Setting> registerSettings = null;
         if (dbSettings == null || dbSettings.Count == 0)
+        {
             registerSettings = this.settings;
+            dbSettings = this.settings;
+        }
         else
         {
             registerSettings = new List<Setting>();
