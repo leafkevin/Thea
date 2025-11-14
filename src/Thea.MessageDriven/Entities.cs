@@ -3,8 +3,9 @@ using System.Collections.Generic;
 
 namespace Thea.MessageDriven;
 
+
 /// <summary>
-/// 配置表，描述所有的队列、交换机的配置信息
+/// 配置表，描述所有的队列、交换机绑定等信息
 /// </summary>
 public class Setting
 {
@@ -13,7 +14,7 @@ public class Setting
     /// </summary>
     public string SettingId { get; set; }
     /// <summary>
-    /// 队列
+    /// 队列名称
     /// </summary>
     public string Queue { get; set; }
     /// <summary>
@@ -37,17 +38,17 @@ public class Setting
     /// </summary>
     public bool IsStateful { get; set; }
     /// <summary>
+    /// 是否单一激活消费者
+    /// </summary>
+    public bool IsSingleActiveConsumer { get; set; }
+    /// <summary>
     /// 是否需要转发
     /// </summary>
     public bool IsNeedTransfer { get; set; }
     /// <summary>
-    /// 是否延时消费者
+    /// 是否延迟消息
     /// </summary>
     public bool IsDelay { get; set; }
-    /// <summary>
-    /// 是否单一激活消费者
-    /// </summary>
-    public bool IsSingleActiveConsumer { get; set; }
     /// <summary>
     /// 工作负荷个数
     /// </summary>
@@ -91,17 +92,21 @@ public class ExecLog
     /// </summary>
     public string LogId { get; set; }
     /// <summary>
-    /// 信箱ID
+    /// 跟踪ID
     /// </summary>
-    public string ExchangeId { get; set; }
+    public string TraceId { get; set; }
+    /// <summary>
+    /// 交换机
+    /// </summary>
+    public string Exchange { get; set; }
+    /// <summary>
+    /// 队列名称
+    /// </summary>
+    public string Queue { get; set; }
     /// <summary>
     /// 路由KEY
     /// </summary>
     public string RoutingKey { get; set; }
-    /// <summary>
-    /// 队列
-    /// </summary>
-    public string Queue { get; set; }
     /// <summary>
     /// 消息内容
     /// </summary>
