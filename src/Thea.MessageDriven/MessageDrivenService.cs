@@ -263,7 +263,7 @@ class MessageDrivenService : IMessageDriven
 
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
-        if (!this.localExchanges.Exists(f => f == exchange))
+        if (!this.localExchanges.Contains(exchange))
             throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
@@ -282,7 +282,7 @@ class MessageDrivenService : IMessageDriven
     }
     public async Task PublishRpcAsync<TRequest>(string replyToQueue, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default)
     {
-        if (!this.localExchanges.Exists(f => f == exchange))
+        if (!this.localExchanges.Contains(exchange))
             throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (request == null)
             throw new ArgumentNullException(nameof(request));
@@ -308,7 +308,7 @@ class MessageDrivenService : IMessageDriven
     }
     public async Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest request, int timeoutSeconds = 30, CancellationToken cancellationToken = default)
     {
-        if (!this.localExchanges.Exists(f => f == exchange))
+        if (!this.localExchanges.Contains(exchange))
             throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (!this.isRpcConsumer)
             throw new Exception($"未配置RPC消费者，请使用方法：UseRpcConsumer()或是UseProducer(isUseRpc:true)配置RPC消费者");
@@ -343,7 +343,7 @@ class MessageDrivenService : IMessageDriven
     {
         if (enqueueTimeUtc < DateTime.UtcNow)
             throw new Exception($"入队时间晚于现在时间，只能选择未来时间");
-        if (!this.localExchanges.Exists(f => f == exchange))
+        if (!this.localExchanges.Contains(exchange))
             throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
