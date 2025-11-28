@@ -66,16 +66,7 @@ public class TheaWebMiddleware
             if (isJson)
             {
                 (logLevel, var response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
-                if (exception != null)
-                {
-                    logEntityInfo.Body = $"Request failed. An exception has happened. Status code: {logEntityInfo.StatusCode}";
-                    logEntityInfo.Response = TheaResponse.Fail(logEntityInfo.StatusCode, exception.ToString()).ToJson();
-                }
-                else
-                {
-                    logEntityInfo.Body = response;
-                    logEntityInfo.Response = response;
-                }
+                logEntityInfo.Response = response;
                 context.Response.Body = originalStream;
                 await context.Response.WriteAsync(response);
             }
