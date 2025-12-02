@@ -508,7 +508,8 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task Register()
     {
-        //捞取数据库或是配置中心的集群信息        
+        //捞取数据库或是配置中心的集群信息
+        await this.repository.Register(this.settings);
         var dbSettings = await this.repository.GetSettings(false);
         List<Setting> registerSettings = null;
         if (dbSettings == null || dbSettings.Count == 0)
@@ -525,9 +526,6 @@ class MessageDrivenService : IMessageDriven
                     registerSettings.Add(mySetting);
             }
         }
-        //代码中有配置集群信息，但是数据库或是配置中心没有，需要注册，如果需要删除集群配置，需要在代码中要删除
-        if (registerSettings.Count > 0)
-            await this.repository.Register(registerSettings);
 
         //创建交换机和队列及绑定
         string queueName = null;

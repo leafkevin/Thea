@@ -59,8 +59,8 @@ public static class Startup
         {
             f.UseTrolleyRepository("default")
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
-             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward, true)
-             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward, true)
+             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward, true, false)
+             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward, true, false)
              .UseStatefulConsumer<StatefulConsumer>("sequence", "sequence", f => f.UpdateSequence)
              .UseRpcConsumer();
         });

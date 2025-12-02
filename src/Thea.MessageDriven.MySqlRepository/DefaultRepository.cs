@@ -38,7 +38,17 @@ public class DefaultRepository : IMessageDrivenRepository
     {
         var repository = this.dbFactory.Create(this.dbKey);
         await repository.Create<Setting>()
-            .IgnoreInto().WithBulk(settings)
+            .WithBulk(settings)
+            .OnDuplicateKeyUpdate(t => t.Set(f => new
+            {
+                BindType = t.Values(f.BindType),
+                BindingKey = t.Values(f.BindingKey),
+                IsQuorumQueue = t.Values(f.IsQuorumQueue),
+                IsStateful = t.Values(f.IsStateful),
+                IsSingleActiveConsumer = t.Values(f.IsSingleActiveConsumer),
+                IsNeedTransfer = t.Values(f.IsNeedTransfer),
+                IsDelay = t.Values(f.IsDelay)
+            }))
             .ExecuteAsync();
         //这里不能更新缓存，一更新缓存，只有生产者的组件，在队列没有创建好前，获得了这个配置，
         //消息会被发送到一个不存在的队列，导致消息丢失   
