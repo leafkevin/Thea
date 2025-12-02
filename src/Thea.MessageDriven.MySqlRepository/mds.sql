@@ -2,7 +2,7 @@
 -- DROP TABLE IF EXISTS `mds_setting`;
 CREATE TABLE `mds_setting`
 (
-    `queue` VARCHAR(50) NULL COMMENT '队列名称',
+    `queue` VARCHAR(50) NOT NULL COMMENT '队列名称',
     `exchanges` VARCHAR(300) NULL COMMENT '交换机',
     `bind_type` VARCHAR(50) NULL COMMENT '绑定类型',
     `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
@@ -23,6 +23,7 @@ CREATE TABLE `mds_setting`
 );
 ALTER TABLE `mds_setting` COMMENT '配置表，描述所有的队列、交换机绑定等信息';
 -- -------------- TABLE [mds_setting] END----------------
+
 
 
 -- -------------- TABLE [mds_log] BEGIN----------------
