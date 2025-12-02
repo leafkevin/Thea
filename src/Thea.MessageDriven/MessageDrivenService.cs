@@ -400,7 +400,6 @@ class MessageDrivenService : IMessageDriven
         {
             this.settings.Add(myQueue = new Setting
             {
-                SettingId = ObjectId.NewId(),
                 Queue = queue,
                 BindType = Consts.TopicBindingType,
                 IsQuorumQueue = isQuorumQueue,
@@ -442,7 +441,6 @@ class MessageDrivenService : IMessageDriven
         {
             this.settings.Add(myQueue = new Setting
             {
-                SettingId = ObjectId.NewId(),
                 Queue = queue,
                 BindType = bindingType,
                 BindingKey = routingKey,
@@ -511,21 +509,6 @@ class MessageDrivenService : IMessageDriven
         //捞取数据库或是配置中心的集群信息
         await this.repository.Register(this.settings);
         var dbSettings = await this.repository.GetSettings(false);
-        List<Setting> registerSettings = null;
-        if (dbSettings == null || dbSettings.Count == 0)
-        {
-            registerSettings = this.settings;
-            dbSettings = this.settings;
-        }
-        else
-        {
-            registerSettings = new List<Setting>();
-            foreach (var mySetting in this.settings)
-            {
-                if (!dbSettings.Exists(f => f.Queue == mySetting.Queue))
-                    registerSettings.Add(mySetting);
-            }
-        }
 
         //创建交换机和队列及绑定
         string queueName = null;

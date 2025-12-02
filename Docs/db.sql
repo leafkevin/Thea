@@ -313,7 +313,7 @@ COMMENT ON TABLE "sys_lookup_value" IS  '参数值表，描述系统中所有的
 -- DROP TABLE IF EXISTS `mds_setting`;
 CREATE TABLE `mds_setting`
 (
-    `queue` VARCHAR(50) NULL COMMENT '队列名称',
+    `queue` VARCHAR(50) NOT NULL COMMENT '队列名称',
     `exchanges` VARCHAR(300) NULL COMMENT '交换机',
     `bind_type` VARCHAR(50) NULL COMMENT '绑定类型',
     `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
