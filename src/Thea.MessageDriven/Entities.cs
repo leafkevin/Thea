@@ -3,12 +3,15 @@ using System.Collections.Generic;
 
 namespace Thea.MessageDriven;
 
-
 /// <summary>
 /// 配置表，描述所有的队列、交换机绑定等信息
 /// </summary>
 public class Setting
 {
+    /// <summary>
+    /// 应用ID
+    /// </summary>
+    public string AppId { get; set; }
     /// <summary>
     /// 队列名称
     /// </summary>

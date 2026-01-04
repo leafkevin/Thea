@@ -29,7 +29,7 @@ public class DefaultRepository : IMessageDrivenRepository
         return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
-            var result = await repository.QueryAsync<Setting>(f => f.IsEnabled);
+            var result = await repository.QueryAsync<Setting>(f => f.AppId == this.appId && f.IsEnabled);
             if (result.Count <= 0) return null;
             return result;
         });
@@ -60,7 +60,7 @@ public class DefaultRepository : IMessageDrivenRepository
             .Set(new { WorkloadTotal = workloadTotal })
             .Set(prefetchCount.HasValue, f => f.PrefetchCount, prefetchCount)
             .Set(isLogEnabled.HasValue, f => f.IsLogEnabled, isLogEnabled)
-            .Where(f => f.Queue == queue)
+            .Where(new { AppId = this.appId, Queue = queue })
             .ExecuteAsync();
         var cacheKey = $"{this.appId}.settings.all";
         await this.redisCache.RemoveAsync(cacheKey);

@@ -26,7 +26,6 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitShutdownConsumers = new();
     private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> transferWaiters = new();
     private readonly Channel<Message> channel = Channel.CreateBounded<Message>(new BoundedChannelOptions(500)
     {
         FullMode = BoundedChannelFullMode.Wait,
@@ -52,11 +51,9 @@ class MessageDrivenService : IMessageDriven
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
     private readonly IServiceProvider serviceProvider;
     private readonly ILogger<MessageDrivenService> logger;
-    private readonly TimeSpan rpcTimeout;
     private IMessageDrivenRepository repository;
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
-    private DateTime lastLoadBalanceTime = DateTime.MinValue;
 
     internal RabbitProducer rabbitProducer;
     internal List<AmqpTcpEndpoint> tcpEndPoints;
@@ -84,7 +81,6 @@ class MessageDrivenService : IMessageDriven
         this.isAllowCreateExchange = configuration.GetValue("MessageDriven:IsAllowCreateExchange", true);
         this.isAllowCreateBinding = configuration.GetValue("MessageDriven:IsAllowCreateBinding", true);
         this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
-        this.rpcTimeout = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:RpcTimeout", 30));
         this.sacCount = configuration.GetValue("MessageDriven:SacCount", 2);
         this.ServiceId = ObjectId.NewId();
 
@@ -400,6 +396,7 @@ class MessageDrivenService : IMessageDriven
         {
             this.settings.Add(myQueue = new Setting
             {
+                AppId = this.AppId,
                 Queue = queue,
                 BindType = Consts.TopicBindingType,
                 IsQuorumQueue = isQuorumQueue,
@@ -441,6 +438,7 @@ class MessageDrivenService : IMessageDriven
         {
             this.settings.Add(myQueue = new Setting
             {
+                AppId = this.AppId,
                 Queue = queue,
                 BindType = bindingType,
                 BindingKey = routingKey,
