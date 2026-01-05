@@ -42,7 +42,7 @@ class MessageDrivenService : IMessageDriven
     private List<string> localQueues = new();
     private List<string> rpcExchanges = new();
     private List<Setting> settings = new();
-    private List<Setting> lastSettings = null;
+    private List<Setting> lastSettings = new();
     private RabbitConsumer heartbeatConsumer;
     private RabbitConsumer rpcConsumer;
     private string lastNodeIds = null;
@@ -589,20 +589,18 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task Initialize()
     {
-        this.lastSettings = this.settings;
+        this.lastSettings.Clear();
         var dbSettings = await this.repository.GetSettings();
-        this.settings = new();
-        foreach (var setting in this.lastSettings)
+        foreach (var mySetting in this.settings)
         {
-            var mySetting = setting.Clone();
-            var dbSetting = dbSettings.Find(f => f.Queue == setting.Queue);
+            this.lastSettings.Add(mySetting.Clone());
+            var dbSetting = dbSettings.Find(f => f.Queue == mySetting.Queue);
             if (dbSetting != null)
             {
-                mySetting.IsEnabled = dbSetting.IsEnabled;
                 mySetting.WorkloadTotal = dbSetting.WorkloadTotal;
+                mySetting.IsEnabled = dbSetting.IsEnabled;
                 mySetting.IsLogEnabled = dbSetting.IsLogEnabled;
             }
-            this.settings.Add(mySetting);
         }
     }
     private async Task SendHeartbeat()
