@@ -32,53 +32,55 @@ public class TheaLogAlarmMiddleware
             else logger.LogWarning($"The LogLevel value '{logLevel}' is invalid, the default value is 'Warning'.");
         }
     }
-    public async Task Invoke(LoggerHandlerContext context)
+    public async Task Invoke(LogEntity logEntityInfo)
     {
-        if (context.LogEntity != null)
+        if (logEntityInfo.LogLevel < this.alarmLevel)
         {
-            var logEntityInfo = context.LogEntity;
-            if (logEntityInfo.LogLevel < this.alarmLevel)
-                return;
+            await this.next(logEntityInfo);
+            return;
+        }
 
-            var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, logEntityInfo.Exception);
-            if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))
-            {
-                this.alarmInfos.TryAdd(hashKey, alarmInfo = new AlarmInfo
-                {
-                    CreatedAt = DateTime.Now,
-                    FiredTimes = 1
-                });
-                this.Build(logEntityInfo, alarmInfo);
-                alarmInfo.SenceKey = $"{logEntityInfo.AppId}_{logEntityInfo.UserId}_{logEntityInfo.ApiUrl}_{logEntityInfo.Body}";
-                await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
-            }
-            else
-            {
-                //过十分钟了，再报一次，同时更新时间
-                if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
-                {
-                    alarmInfo.FiredTimes++;
-                    this.Build(logEntityInfo, alarmInfo);
-                    await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
-                    //十分钟后移除
-                    this.alarmInfos.TryRemove(hashKey, out _);
-                }
-                else alarmInfo.FiredTimes++;
-            }
-        }
-        else
+        var body = logEntityInfo.Exception?.ToString() ?? logEntityInfo.Body ?? logEntityInfo.Response;
+        var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, body);
+        if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))
         {
-            //十分钟后，不再报警，就删除掉
-            var removeKeys = new List<int>();
-            foreach (var alarmInfo in this.alarmInfos)
+            this.alarmInfos.TryAdd(hashKey, alarmInfo = new AlarmInfo
             {
-                if (DateTime.Now.Subtract(alarmInfo.Value.CreatedAt) > TimeSpan.FromMinutes(10))
-                    removeKeys.Add(alarmInfo.Key);
-            }
-            if (removeKeys.Count > 0)
-                removeKeys.ForEach(key => this.alarmInfos.TryRemove(key, out _));
+                CreatedAt = DateTime.Now,
+                FiredTimes = 1
+            });
+            this.Build(logEntityInfo, alarmInfo);
+            await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
         }
-        await this.next(context);
+        else alarmInfo.FiredTimes++;
+
+        //过十分钟了，再报一次，同时更新时间
+        if (DateTime.Now.Subtract(alarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
+        {
+            alarmInfo.FiredTimes++;
+            this.Build(logEntityInfo, alarmInfo);
+            await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
+            //十分钟后移除
+            this.alarmInfos.TryRemove(hashKey, out _);
+        }
+        else alarmInfo.FiredTimes++;
+
+        //十分钟后再报一次，并删除报警信息，防止占用太多内存
+        var removeKeys = new List<int>();
+        foreach (var key in this.alarmInfos.Keys)
+        {
+            var myAlarmInfo = this.alarmInfos[key];
+            if (DateTime.Now.Subtract(myAlarmInfo.CreatedAt) > TimeSpan.FromMinutes(10))
+            {
+                if (myAlarmInfo.FiredTimes > 1)
+                    await this.alarmService.PostAsync(alarmInfo.Header, alarmInfo.Content);
+                removeKeys.Add(key);
+            }
+        }
+        if (removeKeys.Count > 0)
+            removeKeys.ForEach(key => this.alarmInfos.TryRemove(key, out _));
+
+        await this.next(logEntityInfo);
     }
     private void Build(LogEntity logEntityInfo, AlarmInfo alarmInfo)
     {
@@ -109,7 +111,6 @@ public class TheaLogAlarmMiddleware
     }
     class AlarmInfo
     {
-        public string SenceKey { get; set; }
         public DateTime CreatedAt { get; set; }
         public int FiredTimes { get; set; }
         public string Header { get; set; }

@@ -2,6 +2,7 @@
 using Elastic.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -69,25 +70,19 @@ public class TheaLoggerProcessor : ILoggerProcessor
                     if (logEntities.Count >= batchCount
                         || DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
                     {
-                        if (this.next != null)
+                        if (this.next != null && logEntities.Count > 0)
                         {
-                            if (logEntities.Count > 0)
+                            foreach (var logEntity in logEntities)
                             {
-                                foreach (var logEntity in logEntities)
+                                try
                                 {
-                                    try
-                                    {
-                                        var context = new LoggerHandlerContext(logEntity);
-                                        await this.next.Invoke(context);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Console.WriteLine($"LoggerHandler execute error,{ex}");
-                                        logEntities.Remove(logEntity);
-                                    }
+                                    await this.next.Invoke(logEntity);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"LoggerHandler execute error,{ex}");
                                 }
                             }
-                            else await this.next.Invoke(LoggerHandlerContext.Instance);
                         }
                         await this.SendToAsync(logEntities);
                         logEntities.Clear();

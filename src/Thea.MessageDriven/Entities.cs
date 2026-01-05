@@ -80,6 +80,8 @@ public class Setting
     /// 最后更新日期
     /// </summary>
     public DateTime UpdatedAt { get; set; }
+
+    public Setting Clone() => this.MemberwiseClone() as Setting;
 }
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志

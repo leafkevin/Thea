@@ -96,8 +96,7 @@ class MessageDrivenService : IMessageDriven
                     if (DateTime.Now - this.lastInitedTime >= this.heartbeatCycle)
                     {
                         if (this.hasConsumer) await this.SendHeartbeat();
-                        this.lastSettings = this.settings;
-                        this.settings = await this.repository.GetSettings();
+                        await this.Initialize();
                         if (this.hasConsumer) await this.StartConsumers();
                         this.lastInitedTime = DateTime.Now;
                     }
@@ -517,7 +516,7 @@ class MessageDrivenService : IMessageDriven
             {
                 var mySetting = this.settings.Find(f => f.Exchanges.Contains(exchange));
                 if (mySetting == null) continue;
-                await rabbitProducer.CreateExchange(exchange, mySetting.BindType, mySetting.IsDelay);
+                await this.rabbitProducer.CreateExchange(exchange, mySetting.BindType, mySetting.IsDelay);
             }
         }
         //创建RPC消费者
@@ -532,11 +531,19 @@ class MessageDrivenService : IMessageDriven
 
         if (this.isAllowCreateQueue)
         {
-            foreach (var mySetting in dbSettings)
+            foreach (var mySetting in this.settings)
             {
-                if (!mySetting.IsEnabled) continue;
+                var setting = dbSettings.Find(f => f.Queue == mySetting.Queue);
+                if (setting == null) continue;
+
+                //不管队列是否可用，都要创建队列，数据库的配置只有3个配置生效
+                mySetting.WorkloadTotal = setting.WorkloadTotal;
+                mySetting.IsEnabled = setting.IsEnabled;
+                mySetting.IsLogEnabled = setting.IsLogEnabled;
+
                 if (mySetting.IsStateful)
                 {
+                    //数据库配置的负载个数为准，创建有状态队列
                     for (int i = 0; i < mySetting.WorkloadTotal; i++)
                     {
                         queueName = $"{mySetting.Queue}.{i}";
@@ -546,23 +553,23 @@ class MessageDrivenService : IMessageDriven
                 else await this.rabbitProducer.CreateQueue(mySetting.Queue, mySetting.IsQuorumQueue, false, false);
 
                 //创建转发队列
-                if (mySetting.IsNeedTransfer)
-                {
-                    queueName = $"{Consts.TransferExchange}.{mySetting.Queue}";
-                    await this.rabbitProducer.CreateQueue(queueName, mySetting.IsQuorumQueue, false, false);
-                }
+                if (!mySetting.IsNeedTransfer) continue;
+                queueName = $"{Consts.TransferExchange}.{mySetting.Queue}";
+                await this.rabbitProducer.CreateQueue(queueName, mySetting.IsQuorumQueue, false, false);
             }
         }
         if (this.isAllowCreateBinding)
         {
             foreach (var exchange in this.localExchanges)
             {
-                var mySettings = dbSettings.FindAll(f => f.Exchanges.Contains(exchange) && f.IsEnabled);
+                var mySettings = this.settings.FindAll(f => f.Exchanges.Contains(exchange));
                 if (mySettings == null || mySettings.Count == 0) continue;
+
                 foreach (var mySetting in mySettings)
                 {
                     if (mySetting.IsStateful)
                     {
+                        //以数据库配置的负载个数为准，创建有状态队列
                         for (int i = 0; i < mySetting.WorkloadTotal; i++)
                         {
                             queueName = $"{mySetting.Queue}.{i}";
@@ -579,6 +586,24 @@ class MessageDrivenService : IMessageDriven
         queueName = $"heartbeat.queue.{this.ServiceId}";
         this.heartbeatConsumer = new RabbitConsumer(queueName, queueName, this, this.serviceProvider, QueueType.Heartbeat);
         await this.heartbeatConsumer.Start(Consts.HeartbeatExchange, Consts.FanoutRoutingKey);
+    }
+    private async Task Initialize()
+    {
+        this.lastSettings = this.settings;
+        var dbSettings = await this.repository.GetSettings();
+        this.settings = new();
+        foreach (var setting in this.lastSettings)
+        {
+            var mySetting = setting.Clone();
+            var dbSetting = dbSettings.Find(f => f.Queue == setting.Queue);
+            if (dbSetting != null)
+            {
+                mySetting.IsEnabled = dbSetting.IsEnabled;
+                mySetting.WorkloadTotal = dbSetting.WorkloadTotal;
+                mySetting.IsLogEnabled = dbSetting.IsLogEnabled;
+            }
+            this.settings.Add(mySetting);
+        }
     }
     private async Task SendHeartbeat()
     {
@@ -605,7 +630,7 @@ class MessageDrivenService : IMessageDriven
             Console.WriteLine($"可用节点：{currentNodeIds}");
 
         //先创建有状态队列消费者(包括SAC和非SAC消费者)
-        var mySettings = this.settings.Where(f => this.localQueues.Contains(f.Queue) && f.IsEnabled && f.IsStateful)
+        var mySettings = this.settings.Where(f => f.IsEnabled && f.IsStateful)
             .OrderBy(f => f.Queue).ToList();
 
         //先创建新增的队列和绑定
