@@ -2,7 +2,6 @@
 -- DROP TABLE IF EXISTS `mds_setting`;
 CREATE TABLE `mds_setting`
 (
-    `app_id` VARCHAR(50) NOT NULL COMMENT '应用ID',
     `queue` VARCHAR(50) NOT NULL COMMENT '队列名称',
     `exchanges` VARCHAR(300) NULL COMMENT '交换机',
     `bind_type` VARCHAR(50) NULL COMMENT '绑定类型',
@@ -20,7 +19,7 @@ CREATE TABLE `mds_setting`
     `created_at` DATETIME NULL DEFAULT NOW() COMMENT '创建日期',
     `updated_by` VARCHAR(50) NULL COMMENT '最后更新人',
     `updated_at` DATETIME NULL DEFAULT NOW() COMMENT '最后更新日期',
-    CONSTRAINT `pk_mds_setting` PRIMARY KEY(`app_id`,`queue`)
+    CONSTRAINT `pk_mds_setting` PRIMARY KEY(`queue`)
 );
 ALTER TABLE `mds_setting` COMMENT '配置表，描述所有的队列、交换机绑定等信息';
 -- -------------- TABLE [mds_setting] END----------------

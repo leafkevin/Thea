@@ -9,10 +9,6 @@ namespace Thea.MessageDriven;
 public class Setting
 {
     /// <summary>
-    /// 应用ID
-    /// </summary>
-    public string AppId { get; set; }
-    /// <summary>
     /// 队列名称
     /// </summary>
     public string Queue { get; set; }

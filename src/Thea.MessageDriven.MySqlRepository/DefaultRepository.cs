@@ -29,7 +29,7 @@ public class DefaultRepository : IMessageDrivenRepository
         return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
-            var result = await repository.QueryAsync<Setting>(f => f.AppId == this.appId);
+            var result = await repository.QueryAsync<Setting>();
             if (result.Count <= 0) return null;
             return result;
         });

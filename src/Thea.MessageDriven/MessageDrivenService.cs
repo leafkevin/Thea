@@ -143,7 +143,14 @@ class MessageDrivenService : IMessageDriven
                                         properties.ReplyTo = message.From;
                                         properties.CorrelationId = message.MessageId;
                                     }
-                                    var mySettings = this.settings.FindAll(f => f.Exchanges.Contains(message.Exchange));
+                                    var mySettings = this.settings.FindAll(f => f.Exchanges.Contains(message.Exchange) && f.IsEnabled);
+                                    if (mySettings == null || mySettings.Count == 0)
+                                    {
+                                        this.logger.LogTagWarning("MessageDriven", $"未找到有效的交换机{message.Exchange}的配置信息，消息无法发送");
+                                        Console.WriteLine($"未找到有效的交换机{message.Exchange}的配置信息，消息无法发送");
+                                        message.Waiter?.TrySetResult(true);
+                                        break;
+                                    }
                                     foreach (var mySetting in mySettings)
                                     {
                                         if (mySetting.IsStateful)
@@ -395,7 +402,6 @@ class MessageDrivenService : IMessageDriven
         {
             this.settings.Add(myQueue = new Setting
             {
-                AppId = this.AppId,
                 Queue = queue,
                 BindType = Consts.TopicBindingType,
                 IsQuorumQueue = isQuorumQueue,
@@ -437,7 +443,6 @@ class MessageDrivenService : IMessageDriven
         {
             this.settings.Add(myQueue = new Setting
             {
-                AppId = this.AppId,
                 Queue = queue,
                 BindType = bindingType,
                 BindingKey = routingKey,
@@ -589,8 +594,14 @@ class MessageDrivenService : IMessageDriven
     }
     private async Task Initialize()
     {
-        this.lastSettings.Clear();
         var dbSettings = await this.repository.GetSettings();
+        if (!this.hasConsumer)
+        {
+            //如果只是生产者模式，直接使用数据库的配置，用于发送消息
+            this.settings = dbSettings;
+            return;
+        }
+        this.lastSettings.Clear();
         foreach (var mySetting in this.settings)
         {
             this.lastSettings.Add(mySetting.Clone());
