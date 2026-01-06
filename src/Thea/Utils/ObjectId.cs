@@ -18,6 +18,29 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     private readonly int _c;
 
     public static string NewId() => GenerateNewId().ToString();
+    public static string New16Id()
+    {
+        const string Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz$_";
+        var bytes = GenerateNewId().ToByteArray().AsSpan();
+        Span<char> output = stackalloc char[16]; // ceil(12 * 8 / 6)
+        int dst = 0;
+        int buffer = 0;
+        int bits = 0;
+
+        foreach (byte b in bytes)
+        {
+            buffer = (buffer << 8) | b;
+            bits += 8;
+            while (bits >= 6)
+            {
+                bits -= 6;
+                output[dst++] = Alphabet[(buffer >> bits) & 0x3F];
+            }
+        }
+        if (bits > 0)
+            output[dst++] = Alphabet[(buffer << (6 - bits)) & 0x3F];
+        return new string(output[..dst]);
+    }
     // constructors
     /// <summary>
     /// Initializes a new instance of the ObjectId class.
