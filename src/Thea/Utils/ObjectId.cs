@@ -11,6 +11,7 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     private static readonly ObjectId __emptyInstance = default(ObjectId);
     private static readonly long __random = CalculateRandomValue();
     private static int __staticIncrement = (new Random()).Next();
+    private static string __alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz$_";
 
     // private fields
     private readonly int _a;
@@ -20,7 +21,6 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
     public static string NewId() => GenerateNewId().ToString();
     public static string New16Id()
     {
-        const string Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz$_";
         var bytes = GenerateNewId().ToByteArray().AsSpan();
         Span<char> output = stackalloc char[16]; // ceil(12 * 8 / 6)
         int dst = 0;
@@ -34,11 +34,11 @@ public struct ObjectId : IComparable<ObjectId>, IEquatable<ObjectId>, IConvertib
             while (bits >= 6)
             {
                 bits -= 6;
-                output[dst++] = Alphabet[(buffer >> bits) & 0x3F];
+                output[dst++] = __alphabet[(buffer >> bits) & 0x3F];
             }
         }
         if (bits > 0)
-            output[dst++] = Alphabet[(buffer << (6 - bits)) & 0x3F];
+            output[dst++] = __alphabet[(buffer << (6 - bits)) & 0x3F];
         return new string(output[..dst]);
     }
     // constructors

@@ -26,7 +26,7 @@ class MessageDrivenService : IMessageDriven
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> waitShutdownConsumers = new();
     private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
-    private readonly Channel<Message> channel = Channel.CreateBounded<Message>(new BoundedChannelOptions(500)
+    private readonly Channel<Message> channel = Channel.CreateBounded<Message>(new BoundedChannelOptions(5000)
     {
         FullMode = BoundedChannelFullMode.Wait,
         SingleWriter = false,

@@ -64,32 +64,34 @@ public class TheaLoggerProcessor : ILoggerProcessor
             {
                 try
                 {
-                    if (this.channel.Reader.TryRead(out var logEntityInfo))
-                        logEntities.Add(logEntityInfo);
-
                     if (logEntities.Count >= batchCount
                         || DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
                     {
-                        if (this.next != null && logEntities.Count > 0)
+                        if (logEntities.Count > 0)
                         {
-                            foreach (var logEntity in logEntities)
+                            if (this.next != null)
                             {
-                                try
+                                foreach (var logEntity in logEntities)
                                 {
-                                    await this.next.Invoke(logEntity);
-                                }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"LoggerHandler execute error,{ex}");
+                                    try
+                                    {
+                                        await this.next.Invoke(logEntity);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"LoggerHandler execute error,{ex}");
+                                    }
                                 }
                             }
+                            await this.SendToAsync(logEntities);
+                            logEntities.Clear();
                         }
-                        await this.SendToAsync(logEntities);
-                        logEntities.Clear();
                         this.lastPushedTime = DateTime.Now;
                     }
-                    if (this.channel.Reader.Count <= 0)
-                        Thread.Sleep(1);
+
+                    if (this.channel.Reader.TryRead(out var logEntityInfo))
+                        logEntities.Add(logEntityInfo);
+                    else Thread.Sleep(1);
                 }
                 catch (Exception ex)
                 {

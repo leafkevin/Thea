@@ -1,14 +1,15 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using System.Web;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Primitives;
 using Thea.Logging;
 
 namespace Thea.Web;
@@ -17,11 +18,13 @@ public class TheaWebMiddleware
 {
     private readonly string appId;
     private readonly RequestDelegate next;
+    private readonly bool isDevelopment;
     private readonly IResponseDecorator responseDecorator;
     private readonly ILogger<TheaWebMiddleware> logger;
     private readonly List<string> skipUrls;
 
-    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuration, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
+    public TheaWebMiddleware(RequestDelegate next, IConfiguration configuration,
+        IHostEnvironment environment, IResponseDecorator responseDecorator, ILogger<TheaWebMiddleware> logger)
     {
         this.appId = configuration.GetValue<string>("AppId");
         if (string.IsNullOrEmpty(this.appId))
@@ -30,6 +33,7 @@ public class TheaWebMiddleware
         this.skipUrls = configuration.GetSection("WebApi:SkipUrls").Get<List<string>>();
         if (this.skipUrls != null && this.skipUrls.Count > 0)
             this.skipUrls = this.skipUrls.ConvertAll(u => u.ToLower());
+        this.isDevelopment = environment.IsDevelopment();
         this.next = next;
         this.responseDecorator = responseDecorator;
         this.logger = logger;
@@ -37,66 +41,92 @@ public class TheaWebMiddleware
 
     public async Task Invoke(HttpContext context)
     {
+        var traceId = this.CreateTraceId(context);
         var url = context.Request.Path.Value?.ToLower();
-        if (this.skipUrls != null && this.skipUrls.Count > 0 && this.skipUrls.Contains(url))
+        try
         {
-            await this.next(context);
-            return;
-        }
-        var logLevel = LogLevel.Information;
-        var originalStream = context.Response.Body;
-        var logEntityInfo = await this.CreateLogEntity(context);
-        using (this.logger.BeginScope(logEntityInfo))
-        {
-            using var memoryStream = new MemoryStream();
-            Exception exception = null;
-            try
+            if (this.skipUrls != null && this.skipUrls.Count > 0 && this.skipUrls.Contains(url))
             {
-                context.Response.Body = memoryStream;
-                await next(context);
+                await this.next(context);
+                return;
             }
-            catch (Exception ex)
+            var logLevel = LogLevel.Information;
+            var originalStream = context.Response.Body;
+            var logEntityInfo = await this.CreateLogEntity(traceId, context);
+            using (this.logger.BeginScope(logEntityInfo))
             {
-                exception = ex.InnerException ?? ex;
-                logEntityInfo.Exception = exception;
-                logLevel = LogLevel.Error;
-            }
-            logEntityInfo.StatusCode = context.Response.StatusCode;
-            bool isJson = context.Response.ContentType?.ToLower().Contains("application/json") ?? true;
-            if (isJson)
-            {
-                (logLevel, var response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
-                logEntityInfo.Response = response;
-                context.Response.Body = originalStream;
-                await context.Response.WriteAsync(response);
-            }
-            else
-            {
-                memoryStream.Position = 0;
-                await memoryStream.CopyToAsync(originalStream);
-                context.Response.Body = originalStream;
+                using var memoryStream = new MemoryStream();
+                Exception exception = null;
+                try
+                {
+                    context.Response.Body = memoryStream;
+                    await next(context);
+                }
+                catch (Exception ex)
+                {
+                    exception = ex.InnerException ?? ex;
+                    logEntityInfo.Exception = exception;
+                    logLevel = LogLevel.Error;
+                    if (this.isDevelopment) Console.WriteLine(ex.ToString());
+                }
+                if (string.IsNullOrEmpty(logEntityInfo.Tag))
+                    logEntityInfo.Tag = "Thea";
+                logEntityInfo.StatusCode = context.Response.StatusCode;
+
+                if (context.RequestAborted.IsCancellationRequested)
+                {
+                    logLevel = LogLevel.Error;
+                    logEntityInfo.Body = "Client cancelled the request.";
+                    context.Response.Body = originalStream;
+                    logEntityInfo.LogLevel = (int)logLevel;
+                    this.logger.LogEntity(logEntityInfo);
+                    return;
+                }
+                if (!logEntityInfo.IsEnabled || ScopeState.TryGetState(out var lastScopeState) && !lastScopeState.IsEnabled)
+                {
+                    memoryStream.Position = 0;
+                    await memoryStream.CopyToAsync(originalStream);
+                    context.Response.Body = originalStream;
+                    return;
+                }
+
+                bool isJson = context.Response.ContentType?.ToLower().Contains("application/json") ?? true;
+                if (isJson)
+                {
+                    (logLevel, var response) = await this.responseDecorator.ProcessRequest(context, memoryStream, logLevel, exception);
+                    logEntityInfo.Response = response;
+                    context.Response.Body = originalStream;
+                    if (!string.IsNullOrEmpty(response))
+                        await context.Response.WriteAsync(response);
+                }
+                else
+                {
+                    memoryStream.Position = 0;
+                    await memoryStream.CopyToAsync(originalStream);
+                    context.Response.Body = originalStream;
+                }
             }
             logEntityInfo.LogLevel = (int)logLevel;
-            if (string.IsNullOrEmpty(logEntityInfo.Tag))
-                logEntityInfo.Tag = "TheaWebMiddleware";
             this.logger.LogEntity(logEntityInfo);
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}, TraceId:{traceId}, 请求{url}异常，Details: {ex}");
+        }
     }
-    private async Task<LogEntity> CreateLogEntity(HttpContext context)
+    private string CreateTraceId(HttpContext context)
     {
-        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), LogLevel = (int)LogLevel.Information };
+        string traceId = null;
         if (context.Request.Headers.TryGetValue("TraceId", out var traceIds))
-        {
-            var traceId = traceIds.ToString();
-            context.TraceIdentifier = traceId;
-            logEntityInfo.TraceId = traceId;
-        }
-        else
-        {
-            logEntityInfo.TraceId = ObjectId.NewId();
-            context.TraceIdentifier = logEntityInfo.TraceId;
-            context.Request.Headers.TryAdd("TraceId", new StringValues(logEntityInfo.TraceId));
-        }
+            traceId = traceIds.ToString();
+        else traceId = ObjectId.NewId();
+        return traceId;
+    }
+    private async Task<LogEntity> CreateLogEntity(string traceId, HttpContext context)
+    {
+        var logEntityInfo = new LogEntity { Id = ObjectId.NewId(), TraceId = traceId };
+        context.TraceIdentifier = traceId;
+        context.Request.Headers.TryAdd("TraceId", new StringValues(traceId));
 
         logEntityInfo.Host = GetHost();
         logEntityInfo.ApiType = this.GetApiType(context.Request.Method);

@@ -32,7 +32,14 @@ public class TheaLogger : ILogger
         if (state == null || state is not LogEntity logEntityInfo)
             return null;
 
-        ScopeState.Push(this.Initialize(logEntityInfo));
+        var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
+        if (hasScopeState)
+        {
+            if (!lastScopeState.IsEnabled)
+                return null;
+            this.Decorate(logEntityInfo, lastScopeState);
+        }
+        ScopeState.Push(logEntityInfo);
         return new ScopeStateHolder(ScopeState.Pop);
     }
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
@@ -46,6 +53,9 @@ public class TheaLogger : ILogger
         var stateType = state.GetType();
         if (stateType.FullName.StartsWith("Microsoft.Extensions.Logging.LoggerMessage"))
             return;
+
+        var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
+        if (hasScopeState && !lastScopeState.IsEnabled) return;
 
         var logEntityInfo = state as LogEntity;
         if (logEntityInfo == null)
@@ -61,7 +71,7 @@ public class TheaLogger : ILogger
         }
         logEntityInfo.AppId = this.appId;
         logEntityInfo.Environment = this.environment;
-        this.Initialize(logEntityInfo);
+        if (hasScopeState) this.Decorate(logEntityInfo, lastScopeState);
         //有手动传进来的耗时，不再计算
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
@@ -74,11 +84,8 @@ public class TheaLogger : ILogger
             return false;
         return logLevel >= this.logLevel;
     }
-    private LogEntity Initialize(LogEntity logEntityInfo)
+    private LogEntity Decorate(LogEntity logEntityInfo, LogEntity lastScopeState)
     {
-        if (!ScopeState.TryGetState(out var lastScopeState))
-            return logEntityInfo;
-
         if (string.IsNullOrEmpty(logEntityInfo.TraceId) && !string.IsNullOrEmpty(lastScopeState.TraceId))
             logEntityInfo.TraceId = lastScopeState.TraceId;
         if (string.IsNullOrEmpty(logEntityInfo.Tag) && !string.IsNullOrEmpty(lastScopeState.Tag))

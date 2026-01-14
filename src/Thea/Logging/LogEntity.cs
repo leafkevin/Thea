@@ -29,6 +29,10 @@ public class LogEntity
     public object Exception { get; set; }
     public DateTime LogTime { get; set; } = DateTime.Now;
     public int? Elapsed { get; set; }
+    /// <summary>
+    /// 为false时，可抛弃日志记录
+    /// </summary>
+    public bool IsEnabled { get; set; } = true;
 
     public override string ToString() => this.Body;
 }

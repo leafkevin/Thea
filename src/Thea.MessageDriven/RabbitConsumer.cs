@@ -182,8 +182,9 @@ class RabbitConsumer
                 case Consts.RpcMessage:
                     {
                         //赋值TraceId，用于日志跟踪
+                        IDisposable scopeObj = null;
                         if (!string.IsNullOrEmpty(traceId))
-                            this.logger.BeginScope(new LogEntity { TraceId = traceId });
+                            scopeObj = this.logger.BeginScope(new LogEntity { TraceId = traceId });
 
                         while (iLoop < 3)
                         {
@@ -210,9 +211,9 @@ class RabbitConsumer
                             iLoop++;
                         }
                         if (!isSuccess) result = exception.ToString();
+                        var logId = ObjectId.NewId();
                         if (this.IsLogEnabled || !isSuccess)
-                        {
-                            var logId = ObjectId.NewId();
+                        {                        
                             await this.parent.ProcessMessage(new Message
                             {
                                 MessageId = messageId,
@@ -233,6 +234,10 @@ class RabbitConsumer
                                     UpdatedAt = DateTime.Now
                                 }
                             });
+                        }
+                        var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
+                        if (!hasScopeState || hasScopeState && lastScopeState.IsEnabled)
+                        {
                             var resultBody = isSuccess ? "success" : "failed";
                             this.logger.LogEntity(new LogEntity
                             {
@@ -263,6 +268,7 @@ class RabbitConsumer
                                 Headers = new Dictionary<string, object> { { "TraceId", traceId } }
                             }, result);
                         }
+                        scopeObj?.Dispose();
                         //RPC消息直接跳过，因为异常已经返回到前端了
                         if (!isSuccess && messageType == Consts.UserMessage)
                             throw exception;
