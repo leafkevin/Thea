@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -124,7 +125,7 @@ class MessageDrivenService : IMessageDriven
                                 var properties = new BasicProperties
                                 {
                                     Persistent = true,
-                                    Type = message.Type.ToString(),
+                                    Type = message.Type,
                                     DeliveryMode = DeliveryModes.Persistent,
                                     AppId = this.AppId,
                                     MessageId = message.MessageId,
@@ -157,12 +158,10 @@ class MessageDrivenService : IMessageDriven
                                         {
                                             if (this.localQueues.Contains(mySetting.Queue))
                                             {
-                                                uint routingKey = 0;
+                                                int routingKey = 0;
                                                 if (mySetting.WorkloadTotal > 1)
-                                                {
-                                                    var hashKey = Farmhash.Hash32(message.RoutingKey);
-                                                    routingKey = (uint)(hashKey % mySetting.WorkloadTotal);
-                                                }
+                                                    routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, mySetting.WorkloadTotal);
+                                                message.RoutingKey = routingKey.ToString(); 
                                                 await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, message.Body.ToJson());
                                             }
                                             //转发时，要带上Exchange,RoutingKey

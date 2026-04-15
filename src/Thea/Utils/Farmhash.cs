@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.CompilerServices;
 
-namespace Thea.MessageDriven;
+namespace Thea;
 
 /// <summary>
 /// Class that can calculate 32bit and 64bit hashes using
