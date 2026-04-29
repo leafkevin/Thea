@@ -16,6 +16,7 @@ public class TheaLogAlarmMiddleware
     private readonly LoggerHandlerDelegate next;
     private readonly ConcurrentDictionary<int, AlarmInfo> alarmInfos = new();
     private readonly int alarmLevel = (int)LogLevel.Warning;
+    private readonly List<string> ignoreKeywords;
 
     public TheaLogAlarmMiddleware(LoggerHandlerDelegate next, IAlarmService alarmService, IConfiguration configuration, ILogger<TheaLogAlarmMiddleware> logger)
     {
@@ -31,6 +32,7 @@ public class TheaLogAlarmMiddleware
                 this.alarmLevel = (int)level;
             else logger.LogWarning($"The LogLevel value '{logLevel}' is invalid, the default value is 'Warning'.");
         }
+        this.ignoreKeywords = configuration.GetSection("Alarm:IngoreKeywords").Get<List<string>>();
     }
     public async Task Invoke(LogEntity logEntityInfo)
     {
@@ -39,7 +41,20 @@ public class TheaLogAlarmMiddleware
             await this.next(logEntityInfo);
             return;
         }
-
+        if (logEntityInfo.LogLevel >= (int)LogLevel.Warning)
+        {
+            // 过滤掉一些不需要告警的关键词，比如特定的错误码等，减少不必要的告警
+            if (this.ignoreKeywords != null)
+            {
+                var response = logEntityInfo.Response.JsonTo<TheaResponse>();
+                var myKeyword = response?.Code.ToString();
+                if (!string.IsNullOrEmpty(myKeyword) && this.ignoreKeywords.Contains(myKeyword))
+                {
+                    await this.next(logEntityInfo);
+                    return;
+                }
+            }
+        }
         var body = logEntityInfo.Exception?.ToString() ?? logEntityInfo.Body ?? logEntityInfo.Response;
         var hashKey = HashCode.Combine(logEntityInfo.AppId, logEntityInfo.ApiUrl, body);
         if (!this.alarmInfos.TryGetValue(hashKey, out var alarmInfo))

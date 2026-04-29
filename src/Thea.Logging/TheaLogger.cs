@@ -31,14 +31,6 @@ public class TheaLogger : ILogger
     {
         if (state == null || state is not LogEntity logEntityInfo)
             return null;
-
-        var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
-        if (hasScopeState)
-        {
-            if (!lastScopeState.IsEnabled)
-                return null;
-            this.Decorate(logEntityInfo, lastScopeState);
-        }
         ScopeState.Push(logEntityInfo);
         return new ScopeStateHolder(ScopeState.Pop);
     }
@@ -71,7 +63,7 @@ public class TheaLogger : ILogger
         }
         logEntityInfo.AppId = this.appId;
         logEntityInfo.Environment = this.environment;
-        if (hasScopeState) this.Decorate(logEntityInfo, lastScopeState);
+        if (hasScopeState) logEntityInfo.DecorateFrom(lastScopeState);
         //有手动传进来的耗时，不再计算
         if (!logEntityInfo.Elapsed.HasValue)
             logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
@@ -84,39 +76,10 @@ public class TheaLogger : ILogger
             return false;
         return logLevel >= this.logLevel;
     }
-    private LogEntity Decorate(LogEntity logEntityInfo, LogEntity lastScopeState)
-    {
-        if (string.IsNullOrEmpty(logEntityInfo.TraceId) && !string.IsNullOrEmpty(lastScopeState.TraceId))
-            logEntityInfo.TraceId = lastScopeState.TraceId;
-        if (string.IsNullOrEmpty(logEntityInfo.Tag) && !string.IsNullOrEmpty(lastScopeState.Tag))
-            logEntityInfo.Tag = lastScopeState.Tag;
-
-        if (string.IsNullOrEmpty(logEntityInfo.TenantId) && !string.IsNullOrEmpty(lastScopeState.TenantId))
-            logEntityInfo.TenantId = lastScopeState.TenantId;
-        if (string.IsNullOrEmpty(logEntityInfo.UserId) && !string.IsNullOrEmpty(lastScopeState.UserId))
-            logEntityInfo.UserId = lastScopeState.UserId;
-        if (string.IsNullOrEmpty(logEntityInfo.UserName) && !string.IsNullOrEmpty(lastScopeState.UserName))
-            logEntityInfo.UserName = lastScopeState.UserName;
-        if (string.IsNullOrEmpty(logEntityInfo.Authorization) && !string.IsNullOrEmpty(lastScopeState.Authorization))
-            logEntityInfo.Authorization = lastScopeState.Authorization;
-
-        if (string.IsNullOrEmpty(logEntityInfo.ApiUrl) && !string.IsNullOrEmpty(lastScopeState.ApiUrl))
-            logEntityInfo.ApiUrl = lastScopeState.ApiUrl;
-        if (string.IsNullOrEmpty(logEntityInfo.Headers) && !string.IsNullOrEmpty(lastScopeState.Headers))
-            logEntityInfo.Headers = lastScopeState.Headers;
-        if (string.IsNullOrEmpty(logEntityInfo.Request) && !string.IsNullOrEmpty(lastScopeState.Request))
-            logEntityInfo.Request = lastScopeState.Request;
-
-        if (string.IsNullOrEmpty(logEntityInfo.Host) && !string.IsNullOrEmpty(lastScopeState.Host))
-            logEntityInfo.Host = lastScopeState.Host;
-        if (string.IsNullOrEmpty(logEntityInfo.ClientIp) && !string.IsNullOrEmpty(lastScopeState.ClientIp))
-            logEntityInfo.ClientIp = lastScopeState.ClientIp;
-        return logEntityInfo;
-    }
     private struct ScopeStateHolder : IDisposable
     {
-        private readonly Action onDispose;
-        public ScopeStateHolder(Action onDispose) => this.onDispose = onDispose;
+        private readonly Func<LogEntity> onDispose;
+        public ScopeStateHolder(Func<LogEntity> onDispose) => this.onDispose = onDispose;
         public void Dispose() => this.onDispose.Invoke();
     }
 }

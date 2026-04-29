@@ -35,4 +35,34 @@ public class LogEntity
     public bool IsEnabled { get; set; } = true;
 
     public override string ToString() => this.Body;
+
+    public LogEntity DecorateFrom(LogEntity lastScopeState)
+    {
+        if (string.IsNullOrEmpty(this.TraceId) && !string.IsNullOrEmpty(lastScopeState.TraceId))
+            this.TraceId = lastScopeState.TraceId;
+        if (string.IsNullOrEmpty(this.Tag) && !string.IsNullOrEmpty(lastScopeState.Tag))
+            this.Tag = lastScopeState.Tag;
+
+        if (string.IsNullOrEmpty(this.TenantId) && !string.IsNullOrEmpty(lastScopeState.TenantId))
+            this.TenantId = lastScopeState.TenantId;
+        if (string.IsNullOrEmpty(this.UserId) && !string.IsNullOrEmpty(lastScopeState.UserId))
+            this.UserId = lastScopeState.UserId;
+        if (string.IsNullOrEmpty(this.UserName) && !string.IsNullOrEmpty(lastScopeState.UserName))
+            this.UserName = lastScopeState.UserName;
+        if (string.IsNullOrEmpty(this.Authorization) && !string.IsNullOrEmpty(lastScopeState.Authorization))
+            this.Authorization = lastScopeState.Authorization;
+
+        if (string.IsNullOrEmpty(this.ApiUrl) && !string.IsNullOrEmpty(lastScopeState.ApiUrl))
+            this.ApiUrl = lastScopeState.ApiUrl;
+        if (string.IsNullOrEmpty(this.Headers) && !string.IsNullOrEmpty(lastScopeState.Headers))
+            this.Headers = lastScopeState.Headers;
+        if (string.IsNullOrEmpty(this.Request) && !string.IsNullOrEmpty(lastScopeState.Request))
+            this.Request = lastScopeState.Request;
+
+        if (string.IsNullOrEmpty(this.Host) && !string.IsNullOrEmpty(lastScopeState.Host))
+            this.Host = lastScopeState.Host;
+        if (string.IsNullOrEmpty(this.ClientIp) && !string.IsNullOrEmpty(lastScopeState.ClientIp))
+            this.ClientIp = lastScopeState.ClientIp;
+        return this;
+    }
 }

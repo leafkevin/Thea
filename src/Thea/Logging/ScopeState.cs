@@ -19,11 +19,19 @@ public class ScopeState
     public static void Push(LogEntity scopeState)
     {
         states.Value ??= new();
+        if (states.Value.TryPop(out var lastScopeState))
+            scopeState = lastScopeState.DecorateFrom(scopeState);
         states.Value.Push(scopeState);
     }
-    public static void Pop()
+    public static LogEntity Pop()
     {
         if (states.Value != null && states.Value.Count > 0)
-            states.Value.Pop();
+        {
+            var scopeState = states.Value.Pop();
+            if (states.Value.Count == 0)
+                states.Value = null;
+            return scopeState;
+        }
+        return null;
     }
 }

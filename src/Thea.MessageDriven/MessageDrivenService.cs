@@ -227,7 +227,7 @@ class MessageDrivenService : IMessageDriven
                 catch (Exception ex)
                 {
                     var exception = ex.InnerException ?? ex;
-                    this.logger.LogTagError("MessageDriven", exception, "MessageDriven:消费者守护宿主线程执行异常");
+                    this.logger.LogTagError("MessageDriven", exception, $"Message: {message.ToJson()}");
                     logs.Clear();
                 }
             }
@@ -249,6 +249,7 @@ class MessageDrivenService : IMessageDriven
             rabbitConsumers.ForEach(async f => await f.Shutdown());
         this.consumers.Clear();
         this.heartbeats.Clear();
+        this.rabbitProducer.Shutdown().Wait();
         this.heartbeatConsumer?.Shutdown().Wait();
         this.rpcConsumer?.Shutdown();
         this.waitStartingConsumers.Clear();
