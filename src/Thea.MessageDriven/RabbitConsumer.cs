@@ -20,7 +20,7 @@ class RabbitConsumer
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
-    private readonly int prefetchCount;
+
     private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
 
     private ConnectionFactory factory;
@@ -33,6 +33,7 @@ class RabbitConsumer
     public volatile bool IsLogEnabled;
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
+    public int PrefetchCount { get; internal set; }
     public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false);
     public bool IsRunning => this.consumer?.IsRunning ?? false;
 
@@ -41,7 +42,7 @@ class RabbitConsumer
         this.parent = parent;
         this.QueueName = queueName;
         this.ConsumerId = consumerId;
-        this.prefetchCount = prefetchCount;
+        this.PrefetchCount = prefetchCount;
         this.queueType = queueType;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
@@ -103,7 +104,7 @@ class RabbitConsumer
         this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
         this.channel = await this.connection.CreateChannelAsync();
-        await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
+        await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
         switch (this.queueType)
         {
             case QueueType.Message: await this.BindUserMessageHandler(); break;
@@ -122,7 +123,7 @@ class RabbitConsumer
             await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
             await this.channel.QueueBindAsync(this.QueueName, exclusiveExchange, exclusiveBindingKey);
         }
-        await this.channel.BasicQosAsync(0, (ushort)this.prefetchCount, false);
+        await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
         switch (this.queueType)
         {
             case QueueType.Heartbeat: await this.BindHeartbeatHandler(); break;
@@ -213,7 +214,7 @@ class RabbitConsumer
                         if (!isSuccess) result = exception.ToString();
                         var logId = ObjectId.NewId();
                         if (this.IsLogEnabled || !isSuccess)
-                        {                        
+                        {
                             await this.parent.ProcessMessage(new Message
                             {
                                 MessageId = messageId,

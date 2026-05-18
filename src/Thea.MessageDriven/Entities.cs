@@ -79,6 +79,19 @@ public class Setting
 
     public Setting Clone() => this.MemberwiseClone() as Setting;
 }
+class ConfigInfo
+{
+    public List<string> EndPoints { get; set; }
+    public string User { get; set; }
+    public string Password { get; set; }
+    public int SacCount { get; set; } = 2;
+    public int Heartbeat { get; set; } = 10;
+    public int RpcTimeout { get; set; } = 30;
+    public string DbKey { get; set; }
+    public bool IsAllowCreateQueue { get; set; } = true;
+    public bool IsAllowCreateExchange { get; set; } = true;
+    public bool IsAllowCreateBinding { get; set; } = true;
+}
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志
 /// </summary>

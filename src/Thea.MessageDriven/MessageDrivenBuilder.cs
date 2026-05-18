@@ -28,11 +28,6 @@ public class MessageDrivenBuilder
         this.messageDriven.UseProducer(exchanges);
         return this;
     }
-    public MessageDrivenBuilder UseProducer(string exchange, bool isUseRpc)
-    {
-        this.messageDriven.UseProducer(exchange, isUseRpc);
-        return this;
-    }
     public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isNeedTransfer = false, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
