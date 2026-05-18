@@ -100,11 +100,19 @@ class MessageDrivenService : IMessageDriven
                         logs.Clear();
                         this.lastLoggedTime = DateTime.Now;
                     }
-                    if (this.rpcWaiters.Count > 0)
+                    if (this.rpcWaiters.IsEmpty)
                     {
-                        var waiters = this.rpcWaiters.Values.Where(f => DateTime.Now.Subtract(f.CreatedAt).TotalSeconds > f.TimeoutSeconds).ToList();
-                        waiters.ForEach(f => f.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{DateTime.Now.Subtract(f.CreatedAt).TotalSeconds}s")));
-                        waiters.Clear();
+                        var removedKeys = new List<string>();
+                        foreach (var messageId in this.rpcWaiters.Keys)
+                        {
+                            var rpcWaiter = this.rpcWaiters[messageId];
+                            var elapsedSeconds = DateTime.Now.Subtract(rpcWaiter.CreatedAt).TotalSeconds - rpcWaiter.TimeoutSeconds;
+                            if (elapsedSeconds < rpcWaiter.TimeoutSeconds)
+                                continue;
+                            rpcWaiter.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{elapsedSeconds}s"));
+                            removedKeys.Add(messageId);
+                        }
+                        removedKeys.ForEach(f => this.rpcWaiters.TryRemove(f, out _));
                     }
                     for (int i = 0; i < 10; i++)
                     {
@@ -667,6 +675,7 @@ class MessageDrivenService : IMessageDriven
                 //先创建激活的SAC消费者
                 var queueName = $"{mySetting.Queue}.{i}";
                 rabbitConsumers = this.consumers.GetOrAdd(queueName, f => new List<RabbitConsumer>());
+                //消费者ID带有服务ID，可以展现各个服务中消费者的分布情况，便于平衡各个服务中消费者
                 var consumerId = $"{queueName}.{this.ServiceId}.0";
                 if (!consumerIds.TryGetValue(queueName, out var myConsumerIds))
                     consumerIds.TryAdd(queueName, myConsumerIds = new());
