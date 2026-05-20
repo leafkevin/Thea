@@ -60,37 +60,42 @@ public static class TheaExtensions
         value = default;
         return false;
     }
-    public static Task<T> WithTimeout<T>(this TaskCompletionSource<T> tcs, TimeSpan timeout)
+    public static async Task<T> WaitAsync<T>(this TaskCompletionSource<T> tcs, TimeSpan timeout, string exMessage, CancellationToken cancellationToken = default)
     {
-        var timeoutCts = new CancellationTokenSource(timeout);
-        var registration = timeoutCts.Token.Register(() =>
-            tcs.TrySetException(new TimeoutException($"操作在{timeout.TotalSeconds}s内未完成")));
-        // 当任务完成时清理资源
-        tcs.Task.ContinueWith(_ =>
+        var cts = new CancellationTokenSource(timeout);
+        var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cts.Token);
+        var message = exMessage ?? $"操作超时, 耗时{timeout.TotalSeconds}s";
+        var ctr = cts.Token.Register(() =>
         {
-            registration.Dispose();
-            timeoutCts.Dispose();
-        }, TaskContinuationOptions.ExecuteSynchronously);
-        return tcs.Task;
-    }
-
-    public static Task<T> WithTimeout<T>(this TaskCompletionSource<T> tcs, TimeSpan timeout, CancellationToken cancellationToken = default)
-    {
-        var timeoutCts = new CancellationTokenSource(timeout);
-        var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
-        var registration = combinedCts.Token.Register(() =>
-        {
-            if (timeoutCts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                tcs.TrySetException(new TimeoutException($"操作在{timeout.TotalSeconds}s内未完成"));
+            tcs.TrySetException(new TimeoutException(message));
+            if (cts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                tcs.TrySetException(new TimeoutException(message));
             else tcs.TrySetCanceled(cancellationToken);
         });
-        tcs.Task.ContinueWith(_ =>
-        {
-            registration.Dispose();
-            combinedCts.Dispose();
-            timeoutCts.Dispose();
-        }, TaskContinuationOptions.ExecuteSynchronously);
-        return tcs.Task;
+        var result = await tcs.Task;
+        ctr.Dispose();
+        combinedCts.Dispose();
+        cts.Dispose();
+        return result;
     }
+    //public static Task<T> WithTimeout<T>(this TaskCompletionSource<T> tcs, TimeSpan timeout, CancellationToken cancellationToken = default, string exMessage = null)
+    //{
+    //    var timeoutCts = new CancellationTokenSource(timeout);
+    //    var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+    //    var message = exMessage ?? $"操作在{timeout.TotalSeconds}s内未完成";
+
+    //    var registration = combinedCts.Token.Register(() =>
+    //    {
+    //        if (timeoutCts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+    //            tcs.TrySetException(new TimeoutException(message));
+    //        else tcs.TrySetCanceled(cancellationToken);
+    //    });
+    //    tcs.Task.ContinueWith(_ =>
+    //    {
+    //        registration.Dispose();
+    //        combinedCts.Dispose();
+    //        timeoutCts.Dispose();
+    //    }, TaskContinuationOptions.ExecuteSynchronously);
+    //    return tcs.Task;
+    //}
 }

@@ -57,16 +57,16 @@ class MySqlProvider : DbHelper
     public List<ColumnInfo> GetColumnList(string database, string tableName)
     {
         var sql = @"SELECT a.COLUMN_NAME,
-		    a.DATA_TYPE,
-		    a.COLUMN_TYPE,
-		    a.CHARACTER_MAXIMUM_LENGTH,
-		    a.NUMERIC_SCALE,
-		    a.NUMERIC_PRECISION,
-		    a.COLUMN_COMMENT,
-		    a.COLUMN_DEFAULT,
-		    a.COLUMN_KEY,
-		    a.EXTRA,
-		    a.IS_NULLABLE,
+		a.DATA_TYPE,
+		a.COLUMN_TYPE,
+		a.CHARACTER_MAXIMUM_LENGTH,
+		a.NUMERIC_SCALE,
+		a.NUMERIC_PRECISION,
+		a.COLUMN_COMMENT,
+		a.COLUMN_DEFAULT,
+		a.COLUMN_KEY,
+		a.EXTRA,
+		a.IS_NULLABLE,
         	a.ORDINAL_POSITION
     	FROM INFORMATION_SCHEMA.COLUMNS a
     	WHERE a.TABLE_SCHEMA='{0}' AND a.TABLE_NAME='{1}'
@@ -169,7 +169,7 @@ class MySqlProvider : DbHelper
                 break;
             case "date":
                 result.NativeDbType = "MySqlDbType.Date";
-                result.MemberType = "DateOnly";
+                result.MemberType = "DateTime";
                 break;
             case "timestamp":
                 result.NativeDbType = "MySqlDbType.Timestamp";

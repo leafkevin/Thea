@@ -29,9 +29,13 @@ class Message
     public string Type { get; set; }
     public string TraceId { get; set; }
     /// <summary>
-    /// 心跳时是AppId，RpcMessage时，是NodeId
+    /// 心跳时是AppId
     /// </summary>
     public string From { get; set; }
+    /// <summary>
+    /// RpcMessage响应发送的队列
+    /// </summary>
+    public string ReplyTo { get; set; }
     public string Exchange { get; set; }
     public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }
@@ -59,7 +63,8 @@ class ConsumerWaiter
 class RpcWaiter
 {
     public string MessageId { get; set; }
-    public TaskCompletionSource<Message<string>> Waiter { get; set; } = new();
-    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public TaskCompletionSource<Message<string>> Waiter { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int TimeoutSeconds { get; set; } = 30;
+    public string TimeoutMessage { get; set; }
 }

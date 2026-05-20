@@ -17,6 +17,7 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
+    private readonly int timeout = 15;
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
@@ -231,7 +232,7 @@ class RabbitConsumer
                                     IsSuccess = isSuccess,
                                     Result = result,
                                     RetryTimes = iLoop,
-                                    UpdatedBy = "MessageDrivenService",
+                                    UpdatedBy = this.parent.AppId,
                                     UpdatedAt = DateTime.Now
                                 }
                             });
@@ -266,6 +267,7 @@ class RabbitConsumer
                                 AppId = this.parent.AppId,
                                 DeliveryMode = DeliveryModes.Persistent,
                                 MessageId = ea.BasicProperties.MessageId,
+                                CorrelationId = ea.BasicProperties.MessageId,
                                 Headers = new Dictionary<string, object> { { "TraceId", traceId } }
                             }, result);
                         }
@@ -277,7 +279,7 @@ class RabbitConsumer
                     break;
                 case Consts.WaitStarting:
                 case Consts.WaitShutdowning:
-                    Console.WriteLine($"队列 {this.QueueName} 收到 {messageType} 标志消息!!");
+                    Console.WriteLine($"队列 {this.QueueName} 收到 {messageType} 标志消息!");
                     //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
                     await this.parent.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, new BasicProperties
                     {
@@ -332,21 +334,22 @@ class RabbitConsumer
                             MessageId = messageId,
                             Type = messageType,
                             Body = body,
-                            Waiter = new()
+                            Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
                         };
                         int retryTimes = 0;
                         while (retryTimes < 3)
                         {
                             try
                             {
+                                var exMessage = $"心跳处理超时, 耗时{timeout}s, message: {syncMessage.ToJson()}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
                                 await this.parent.ProcessMessage(syncMessage);
-                                await syncMessage.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                                await syncMessage.Waiter.WaitAsync(TimeSpan.FromSeconds(timeout), exMessage, this.cancellationSource.Token);
                                 retryTimes++;
                                 break;
                             }
                             catch (TimeoutException ex)
                             {
-                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{messageType} message timeout 15s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{messageType} message timeout {timeout}s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                 Console.WriteLine($"{messageType} message timeout 15s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                                 continue;
                             }
@@ -421,9 +424,11 @@ class RabbitConsumer
             {
                 try
                 {
+                    const int timeout = 15;
+                    var exMessage = $"WaitStarting处理超时, 耗时{timeout}s, message: {syncMessage.ToJson()}";
                     message.Waiter = new TaskCompletionSource<bool>();
                     await this.parent.ProcessMessage(message);
-                    await message.Waiter.WithTimeout(TimeSpan.FromSeconds(15));
+                    await message.Waiter.WaitAsync(TimeSpan.FromSeconds(15), $"WaitStarting处理超时, 耗时15s, message: {message.ToJson()}", this.cancellationSource.Token);
                     retryTimes++;
                     break;
                 }

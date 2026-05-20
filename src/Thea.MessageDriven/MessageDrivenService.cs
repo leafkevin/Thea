@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -87,32 +86,32 @@ class MessageDrivenService : IMessageDriven
                 try
                 {
                     //每10秒发送一次心跳，根据配置更新本地集群配置信息localQueues，配置中心或是数据库会有更改，比如：临时禁用某个集群
-                    if (DateTime.Now - this.lastInitedTime >= this.heartbeatCycle)
+                    if (DateTime.UtcNow - this.lastInitedTime >= this.heartbeatCycle)
                     {
                         if (this.hasConsumer)
                             await this.Initialize();
-                        this.lastInitedTime = DateTime.Now;
+                        this.lastInitedTime = DateTime.UtcNow;
                     }
-                    if ((DateTime.Now - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
+                    if ((DateTime.UtcNow - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
                         || logs.Count >= 100)
                     {
                         await this.repository.WriteLogs(logs);
                         logs.Clear();
-                        this.lastLoggedTime = DateTime.Now;
+                        this.lastLoggedTime = DateTime.UtcNow;
                     }
                     if (this.rpcWaiters.IsEmpty)
                     {
-                        var removedKeys = new List<string>();
-                        foreach (var messageId in this.rpcWaiters.Keys)
+                        var messageIds = this.rpcWaiters.Keys.ToList();
+                        foreach (var messageId in messageIds)
                         {
                             var rpcWaiter = this.rpcWaiters[messageId];
-                            var elapsedSeconds = DateTime.Now.Subtract(rpcWaiter.CreatedAt).TotalSeconds - rpcWaiter.TimeoutSeconds;
+                            var elapsedSeconds = DateTime.UtcNow.Subtract(rpcWaiter.CreatedAt).TotalSeconds - rpcWaiter.TimeoutSeconds;
                             if (elapsedSeconds < rpcWaiter.TimeoutSeconds)
                                 continue;
-                            rpcWaiter.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{elapsedSeconds}s"));
-                            removedKeys.Add(messageId);
+                            //只结束超时的RPC请求，不做清理工作，清理工作在Request方法中处理
+                            rpcWaiter.Waiter.TrySetException(new TimeoutException(rpcWaiter.TimeoutMessage));
+                            this.rpcWaiters.TryRemove(messageId, out _);
                         }
-                        removedKeys.ForEach(f => this.rpcWaiters.TryRemove(f, out _));
                     }
                     for (int i = 0; i < 10; i++)
                     {
@@ -143,39 +142,45 @@ class MessageDrivenService : IMessageDriven
                                     if (message.Type == Consts.RpcMessage)
                                     {
                                         //RPC消息，设置回复队列和过期时间
-                                        properties.ReplyTo = message.From;
+                                        properties.ReplyTo = message.ReplyTo;
                                         properties.CorrelationId = message.MessageId;
                                     }
-                                    var mySettings = this.settings.FindAll(f => f.Exchanges.Contains(message.Exchange) && f.IsEnabled);
-                                    if (mySettings == null || mySettings.Count == 0)
+                                    var mySettings = this.settings.FindAll(f => f.Exchanges.Contains(message.Exchange) && f.IsStateful && f.IsEnabled);
+                                    if (mySettings != null && mySettings.Count > 0)
                                     {
-                                        this.logger.LogTagWarning("MessageDriven", $"未找到有效的交换机{message.Exchange}的配置信息，消息无法发送");
-                                        Console.WriteLine($"未找到有效的交换机{message.Exchange}的配置信息，消息无法发送");
-                                        message.Waiter?.TrySetResult(true);
+                                        if (mySettings.Select(f => f.WorkloadTotal).Distinct().Count() > 1)
+                                        {
+                                            var exMessage = $"交换机{message.Exchange}绑定的有状态队列{string.Join(",", mySettings.Select(f => f.Queue))}的负载个数不一致，无法支持负载均衡，请调整为一致的负载个数";
+                                            this.logger.LogTagWarning("MessageDriven", exMessage);
+                                            Console.WriteLine(exMessage);
+                                            message.Waiter?.TrySetResult(true);
+                                            throw new NotSupportedException(exMessage);
+                                        }
+                                        foreach (var mySetting in mySettings)
+                                        {
+                                            if (mySetting.IsStateful)
+                                            {
+                                                if (this.localQueues.Contains(mySetting.Queue))
+                                                {
+                                                    int routingKey = 0;
+                                                    if (mySetting.WorkloadTotal > 1)
+                                                        routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, mySetting.WorkloadTotal);
+                                                    message.RoutingKey = routingKey.ToString();
+                                                    await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, message.Body.ToJson());
+                                                }
+                                                //转发时，要带上Exchange,RoutingKey
+                                                else
+                                                {
+                                                    properties.Headers.Add("Exchange", message.Exchange);
+                                                    properties.Headers.Add("RoutingKey", message.RoutingKey);
+                                                    await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, $"{Consts.TransferQueue}.{mySetting.Queue}", properties, message.Body.ToJson());
+                                                }
+                                            }
+                                            else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, message.Body.ToJson());
+                                        }
                                         break;
                                     }
-                                    foreach (var mySetting in mySettings)
-                                    {
-                                        if (mySetting.IsStateful)
-                                        {
-                                            if (this.localQueues.Contains(mySetting.Queue))
-                                            {
-                                                int routingKey = 0;
-                                                if (mySetting.WorkloadTotal > 1)
-                                                    routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, mySetting.WorkloadTotal);
-                                                message.RoutingKey = routingKey.ToString();
-                                                await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, message.Body.ToJson());
-                                            }
-                                            //转发时，要带上Exchange,RoutingKey
-                                            else
-                                            {
-                                                properties.Headers.Add("Exchange", message.Exchange);
-                                                properties.Headers.Add("RoutingKey", message.RoutingKey);
-                                                await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, $"{Consts.TransferQueue}.{mySetting.Queue}", properties, message.Body.ToJson());
-                                            }
-                                        }
-                                        else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, message.Body.ToJson());
-                                    }
+
                                 }
                                 //防止条件问题阻塞后续消费
                                 message.Waiter?.TrySetResult(true);
@@ -183,8 +188,7 @@ class MessageDrivenService : IMessageDriven
                             case Consts.Heartbeat:
                                 //用户消息堆积，心跳消息也会阻塞，此节点会被认为是异常节点，将会从可用节点中移除
                                 var nodeId = (string)message.Body;
-                                this.heartbeats.AddOrUpdate(nodeId, DateTime.Now, (k, o) => DateTime.Now);
-                                message.Waiter?.TrySetResult(true);
+                                this.heartbeats.AddOrUpdate(nodeId, DateTime.UtcNow, (k, o) => DateTime.UtcNow);
                                 break;
                             case Consts.WaitStarting:
                                 queueName = (string)message.Body;
@@ -271,8 +275,6 @@ class MessageDrivenService : IMessageDriven
 
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
-        if (!this.localExchanges.Contains(exchange))
-            throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
         var traceId = string.Empty;
@@ -290,8 +292,6 @@ class MessageDrivenService : IMessageDriven
     }
     public async Task PublishRpcAsync<TRequest>(string replyToQueue, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default)
     {
-        if (!this.localExchanges.Contains(exchange))
-            throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
@@ -306,7 +306,7 @@ class MessageDrivenService : IMessageDriven
         await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = messageId,
-            From = replyToQueue,
+            ReplyTo = replyToQueue,
             Type = Consts.RpcMessage,
             TraceId = traceId,
             Exchange = exchange,
@@ -316,10 +316,8 @@ class MessageDrivenService : IMessageDriven
     }
     public async Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest request, int timeoutSeconds = 30, CancellationToken cancellationToken = default)
     {
-        if (!this.localExchanges.Contains(exchange))
-            throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (!this.isRpcConsumer)
-            throw new Exception($"未配置RPC消费者，请使用方法：UseRpcConsumer()或是UseProducer(isUseRpc:true)配置RPC消费者");
+            throw new Exception($"未配置RPC消费者，请使用方法：UseRpcConsumer()配置RPC消费者");
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
@@ -328,12 +326,13 @@ class MessageDrivenService : IMessageDriven
             traceId = scopeState.TraceId;
         var messageId = ObjectId.NewId();
 
-        var rpcWaiter = new RpcWaiter { MessageId = messageId, TimeoutSeconds = timeoutSeconds };
+        var exMessage = $"RPC请求超时, 耗时{timeoutSeconds}s, message: {request.ToJson()}, exchange: {exchange}, routingKey: {routingKey}";
+        var rpcWaiter = new RpcWaiter { MessageId = messageId, TimeoutSeconds = timeoutSeconds, TimeoutMessage = exMessage };
         this.rpcWaiters.TryAdd(messageId, rpcWaiter);
         await this.channel.Writer.WriteAsync(new Message
         {
             MessageId = messageId,
-            From = $"rpc.result.{this.ServiceId}",
+            ReplyTo = $"rpc.result.{this.ServiceId}",
             Type = Consts.RpcMessage,
             TraceId = traceId,
             Exchange = exchange,
@@ -342,7 +341,7 @@ class MessageDrivenService : IMessageDriven
         }, cancellationToken);
 
         //Console.WriteLine($"RpcMessage,Request Message, MessageId: {theaMessage.MessageId}, From:{this.ServiceId}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        var rpcMessage = await rpcWaiter.Waiter.WithTimeout(TimeSpan.FromSeconds(timeoutSeconds));
+        var rpcMessage = await rpcWaiter.Waiter.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), exMessage, cancellationToken);
         if (rpcMessage.Type == Consts.RpcFailure)
             throw new Exception(rpcMessage.Body);
         return rpcMessage.Body.JsonTo<TResponse>();
