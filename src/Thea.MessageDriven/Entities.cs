@@ -17,33 +17,9 @@ public class Setting
     /// </summary>
     public List<string> Exchanges { get; set; }
     /// <summary>
-    /// 绑定类型
-    /// </summary>
-    public string BindType { get; set; }
-    /// <summary>
-    /// 绑定KEY
-    /// </summary>
-    public string BindingKey { get; set; }
-    /// <summary>
-    /// 是否仲裁队列
-    /// </summary>
-    public bool IsQuorumQueue { get; set; }
-    /// <summary>
     /// 是否有状态
     /// </summary>
     public bool IsStateful { get; set; }
-    /// <summary>
-    /// 是否单一激活消费者
-    /// </summary>
-    public bool IsSingleActiveConsumer { get; set; }
-    /// <summary>
-    /// 是否需要转发
-    /// </summary>
-    public bool IsNeedTransfer { get; set; }
-    /// <summary>
-    /// 是否延迟消息
-    /// </summary>
-    public bool IsDelay { get; set; }
     /// <summary>
     /// 工作负荷个数
     /// </summary>
@@ -77,7 +53,27 @@ public class Setting
     /// </summary>
     public DateTime UpdatedAt { get; set; }
 
-    public Setting Clone() => this.MemberwiseClone() as Setting;
+
+    /// <summary>
+    /// 绑定类型
+    /// </summary>
+    public string BindType { get; set; }
+    /// <summary>
+    /// 绑定KEY
+    /// </summary>
+    public string BindingKey { get; set; }
+    /// <summary>
+    /// 是否仲裁队列
+    /// </summary>
+    public bool IsQuorumQueue { get; set; }
+    /// <summary>
+    /// 是否单一激活消费者
+    /// </summary>
+    public bool IsSingleActiveConsumer { get; set; }
+    /// <summary>
+    /// 是否延迟消息
+    /// </summary>
+    public bool IsDelay { get; set; }
 }
 class ConfigInfo
 {

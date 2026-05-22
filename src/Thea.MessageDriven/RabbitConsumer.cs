@@ -105,30 +105,25 @@ class RabbitConsumer
         this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
         this.channel = await this.connection.CreateChannelAsync();
-        await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
-        switch (this.queueType)
-        {
-            case QueueType.Message: await this.BindUserMessageHandler(); break;
-            case QueueType.Transfer: await this.BindTransferHandler(); break;
-        }
-    }
-    public async Task Start(string exclusiveExchange, string exclusiveBindingKey)
-    {
-        if (this.IsActivated) return;
-        this.cancellationSource = new();
-        this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
-        this.channel = await this.connection.CreateChannelAsync();
-
-        if (this.queueType == QueueType.Heartbeat || this.queueType == QueueType.RpcResult)
+        if (this.queueType == QueueType.Heartbeat)
         {
             await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
-            await this.channel.QueueBindAsync(this.QueueName, exclusiveExchange, exclusiveBindingKey);
+            await this.channel.QueueBindAsync(this.QueueName, $"{Consts.HeartbeatExchange}.{this.parent.AppId}", this.parent.AppId);
         }
         await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
         switch (this.queueType)
         {
-            case QueueType.Heartbeat: await this.BindHeartbeatHandler(); break;
-            case QueueType.RpcResult: await this.BindRpcResultHandler(); break;
+            case QueueType.Heartbeat:
+                await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
+                await this.channel.QueueBindAsync(this.QueueName, $"{Consts.HeartbeatExchange}.{this.parent.AppId}", this.parent.AppId);
+                await this.BindHeartbeatHandler();
+                break;
+            case QueueType.Message: await this.BindUserMessageHandler(); break;
+            case QueueType.Transfer: await this.BindTransferHandler(); break;
+            case QueueType.RpcResult:
+                await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
+                await this.BindRpcResultHandler();
+                break;
         }
     }
     public async Task Shutdown(bool isForce = false)

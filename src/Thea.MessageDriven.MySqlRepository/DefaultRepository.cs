@@ -39,10 +39,12 @@ public class DefaultRepository : IMessageDrivenRepository
         var repository = this.dbFactory.Create(this.dbKey);
         await repository.Create<Setting>()
             .WithBulk(settings)
-            .OnDuplicateKeyUpdate(t => t.Set(f => new { Exchanges = t.Values(f.Exchanges) }))
+            .OnDuplicateKeyUpdate(t => t.Set(f => new
+            {
+                Exchanges = t.Values(f.Exchanges),
+                IsStateful = t.Values(f.IsStateful)
+            }))
             .ExecuteAsync();
-        //这里不能更新缓存，一更新缓存，只有生产者的组件，在队列没有创建好前，获得了这个配置，
-        //消息会被发送到一个不存在的队列，导致消息丢失
     }
     public virtual async Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null)
     {

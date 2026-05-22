@@ -6,6 +6,7 @@ CREATE TABLE `mds_setting`
     `exchanges` VARCHAR(300) NULL COMMENT '交换机',
     `bind_type` VARCHAR(50) NULL COMMENT '绑定类型',
     `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
+    `is_stateful` TINYINT(1) NULL DEFAULT 0 COMMENT '是否有状态',
     `workload_total` INT NULL COMMENT '工作负荷个数',
     `prefetch_count` INT NULL DEFAULT 250 COMMENT '预取个数',
     `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',

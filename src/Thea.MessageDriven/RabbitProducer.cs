@@ -81,10 +81,10 @@ class RabbitProducer : IDisposable
         }
         await this.channel.Writer.WriteAsync(rabbitChannel);
     }
-    public async Task BindExchange(string exchange, string toExchange, string routingKey)
+    public async Task BindExchange(string fromExchange, string toExchange, string routingKey)
     {
         var rabbitChannel = await this.channel.Reader.ReadAsync();
-        await rabbitChannel.ExchangeBindAsync(toExchange, exchange, routingKey);
+        await rabbitChannel.ExchangeBindAsync(toExchange, fromExchange, routingKey);
         await this.channel.Writer.WriteAsync(rabbitChannel);
     }
     public async Task BindQueue(string exchange, string queueName, string routingKey)
