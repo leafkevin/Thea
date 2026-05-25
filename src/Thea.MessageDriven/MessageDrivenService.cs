@@ -108,9 +108,9 @@ class MessageDrivenService : IMessageDriven
                             var elapsedSeconds = DateTime.UtcNow.Subtract(rpcWaiter.CreatedAt).TotalSeconds - rpcWaiter.TimeoutSeconds;
                             if (elapsedSeconds < rpcWaiter.TimeoutSeconds)
                                 continue;
+                            this.rpcWaiters.TryRemove(messageId, out _);
                             //只结束超时的RPC请求，不做清理工作，清理工作在Request方法中处理
                             rpcWaiter.Waiter.TrySetException(new TimeoutException(rpcWaiter.TimeoutMessage));
-                            this.rpcWaiters.TryRemove(messageId, out _);
                         }
                     }
                     for (int i = 0; i < 10; i++)
@@ -146,47 +146,32 @@ class MessageDrivenService : IMessageDriven
                                         properties.CorrelationId = message.MessageId;
                                     }
 
-
                                     if (this.hasConsumer)
                                     {
+                                        var workloadTotals = this.settings.Where(f => f.Exchanges.Contains(message.Exchange) && f.IsStateful)
+                                            .Select(f => f.WorkloadTotal).Distinct().ToList();
 
-                                    }
-                                    else
-                                    {
-                                        localExchanges
-                                    }
-
-                                    if (mySettings != null && mySettings.Count > 0)
-                                    {
-
-                                        foreach (var mySetting in mySettings)
+                                        //如果存在有状态队列，根据消息的RoutingKey进行一致性哈希，路由到对应的队列中
+                                        if (workloadTotals.Count > 0)
                                         {
-                                            if (mySetting.IsStateful)
+                                            if (workloadTotals.Count > 1)
                                             {
-                                                if (this.localQueues.Contains(mySetting.Queue))
-                                                {
-                                                    int routingKey = 0;
-                                                    if (mySetting.WorkloadTotal > 1)
-                                                        routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, mySetting.WorkloadTotal);
-                                                    message.RoutingKey = routingKey.ToString();
-                                                    await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, message.Body.ToJson());
-                                                }
-                                                //转发时，要带上Exchange,RoutingKey
-                                                else
-                                                {
-                                                    properties.Headers.Add("Exchange", message.Exchange);
-                                                    properties.Headers.Add("RoutingKey", message.RoutingKey);
-                                                    await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, $"{Consts.TransferQueue}.{mySetting.Queue}", properties, message.Body.ToJson());
-                                                }
+                                                var exMessage = $"交换机{message.Exchange}绑定的有状态队列工作负载个数不一致，无法实现消息负载均衡，请检查配置";
+                                                this.logger.LogTagError("MessageDriven", new Exception(exMessage), exMessage);
+                                                Console.WriteLine(exMessage);
+                                                throw new Exception(exMessage);
                                             }
-                                            else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, message.Body.ToJson());
+                                            var routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, workloadTotals[0]);
+                                            message.RoutingKey = routingKey.ToString();
+                                            await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, message.Body.ToJson());
                                         }
-                                        break;
+                                        //如果没有有状态队列，直接路由到交换机，由交换机根据绑定规则路由到对应的队列中
+                                        else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, message.Body.ToJson());
                                     }
-                                    else
-                                    {
-
-                                    }
+                                    //如果当前应用没有对应的消费者，消息会发送到其他应用的交换机，直接发送不做任何处理
+                                    //有状态消息时，exhcange是其他应用的交换机，$"Consts.TransferQueue.{this.AppId}"，如：transfer.GameConsumer
+                                    //无状态消息时，exchange直接就是消息的交换机，如：player
+                                    else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, message.Body.ToJson());
                                 }
                                 //防止条件问题阻塞后续消费
                                 message.Waiter?.TrySetResult(true);
@@ -355,8 +340,6 @@ class MessageDrivenService : IMessageDriven
     {
         if (enqueueTimeUtc < DateTime.UtcNow)
             throw new Exception($"入队时间晚于现在时间，只能选择未来时间");
-        if (!this.localExchanges.Contains(exchange))
-            throw new Exception($"未注册的交换机{exchange}，请使用UseProducer或是UseStatefulConsumer、UseSubscriber方法进行注册");
         if (message == null)
             throw new ArgumentNullException(nameof(message));
 
@@ -374,7 +357,6 @@ class MessageDrivenService : IMessageDriven
             Body = message.ToJson()
         }, cancellationToken);
     }
-
     public void UseBinding(string fromExchange, string toExchange, string routingKey)
     {
         if (this.bindings.Exists(f => f.FromExchange == fromExchange && f.ToExchange == toExchange))
@@ -496,30 +478,7 @@ class MessageDrivenService : IMessageDriven
         else if (!myQueue.Exchanges.Contains(exchange))
             myQueue.Exchanges.Add(exchange);
     }
-    public void UseTransfer(int queueCount = 1, bool isQuorumQueue = true)
-    {
-        if (queueCount <= 0) throw new Exception($"转发队列个数必须大于0");
-        this.isNeedTransfer = true;
-        var queueName = $"{Consts.TransferQueue}.{this.AppId}";
-        this.settings.Add(new Setting
-        {
-            Queue = queueName,
-            BindType = Consts.TopicBindingType,
-            IsQuorumQueue = isQuorumQueue,
-            IsStateful = queueCount > 1,
-            IsSingleActiveConsumer = false,
-            IsDelay = false,
-            PrefetchCount = 250,
-            WorkloadTotal = queueCount,
-            Exchanges = [queueName],
-            IsEnabled = true,
-            IsLogEnabled = false,
-            CreatedBy = this.AppId,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedBy = this.AppId,
-            UpdatedAt = DateTime.UtcNow
-        });
-    }
+    public void UseTransfer() => this.isNeedTransfer = true;
     public void UseRpcConsumer() => this.isRpcConsumer = true;
     public async Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null)
     {

@@ -276,7 +276,7 @@ class RabbitConsumer
                 case Consts.WaitShutdowning:
                     Console.WriteLine($"队列 {this.QueueName} 收到 {messageType} 标志消息!");
                     //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
-                    await this.parent.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, Consts.FanoutRoutingKey, new BasicProperties
+                    await this.parent.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, Consts.DirectRoutingKey, new BasicProperties
                     {
                         Persistent = true,
                         Type = messageType,
@@ -420,7 +420,7 @@ class RabbitConsumer
                 try
                 {
                     const int timeout = 15;
-                    var exMessage = $"WaitStarting处理超时, 耗时{timeout}s, message: {syncMessage.ToJson()}";
+                    var exMessage = $"WaitStarting处理超时, 耗时{timeout}s, message: {message.ToJson()}";
                     message.Waiter = new TaskCompletionSource<bool>();
                     await this.parent.ProcessMessage(message);
                     await message.Waiter.WaitAsync(TimeSpan.FromSeconds(15), $"WaitStarting处理超时, 耗时15s, message: {message.ToJson()}", this.cancellationSource.Token);

@@ -88,6 +88,13 @@ class ConfigInfo
     public bool IsAllowCreateExchange { get; set; } = true;
     public bool IsAllowCreateBinding { get; set; } = true;
 }
+class Binding
+{
+    public string FromExchange { get; set; }
+    public string ToExchange { get; set; }
+    public string RoutingKey { get; set; }
+}
+
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志
 /// </summary>
