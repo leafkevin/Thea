@@ -17,7 +17,7 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
-    private readonly int timeout = 15;
+    private readonly int timeout = 30;
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
@@ -272,19 +272,6 @@ class RabbitConsumer
                             throw exception;
                     }
                     break;
-                case Consts.WaitStarting:
-                case Consts.WaitShutdowning:
-                    Console.WriteLine($"队列 {this.QueueName} 收到 {messageType} 标志消息!");
-                    //通知到所有节点，当前队列消息已消费完毕，累加消息完成的队列个数
-                    await this.parent.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, Consts.DirectRoutingKey, new BasicProperties
-                    {
-                        Persistent = true,
-                        Type = messageType,
-                        DeliveryMode = DeliveryModes.Persistent,
-                        AppId = this.parent.AppId,
-                        MessageId = ea.BasicProperties.MessageId
-                    }, jsonBody);
-                    break;
                 default: throw new Exception("Unknown message type");
             }
             await channel.BasicAckAsync(ea.DeliveryTag, false);
@@ -307,63 +294,16 @@ class RabbitConsumer
             var messageId = ea.BasicProperties.MessageId;
             var messageType = ea.BasicProperties.Type;
             var appId = ea.BasicProperties.AppId;
-            switch (messageType)
+            if (appId == this.parent.AppId)
             {
-                case Consts.Heartbeat:
-                    if (appId == this.parent.AppId)
-                    {
-                        await this.parent.ProcessMessage(new Message
-                        {
-                            MessageId = messageId,
-                            Type = messageType,
-                            Body = body
-                        });
-                    }
-                    break;
-                case Consts.WaitStarting:
-                case Consts.WaitShutdowning:
-                    if (appId == this.parent.AppId)
-                    {
-                        var syncMessage = new Message
-                        {
-                            MessageId = messageId,
-                            Type = messageType,
-                            Body = body,
-                            Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
-                        };
-                        int retryTimes = 0;
-                        while (retryTimes < 3)
-                        {
-                            try
-                            {
-                                var exMessage = $"心跳处理超时, 耗时{timeout}s, message: {syncMessage.ToJson()}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-                                await this.parent.ProcessMessage(syncMessage);
-                                await syncMessage.Waiter.WaitAsync(TimeSpan.FromSeconds(timeout), exMessage, this.cancellationSource.Token);
-                                retryTimes++;
-                                break;
-                            }
-                            catch (TimeoutException ex)
-                            {
-                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{messageType} message timeout {timeout}s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                Console.WriteLine($"{messageType} message timeout 15s, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                continue;
-                            }
-                            catch (Exception ex)
-                            {
-                                this.logger.LogTagError("BindHeartbeatHandler", ex, $"{messageType} message exception, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                Console.WriteLine($"Transfer message exception, MessageId: {messageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                continue;
-                            }
-                        }
-                        syncMessage.Waiter = null;
-                    }
-                    break;
-                default: throw new Exception("Unknown message type");
+                await this.parent.ProcessMessage(new Message
+                {
+                    MessageId = messageId,
+                    Type = messageType,
+                    Body = body
+                });
             }
             await channel.BasicAckAsync(ea.DeliveryTag, false);
-            //再延迟停止
-            if (this.isDeferClose)
-                await this.Close();
         };
         await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
@@ -415,28 +355,27 @@ class RabbitConsumer
             };
 
             int retryTimes = 0;
+            var exMessage = $"Transfer message timeout {timeout}s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
             while (retryTimes < 3)
             {
                 try
                 {
-                    const int timeout = 15;
-                    var exMessage = $"WaitStarting处理超时, 耗时{timeout}s, message: {message.ToJson()}";
                     message.Waiter = new TaskCompletionSource<bool>();
                     await this.parent.ProcessMessage(message);
-                    await message.Waiter.WaitAsync(TimeSpan.FromSeconds(15), $"WaitStarting处理超时, 耗时15s, message: {message.ToJson()}", this.cancellationSource.Token);
+                    await message.Waiter.WaitAsync(TimeSpan.FromSeconds(timeout), exMessage, this.cancellationSource.Token);
                     retryTimes++;
                     break;
                 }
                 catch (TimeoutException ex)
                 {
-                    this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                    Console.WriteLine($"Transfer message timeout 15s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    this.logger.LogTagError("BindTransferHandler", ex, exMessage);
+                    Console.WriteLine(exMessage);
                     continue;
                 }
                 catch (Exception ex)
                 {
-                    this.logger.LogTagError("BindTransferHandler", ex, $"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                    Console.WriteLine($"Transfer message exception, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    this.logger.LogTagError("BindTransferHandler", ex, exMessage);
+                    Console.WriteLine(exMessage);
                     continue;
                 }
             }

@@ -49,11 +49,6 @@ public class MessageDrivenBuilder
         this.messageDriven.UseBinding(fromExchange, toExchange, routingKey);
         return this;
     }
-    public MessageDrivenBuilder UseTransfer()
-    {
-        this.messageDriven.UseTransfer();
-        return this;
-    }
     public MessageDrivenBuilder UseRpcConsumer()
     {
         this.messageDriven.UseRpcConsumer();
