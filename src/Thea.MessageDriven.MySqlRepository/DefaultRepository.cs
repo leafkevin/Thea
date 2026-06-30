@@ -22,40 +22,59 @@ public class DefaultRepository : IMessageDrivenRepository
         this.appId = configuration.GetValue<string>("AppId");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
-    public virtual async Task<List<Setting>> GetSettings(bool useCache = true)
+    public virtual async Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true)
     {
-        var cacheKey = $"{this.appId}.settings.all";
+        var cacheKey = "thea.queue.all";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
-            var result = await repository.QueryAsync<Setting>();
-            if (result.Count <= 0) return null;
-            return result;
+            return await repository.QueryAsync<Queue>(f => f.IsEnabled);
         });
+        cacheKey = "thea.binding.all";
+        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
+        var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        {
+            var repository = this.dbFactory.Create(this.dbKey);
+            return await repository.QueryAsync<Binding>();
+        });
+        return (queues, bindings);
     }
-    public virtual async Task Register(List<Setting> settings)
+    public virtual async Task Register(List<Queue> queues, List<Binding> bindings)
     {
         var repository = this.dbFactory.Create(this.dbKey);
-        await repository.Create<Setting>()
-            .WithBulk(settings)
-            .OnDuplicateKeyUpdate(t => t.Set(f => new
+        if (queues != null && queues.Count > 0)
+        {
+            await repository.Create<Queue>()
+                .WithBulk(queues)
+                .OnDuplicateKeyUpdate(t => t.Set(f => new { IsStateful = t.Values(f.IsStateful) }))
+                .ExecuteAsync();
+        }
+        if (bindings != null && bindings.Count > 0)
+        {
+            await repository.Create<Binding>()
+                .WithBulk(bindings)
+                .OnDuplicateKeyUpdate(t => t.Set(f => new
+                {
+                    BindType = t.Values(f.BindType),
+                    IsDelay = t.Values(f.IsDelay)
+                }))
+                .ExecuteAsync();
+        }
+    }
+    public virtual async Task Change(Queue myQueue)
+    {
+        var repository = this.dbFactory.Create(this.dbKey);
+        await repository.Update<Queue>()
+            .Set(new
             {
-                Exchanges = t.Values(f.Exchanges),
-                IsStateful = t.Values(f.IsStateful)
-            }))
+                myQueue.WorkloadTotal,
+                myQueue.PrefetchCount,
+                myQueue.IsLogEnabled
+            })
+            .Where(f => f.QueueId == myQueue.QueueId)
             .ExecuteAsync();
-    }
-    public virtual async Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null)
-    {
-        var repository = this.dbFactory.Create(this.dbKey);
-        await repository.Update<Setting>()
-            .Set(new { WorkloadTotal = workloadTotal })
-            .Set(prefetchCount.HasValue, f => f.PrefetchCount, prefetchCount)
-            .Set(isLogEnabled.HasValue, f => f.IsLogEnabled, isLogEnabled)
-            .Where(new { AppId = this.appId, Queue = queue })
-            .ExecuteAsync();
-        var cacheKey = $"{this.appId}.settings.all";
+        var cacheKey = "thea.settings.all";
         await this.redisCache.RemoveAsync(cacheKey);
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)

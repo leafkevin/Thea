@@ -30,11 +30,11 @@ public class MessageDrivenBuilder
         this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo, isSingleActiveConsumer, isQuorumQueue);
         return this;
     }
-    public MessageDrivenBuilder UseSubscriber<TConsumer>(string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isDelay = false, bool isQuorumQueue = true)
+    public MessageDrivenBuilder UseSubscriber<TConsumer>(string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isQuorumQueue = true)
     {
         var consumer = ServiceProvider.GetService<TConsumer>();
         var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseSubscriber(queue, methodInfo, isDelay, isQuorumQueue);
+        this.messageDriven.UseSubscriber(queue, methodInfo, isQuorumQueue);
         return this;
     }
     public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isDelay = false, bool isQuorumQueue = true)
@@ -44,9 +44,9 @@ public class MessageDrivenBuilder
         this.messageDriven.UseSubscriber(exchange, queue, methodInfo, isDelay, isQuorumQueue);
         return this;
     }
-    public MessageDrivenBuilder UseBinding(string fromExchange, string toExchange, string routingKey)
+    public MessageDrivenBuilder UseTransfer(string fromExchange, string toExchange, string routingKey)
     {
-        this.messageDriven.UseBinding(fromExchange, toExchange, routingKey);
+        this.messageDriven.UseTransfer(fromExchange, toExchange, routingKey);
         return this;
     }
     public MessageDrivenBuilder UseRpcConsumer()

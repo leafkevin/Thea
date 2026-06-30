@@ -17,7 +17,6 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
-    private readonly int timeout = 30;
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
@@ -31,10 +30,10 @@ class RabbitConsumer
     private AsyncEventingBasicConsumer consumer = null;
 
     private volatile bool isDeferClose = false;
+    public volatile int PrefetchCount;
     public volatile bool IsLogEnabled;
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
-    public int PrefetchCount { get; internal set; }
     public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false);
     public bool IsRunning => this.consumer?.IsRunning ?? false;
 
@@ -105,26 +104,22 @@ class RabbitConsumer
         this.cancellationSource = new();
         this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
         this.channel = await this.connection.CreateChannelAsync();
-        if (this.queueType == QueueType.Heartbeat)
-        {
-            await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
-            await this.channel.QueueBindAsync(this.QueueName, $"{Consts.HeartbeatExchange}.{this.parent.AppId}", this.parent.AppId);
-        }
-        await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
         switch (this.queueType)
         {
             case QueueType.Heartbeat:
                 await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
-                await this.channel.QueueBindAsync(this.QueueName, $"{Consts.HeartbeatExchange}.{this.parent.AppId}", this.parent.AppId);
+                await this.channel.QueueBindAsync(this.QueueName, Consts.HeartbeatExchange, this.parent.AppId);
                 await this.BindHeartbeatHandler();
                 break;
             case QueueType.Message: await this.BindUserMessageHandler(); break;
             case QueueType.Transfer: await this.BindTransferHandler(); break;
             case QueueType.RpcResult:
                 await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
+                await this.channel.QueueBindAsync(this.QueueName, Consts.RpcExchange, this.parent.ServiceId);
                 await this.BindRpcResultHandler();
                 break;
         }
+        await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
     }
     public async Task Shutdown(bool isForce = false)
     {
@@ -134,7 +129,8 @@ class RabbitConsumer
         if (isForce || !this.IsRunning)
             await this.Close();
     }
-    public async Task<uint> MessageCount() => await this.channel.MessageCountAsync(this.QueueName);
+    public async Task<uint> MessageCount() => this.channel != null
+        ? await this.channel.MessageCountAsync(this.QueueName) : 0;
     private async Task Close()
     {
         if (this.channel != null)
@@ -170,9 +166,10 @@ class RabbitConsumer
             var createdAt = DateTime.Now;
             var messageId = ea.BasicProperties.MessageId;
             var messageType = ea.BasicProperties.Type;
+            var headers = ea.BasicProperties.Headers;
             string traceId = null;
-            if (ea.BasicProperties.Headers != null && ea.BasicProperties.Headers.TryGetValue("TraceId", out var objValue))
-                traceId = Encoding.UTF8.GetString((byte[])ea.BasicProperties.Headers["TraceId"]);
+            if (headers != null && headers.TryGetValue("TraceId", out var objValue))
+                traceId = Encoding.UTF8.GetString((byte[])headers["TraceId"]);
             switch (messageType)
             {
                 case Consts.UserMessage:
@@ -254,15 +251,15 @@ class RabbitConsumer
                         {
                             //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                             var replyToQueue = ea.BasicProperties.ReplyTo;
-                            var rpcType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
+                            var rpcMessageType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
                             await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
                             {
                                 Persistent = true,
-                                Type = rpcType,
-                                AppId = this.parent.AppId,
+                                Type = rpcMessageType,
+                                AppId = ea.BasicProperties.AppId,
                                 DeliveryMode = DeliveryModes.Persistent,
-                                MessageId = ea.BasicProperties.MessageId,
-                                CorrelationId = ea.BasicProperties.MessageId,
+                                MessageId = messageId,
+                                CorrelationId = messageId,
                                 Headers = new Dictionary<string, object> { { "TraceId", traceId } }
                             }, result);
                         }
@@ -290,20 +287,20 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-            var body = Encoding.UTF8.GetString(ea.Body.Span);
-            var messageId = ea.BasicProperties.MessageId;
-            var messageType = ea.BasicProperties.Type;
-            var appId = ea.BasicProperties.AppId;
-            if (appId == this.parent.AppId)
+            var serviceId = Encoding.UTF8.GetString(ea.Body.Span);
+            if (ea.BasicProperties.AppId == this.parent.AppId)
             {
                 await this.parent.ProcessMessage(new Message
                 {
-                    MessageId = messageId,
-                    Type = messageType,
-                    Body = body
+                    MessageId = ea.BasicProperties.MessageId,
+                    Type = ea.BasicProperties.Type,
+                    Body = serviceId
                 });
             }
             await channel.BasicAckAsync(ea.DeliveryTag, false);
+            //再延迟停止
+            if (this.isDeferClose)
+                await this.Close();
         };
         await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
@@ -316,9 +313,13 @@ class RabbitConsumer
             if (this.cancellationSource.IsCancellationRequested)
                 return;
 
-            var body = Encoding.UTF8.GetString(ea.Body.Span);
+            var result = Encoding.UTF8.GetString(ea.Body.Span);
             //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            this.parent.SetRpcResult(ea.BasicProperties.MessageId, new Message<string> { Body = body });
+            this.parent.SetRpcResult(ea.BasicProperties.MessageId, new RpcResponse
+            {
+                Type = ea.BasicProperties.Type,
+                Body = result
+            });
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止
             if (this.isDeferClose)
@@ -335,12 +336,13 @@ class RabbitConsumer
                 return;
 
             var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+            var headers = ea.BasicProperties.Headers;
             string exchange = null, routingKey = null, traceId = null;
-            if (ea.BasicProperties.Headers.TryGetValue("Exchange", out var exchangeBytes))
+            if (headers.TryGetValue("Exchange", out var exchangeBytes))
                 exchange = Encoding.UTF8.GetString((byte[])exchangeBytes);
-            if (ea.BasicProperties.Headers.TryGetValue("RoutingKey", out var routingKeyBytes))
+            if (headers.TryGetValue("RoutingKey", out var routingKeyBytes))
                 routingKey = Encoding.UTF8.GetString((byte[])routingKeyBytes);
-            if (ea.BasicProperties.Headers.TryGetValue("TraceId", out var traceIdBytes))
+            if (headers.TryGetValue("TraceId", out var traceIdBytes))
                 traceId = Encoding.UTF8.GetString((byte[])traceIdBytes);
 
             var message = new Message
@@ -350,34 +352,24 @@ class RabbitConsumer
                 Exchange = exchange,
                 RoutingKey = routingKey,
                 TraceId = traceId,
-                From = ea.BasicProperties.ReplyTo,
-                Body = jsonBody.JsonTo<object>()
+                ReplyTo = ea.BasicProperties.ReplyTo,
+                IsJsonMessage = true,
+                Body = jsonBody
             };
 
-            int retryTimes = 0;
-            var exMessage = $"Transfer message timeout {timeout}s, MessageId: {message.MessageId}, Now: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
-            while (retryTimes < 3)
+            var timeoutSeconds = this.parent.HeartbeatCycle.TotalSeconds;
+            var exMessage = $"转发消息超时, 耗时{timeoutSeconds}s, Now: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, Message: {message.ToJson()}, ";
+
+            try
             {
-                try
-                {
-                    message.Waiter = new TaskCompletionSource<bool>();
-                    await this.parent.ProcessMessage(message);
-                    await message.Waiter.WaitAsync(TimeSpan.FromSeconds(timeout), exMessage, this.cancellationSource.Token);
-                    retryTimes++;
-                    break;
-                }
-                catch (TimeoutException ex)
-                {
-                    this.logger.LogTagError("BindTransferHandler", ex, exMessage);
-                    Console.WriteLine(exMessage);
-                    continue;
-                }
-                catch (Exception ex)
-                {
-                    this.logger.LogTagError("BindTransferHandler", ex, exMessage);
-                    Console.WriteLine(exMessage);
-                    continue;
-                }
+                message.Waiter = new TaskCompletionSource<bool>();
+                await this.parent.ProcessMessage(message);
+                await message.Waiter.WaitAsync(this.parent.HeartbeatCycle, exMessage, this.cancellationSource.Token);
+            }
+            catch (Exception ex)
+            {
+                this.logger.LogTagError("BindTransferHandler", ex, exMessage);
+                Console.WriteLine(exMessage);
             }
             await channel.BasicAckAsync(ea.DeliveryTag, false);
             //再延迟停止

@@ -78,24 +78,4 @@ public static class TheaExtensions
         cts.Dispose();
         return result;
     }
-    //public static Task<T> WithTimeout<T>(this TaskCompletionSource<T> tcs, TimeSpan timeout, CancellationToken cancellationToken = default, string exMessage = null)
-    //{
-    //    var timeoutCts = new CancellationTokenSource(timeout);
-    //    var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-    //    var message = exMessage ?? $"操作在{timeout.TotalSeconds}s内未完成";
-
-    //    var registration = combinedCts.Token.Register(() =>
-    //    {
-    //        if (timeoutCts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-    //            tcs.TrySetException(new TimeoutException(message));
-    //        else tcs.TrySetCanceled(cancellationToken);
-    //    });
-    //    tcs.Task.ContinueWith(_ =>
-    //    {
-    //        registration.Dispose();
-    //        combinedCts.Dispose();
-    //        timeoutCts.Dispose();
-    //    }, TaskContinuationOptions.ExecuteSynchronously);
-    //    return tcs.Task;
-    //}
 }

@@ -98,7 +98,6 @@ class RabbitProducer : IDisposable
         var rabbitChannel = await this.channel.Reader.ReadAsync();
         try
         {
-            await rabbitChannel.QueuePurgeAsync(queueName);
             await rabbitChannel.QueueDeleteAsync(queueName);
         }
         catch (Exception ex)
