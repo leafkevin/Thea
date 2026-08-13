@@ -28,7 +28,7 @@ class RabbitConsumer
     private IConnection connection = null;
     private IChannel channel = null;
     private AsyncEventingBasicConsumer consumer = null;
-
+    private string consumerTag;
     private volatile bool isDeferClose = false;
     public volatile int PrefetchCount;
     public volatile bool IsLogEnabled;
@@ -125,7 +125,8 @@ class RabbitConsumer
     {
         if (this.cancellationSource == null) return;
         this.cancellationSource.Cancel();
-        this.isDeferClose = !isForce && !this.IsRunning;
+        this.isDeferClose = !isForce && this.IsRunning;
+        await this.channel.BasicCancelAsync(this.consumerTag);
         if (isForce || !this.IsRunning)
             await this.Close();
     }
@@ -277,7 +278,7 @@ class RabbitConsumer
             if (this.isDeferClose)
                 await this.Close();
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindHeartbeatHandler()
     {
@@ -302,7 +303,7 @@ class RabbitConsumer
             if (this.isDeferClose)
                 await this.Close();
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindRpcResultHandler()
     {
@@ -325,7 +326,7 @@ class RabbitConsumer
             if (this.isDeferClose)
                 await this.Close();
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindTransferHandler()
     {
@@ -376,6 +377,6 @@ class RabbitConsumer
             if (this.isDeferClose)
                 await this.Close();
         };
-        await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
 }

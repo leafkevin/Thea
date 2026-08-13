@@ -205,7 +205,7 @@ class MessageDrivenService : IMessageDriven
         this.cancellationSource.Cancel();
         this.rabbitProducer.Shutdown().Wait();
         foreach (var rabbitConsumers in this.consumers.Values)
-            rabbitConsumers.ForEach(async f => await f.Shutdown());
+            rabbitConsumers.ForEach(f => f.Shutdown().Wait());
         this.consumers.Clear();
         this.heartbeats.Clear();
         this.rabbitProducer.Shutdown().Wait();
