@@ -144,7 +144,7 @@ class MessageDrivenService : IMessageDriven
                                 }
                                 var queueIds = this.bindings.Where(f => f.ExchangeId == message.Exchange)
                                    .Select(f => f.QueueId).ToList();
-                                var statefalQeues = this.queues.FindAll(f => queueIds.Contains(f.QueueId) && f.IsStateful);
+                                var statefalQeues = this.queues.FindAll(f => queueIds.Contains(f.QueueId) && f.IsStateful && f.IsEnabled);
 
                                 var jsonMessage = message.IsJsonMessage ? message.Body.ToString() : message.Body.ToJson();
                                 if (statefalQeues != null && statefalQeues.Count > 0)
@@ -162,7 +162,8 @@ class MessageDrivenService : IMessageDriven
                                         //如果队列消费者是其他应用的，发到转发队列中
                                         properties.Headers.Add("Exchange", message.Exchange);
                                         properties.Headers.Add("RoutingKey", message.RoutingKey);
-                                        await this.rabbitProducer.PublishAsync(Consts.TransferExchange, myQueue.AppId, properties, jsonMessage);
+                                        var transferQueue = $"{Consts.TransferExchange}.{myQueue.AppId}";
+                                        await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, transferQueue, properties, jsonMessage);
                                     }
                                 }
                                 //如果是无状态队列的消息，直接发送交换机
@@ -572,8 +573,11 @@ class MessageDrivenService : IMessageDriven
             }
 
             //创建转发队列
-            queueName = $"{Consts.TransferExchange}.{this.AppId}";
-            await this.rabbitProducer.CreateQueue(queueName, true, true, false);
+            if (this.queues.Exists(f => f.IsStateful && f.AppId == this.AppId))
+            {
+                queueName = $"{Consts.TransferExchange}.{this.AppId}";
+                await this.rabbitProducer.CreateQueue(queueName, true, true, false);
+            }
 
             //创建心跳队列
             queueName = $"{Consts.HeartbeatExchange}.{this.AppId}.{this.ServiceId}";
@@ -602,6 +606,7 @@ class MessageDrivenService : IMessageDriven
                 else await this.rabbitProducer.BindQueue(myBindings[0].ExchangeId, myQueue.QueueId, Consts.DirectRoutingKey);
             }
             //创建转发队列绑定
+
             queueName = $"{Consts.TransferExchange}.{this.AppId}";
             await this.rabbitProducer.BindQueue(queueName, queueName, Consts.DirectRoutingKey);
 
@@ -724,10 +729,13 @@ class MessageDrivenService : IMessageDriven
         }
 
         //创建转发队列
-        for (int workloadIndex = 0; workloadIndex < this.configInfo.SacCount; workloadIndex++)
+        if (this.queues.Exists(f => f.IsStateful && f.AppId == this.AppId && f.IsEnabled))
         {
-            await this.CreateTransferConsumer(workloadIndex, nodeIds, consumerIds);
-            index++;
+            for (int workloadIndex = 0; workloadIndex < this.configInfo.SacCount; workloadIndex++)
+            {
+                await this.CreateTransferConsumer(workloadIndex, nodeIds, consumerIds);
+                index++;
+            }
         }
         this.lastNodeIds = currentNodeIds;
 
