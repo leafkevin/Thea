@@ -166,29 +166,37 @@ public class RedisCache : IDistributedCache
         }
         return redisValue.ToString().JsonTo<T>();
     }
-    public long Increment(string key, long initVavlue = 1)
+    public long Increment(string key, long value = 1)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
 
         var database = connection.GetDatabase(this.databaseSelector(key));
-        var result = database.StringIncrement(key);
-        //设置初始值
-        if (initVavlue > result)
-            result = database.StringIncrement(key, initVavlue - result);
-        return result;
+        return database.StringIncrement(key, value);
     }
-    public async Task<long> IncrementAsync(string key, long initVavlue = 1)
+    public async Task<long> IncrementAsync(string key, long value = 1)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
 
         var database = connection.GetDatabase(this.databaseSelector(key));
-        var result = await database.StringIncrementAsync(key);
-        //设置初始值
-        if (initVavlue > result)
-            result = await database.StringIncrementAsync(key, initVavlue - result);
-        return result;
+        return await database.StringIncrementAsync(key, value);
+    }
+    public long Decrement(string key, long value = 1)
+    {
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentNullException(key);
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
+        return database.StringDecrement(key, value);
+    }
+    public async Task<long> DecrementAsync(string key, long value = 1)
+    {
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentNullException(key);
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
+        return await database.StringDecrementAsync(key, value);
     }
     public void Remove(string key)
     {

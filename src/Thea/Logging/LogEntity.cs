@@ -26,6 +26,7 @@ public class LogEntity
     public int StatusCode { get; set; }
     public string Response { get; set; }
 
+    [JsonIgnore]
     public object Exception { get; set; }
     public DateTime LogTime { get; set; } = DateTime.Now;
     public int? Elapsed { get; set; }
@@ -58,6 +59,10 @@ public class LogEntity
             this.Headers = lastScopeState.Headers;
         if (string.IsNullOrEmpty(this.Request) && !string.IsNullOrEmpty(lastScopeState.Request))
             this.Request = lastScopeState.Request;
+        if (string.IsNullOrEmpty(this.Response) && !string.IsNullOrEmpty(lastScopeState.Response))
+            this.Response = lastScopeState.Response;
+        if (string.IsNullOrEmpty(this.Body) && !string.IsNullOrEmpty(lastScopeState.Body))
+            this.Body = lastScopeState.Body;
 
         if (string.IsNullOrEmpty(this.Host) && !string.IsNullOrEmpty(lastScopeState.Host))
             this.Host = lastScopeState.Host;

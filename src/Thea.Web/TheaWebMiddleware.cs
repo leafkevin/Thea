@@ -76,7 +76,9 @@ public class TheaWebMiddleware
                 if (context.RequestAborted.IsCancellationRequested)
                 {
                     logLevel = LogLevel.Error;
+                    logEntityInfo.StatusCode = 499;
                     logEntityInfo.Body = "Client cancelled the request.";
+                    logEntityInfo.Response = TheaResponse.Fail(499, "Client cancelled the request.").ToJson();
                     context.Response.Body = originalStream;
                     logEntityInfo.LogLevel = (int)logLevel;
                     this.logger.LogEntity(logEntityInfo);
