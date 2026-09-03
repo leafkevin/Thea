@@ -126,7 +126,8 @@ class RabbitConsumer
         if (this.cancellationSource == null) return;
         this.cancellationSource.Cancel();
         this.isDeferClose = !isForce && this.IsRunning;
-        await this.channel.BasicCancelAsync(this.consumerTag);
+        if (!string.IsNullOrEmpty(this.consumerTag))
+            await this.channel.BasicCancelAsync(this.consumerTag);
         if (isForce || !this.IsRunning)
             await this.Close();
     }
