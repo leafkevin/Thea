@@ -39,7 +39,7 @@ class RabbitProducer : IDisposable
             ClientProperties = new Dictionary<string, object>()
             {
                 { "connection_name",  connectionId},
-                { "client_api", $"Thea.MessageDriven" }
+                { "client_api", "Thea.MessageDriven" }
             }
         };
         var connection = await factory.CreateConnectionAsync(parent.tcpEndPoints, connectionId);
@@ -58,40 +58,43 @@ class RabbitProducer : IDisposable
     }
     public async Task CreateExchange(string exchangeName, string bindType, bool isDelay = false)
     {
-        var rabbitChannel = await this.channel.Reader.ReadAsync();
-        Dictionary<string, object> arguments = null;
-        if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
-        await rabbitChannel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
-        await this.channel.Writer.WriteAsync(rabbitChannel);
+        await this.TryTo($"CreateExchange失败，exchange: {exchangeName}，bindType：{bindType}，isDelay：{isDelay}", async channel =>
+        {
+            Dictionary<string, object> arguments = null;
+            if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
+            await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
+        });
     }
     public async Task CreateQueue(string queueName, bool isQuorumQueue, bool isSingleActiveConsumer, bool isExclusive)
     {
-        var rabbitChannel = await this.channel.Reader.ReadAsync();
-        IDictionary<string, object> arguments = null;
-
-        if (isExclusive) await rabbitChannel.QueueDeclareAsync(queueName, false, true, false);
-        else
+        await this.TryTo($"CreateQueue失败，queueName: {queueName}，isQuorumQueue：{isQuorumQueue}，isSingleActiveConsumer：{isSingleActiveConsumer}，isExclusive：{isExclusive}", async channel =>
         {
-            if (isSingleActiveConsumer || isQuorumQueue) arguments = new Dictionary<string, object>();
+            IDictionary<string, object> arguments = null;
+            if (isExclusive) await channel.QueueDeclareAsync(queueName, false, true, false);
+            else
             {
-                if (isSingleActiveConsumer) arguments.Add("x-single-active-consumer", true);
-                if (isQuorumQueue) arguments.Add("x-queue-type", "quorum");
+                if (isSingleActiveConsumer || isQuorumQueue) arguments = new Dictionary<string, object>();
+                {
+                    if (isSingleActiveConsumer) arguments.Add("x-single-active-consumer", true);
+                    if (isQuorumQueue) arguments.Add("x-queue-type", "quorum");
+                }
+                await channel.QueueDeclareAsync(queueName, true, false, false, arguments);
             }
-            await rabbitChannel.QueueDeclareAsync(queueName, true, false, false, arguments);
-        }
-        await this.channel.Writer.WriteAsync(rabbitChannel);
+        });
     }
     public async Task BindExchange(string fromExchange, string toExchange, string routingKey)
     {
-        var rabbitChannel = await this.channel.Reader.ReadAsync();
-        await rabbitChannel.ExchangeBindAsync(toExchange, fromExchange, routingKey);
-        await this.channel.Writer.WriteAsync(rabbitChannel);
+        await this.TryTo($"BindExchange失败，fromExchange: {fromExchange}，toExchange：{toExchange}，routingKey：{routingKey}", async channel =>
+        {
+            await channel.ExchangeBindAsync(toExchange, fromExchange, routingKey);
+        });
     }
     public async Task BindQueue(string exchange, string queueName, string routingKey)
     {
-        var rabbitChannel = await this.channel.Reader.ReadAsync();
-        await rabbitChannel.QueueBindAsync(queueName, exchange, routingKey);
-        await this.channel.Writer.WriteAsync(rabbitChannel);
+        await this.TryTo($"BindQueue失败，exchange: {exchange}，queueName：{queueName}，routingKey：{routingKey}", async channel =>
+        {
+            await channel.QueueBindAsync(queueName, exchange, routingKey);
+        });
     }
     public async Task RemoveQueue(string queueName)
     {
@@ -108,10 +111,11 @@ class RabbitProducer : IDisposable
     }
     public async Task PublishAsync(string exchange, string routingKey, BasicProperties properties, string message)
     {
-        var rabbitChannel = await this.channel.Reader.ReadAsync();
-        var body = Encoding.UTF8.GetBytes(message);
-        await rabbitChannel.BasicPublishAsync(exchange, routingKey, true, properties, body);
-        await this.channel.Writer.WriteAsync(rabbitChannel);
+        await this.TryTo($"发送消息异常，Message: {message}", async channel =>
+        {
+            var body = Encoding.UTF8.GetBytes(message);
+            await channel.BasicPublishAsync(exchange, routingKey, true, properties, body);
+        });
     }
     public async Task Shutdown()
     {
@@ -126,4 +130,21 @@ class RabbitProducer : IDisposable
         this.connection = null;
     }
     public void Dispose() => this.Shutdown().Wait();
+
+    private async Task TryTo(string errMessage, Func<IChannel, Task> work)
+    {
+        var rabbitChannel = await this.channel.Reader.ReadAsync();
+        try
+        {
+            await work.Invoke(rabbitChannel);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{errMessage}, Exception: {ex}");
+            //发生异常，就重建channel
+            await rabbitChannel.DisposeAsync();
+            rabbitChannel = await connection.CreateChannelAsync();
+        }
+        await this.channel.Writer.WriteAsync(rabbitChannel);
+    }
 }

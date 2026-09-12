@@ -20,7 +20,6 @@ class RabbitConsumer
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
-
     private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
 
     private ConnectionFactory factory;
@@ -30,12 +29,13 @@ class RabbitConsumer
     private AsyncEventingBasicConsumer consumer = null;
     private string consumerTag;
     private volatile bool isDeferClose = false;
+    private volatile bool isBusying = false;
     public volatile int PrefetchCount;
     public volatile bool IsLogEnabled;
     public string ConsumerId { get; private set; }
     public string QueueName { get; private set; }
-    public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false);
-    public bool IsRunning => this.consumer?.IsRunning ?? false;
+    public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false) && (this.consumer?.IsRunning ?? false);
+    public bool IsBusying => this.isBusying;
 
     public RabbitConsumer(string queueName, string consumerId, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
@@ -125,28 +125,35 @@ class RabbitConsumer
     {
         if (this.cancellationSource == null) return;
         this.cancellationSource.Cancel();
-        this.isDeferClose = !isForce && this.IsRunning;
+        this.isDeferClose = !isForce && this.IsBusying;
         if (!string.IsNullOrEmpty(this.consumerTag))
             await this.channel.BasicCancelAsync(this.consumerTag);
-        if (isForce || !this.IsRunning)
+        if (isForce || !this.IsBusying)
             await this.Close();
     }
     public async Task<uint> MessageCount() => this.channel != null
         ? await this.channel.MessageCountAsync(this.QueueName) : 0;
     private async Task Close()
     {
-        if (this.channel != null)
+        try
         {
-            await channel.DisposeAsync();
-            this.channel = null;
+            if (this.channel != null)
+            {
+                await channel.DisposeAsync();
+                this.channel = null;
+            }
+            if (this.connection != null)
+            {
+                await this.connection.DisposeAsync();
+                this.connection = null;
+            }
+            this.cancellationSource.Dispose();
+            this.cancellationSource = null;
         }
-        if (this.connection != null)
+        catch (Exception ex)
         {
-            await this.connection.DisposeAsync();
-            this.connection = null;
+            Console.WriteLine($"{ex}");
         }
-        this.cancellationSource.Dispose();
-        this.cancellationSource = null;
     }
     private async Task BindUserMessageHandler()
     {
@@ -157,127 +164,136 @@ class RabbitConsumer
             //先暂停消费
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-
-            var iLoop = 0;
-            Exception exception = null;
-            bool isSuccess = true;
-            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-
-            //内部消息，交给消息总分发处处理
-            string result = null;
-            var createdAt = DateTime.Now;
-            var messageId = ea.BasicProperties.MessageId;
-            var messageType = ea.BasicProperties.Type;
-            var headers = ea.BasicProperties.Headers;
-            string traceId = null;
-            if (headers != null && headers.TryGetValue("TraceId", out var objValue))
-                traceId = Encoding.UTF8.GetString((byte[])headers["TraceId"]);
-            switch (messageType)
+            this.isBusying = true;
+            try
             {
-                case Consts.UserMessage:
-                case Consts.RpcMessage:
-                    {
-                        //赋值TraceId，用于日志跟踪
-                        IDisposable scopeObj = null;
-                        if (!string.IsNullOrEmpty(traceId))
-                            scopeObj = this.logger.BeginScope(new LogEntity { TraceId = traceId });
+                var iLoop = 0;
+                Exception exception = null;
+                bool isSuccess = true;
+                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
 
-                        while (iLoop < 3)
+                //内部消息，交给消息总分发处处理
+                string result = null;
+                var createdAt = DateTime.Now;
+                var messageId = ea.BasicProperties.MessageId;
+                var messageType = ea.BasicProperties.Type;
+                var headers = ea.BasicProperties.Headers;
+                string traceId = null;
+                if (headers != null && headers.TryGetValue("TraceId", out var objValue))
+                    traceId = Encoding.UTF8.GetString((byte[])headers["TraceId"]);
+                switch (messageType)
+                {
+                    case Consts.UserMessage:
+                    case Consts.RpcMessage:
                         {
-                            try
+                            //赋值TraceId，用于日志跟踪
+                            IDisposable scopeObj = null;
+                            if (!string.IsNullOrEmpty(traceId))
+                                scopeObj = this.logger.BeginScope(new LogEntity { TraceId = traceId });
+
+                            while (iLoop < 3)
                             {
-                                (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
-                                var parameters = TheaJsonSerializer.Deserialize(jsonBody, parameterType);
-                                if (messageType == Consts.RpcMessage)
+                                try
                                 {
-                                    //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                                    //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
-                                    var rpcResult = await typedHandler.Invoke(parameters);
-                                    result = rpcResult.ToJson();
+                                    (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
+                                    var parameters = TheaJsonSerializer.Deserialize(jsonBody, parameterType);
+                                    if (messageType == Consts.RpcMessage)
+                                    {
+                                        //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                        //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
+                                        var rpcResult = await typedHandler.Invoke(parameters);
+                                        result = rpcResult.ToJson();
+                                    }
+                                    else await typedHandler.Invoke(parameters);
+                                    isSuccess = true;
+                                    break;
                                 }
-                                else await typedHandler.Invoke(parameters);
-                                isSuccess = true;
-                                break;
-                            }
-                            catch (Exception ex)
-                            {
-                                isSuccess = false;
-                                exception = ex.InnerException ?? ex;
-                            }
-                            iLoop++;
-                        }
-                        if (!isSuccess) result = exception.ToString();
-                        var logId = ObjectId.NewId();
-                        if (this.IsLogEnabled || !isSuccess)
-                        {
-                            await this.parent.ProcessMessage(new Message
-                            {
-                                MessageId = messageId,
-                                Type = Consts.Logs,
-                                TraceId = traceId,
-                                Body = new ExecLog
+                                catch (Exception ex)
                                 {
-                                    LogId = logId,
+                                    isSuccess = false;
+                                    exception = ex.InnerException ?? ex;
+                                }
+                                iLoop++;
+                            }
+                            if (!isSuccess) result = exception.ToString();
+                            var logId = ObjectId.NewId();
+                            if (this.IsLogEnabled || !isSuccess)
+                            {
+                                await this.parent.ProcessMessage(new Message
+                                {
+                                    MessageId = messageId,
+                                    Type = Consts.Logs,
                                     TraceId = traceId,
-                                    Exchange = ea.Exchange,
-                                    RoutingKey = ea.RoutingKey,
-                                    Queue = this.QueueName,
-                                    Body = jsonBody,
-                                    IsSuccess = isSuccess,
-                                    Result = result,
-                                    RetryTimes = iLoop,
-                                    UpdatedBy = this.parent.AppId,
-                                    UpdatedAt = DateTime.Now
-                                }
-                            });
-                        }
-                        var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
-                        if (!hasScopeState || hasScopeState && lastScopeState.IsEnabled)
-                        {
-                            var resultBody = isSuccess ? "success" : "failed";
-                            this.logger.LogEntity(new LogEntity
+                                    Body = new ExecLog
+                                    {
+                                        LogId = logId,
+                                        TraceId = traceId,
+                                        Exchange = ea.Exchange,
+                                        RoutingKey = ea.RoutingKey,
+                                        Queue = this.QueueName,
+                                        Body = jsonBody,
+                                        IsSuccess = isSuccess,
+                                        Result = result,
+                                        RetryTimes = iLoop,
+                                        UpdatedBy = this.parent.AppId,
+                                        UpdatedAt = DateTime.Now
+                                    }
+                                });
+                            }
+                            var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
+                            if (!hasScopeState || hasScopeState && lastScopeState.IsEnabled)
                             {
-                                Id = logId,
-                                ApiType = (int)ApiType.LocalInvoke,
-                                TraceId = traceId,
-                                Tag = "RabbitConsumer",
-                                Body = $"consumed {resultBody}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
-                                LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
-                                Exception = exception,
-                                Request = jsonBody,
-                                Response = result,
-                                Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
-                            });
-                        }
-                        if (messageType == Consts.RpcMessage)
-                        {
-                            //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                            var replyToQueue = ea.BasicProperties.ReplyTo;
-                            var rpcMessageType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
-                            await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
+                                var resultBody = isSuccess ? "success" : "failed";
+                                this.logger.LogEntity(new LogEntity
+                                {
+                                    Id = logId,
+                                    ApiType = (int)ApiType.LocalInvoke,
+                                    TraceId = traceId,
+                                    Tag = "RabbitConsumer",
+                                    Body = $"consumed {resultBody}, queue: {this.QueueName}, exchange: {ea.Exchange}, routingKey: {ea.RoutingKey}",
+                                    LogLevel = (int)(isSuccess ? LogLevel.Information : LogLevel.Error),
+                                    Exception = exception,
+                                    Request = jsonBody,
+                                    Response = result,
+                                    Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
+                                });
+                            }
+                            if (messageType == Consts.RpcMessage)
                             {
-                                Persistent = true,
-                                Type = rpcMessageType,
-                                AppId = ea.BasicProperties.AppId,
-                                DeliveryMode = DeliveryModes.Persistent,
-                                MessageId = messageId,
-                                CorrelationId = messageId,
-                                Headers = new Dictionary<string, object> { { "TraceId", traceId } }
-                            }, result);
+                                //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                var replyToQueue = ea.BasicProperties.ReplyTo;
+                                var rpcMessageType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
+                                await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
+                                {
+                                    Persistent = true,
+                                    Type = rpcMessageType,
+                                    AppId = ea.BasicProperties.AppId,
+                                    DeliveryMode = DeliveryModes.Persistent,
+                                    MessageId = messageId,
+                                    CorrelationId = messageId,
+                                    Headers = new Dictionary<string, object> { { "TraceId", traceId } }
+                                }, result);
+                            }
+                            scopeObj?.Dispose();
+                            //RPC消息直接跳过，因为异常已经返回到前端了
+                            if (!isSuccess && messageType == Consts.UserMessage)
+                                throw exception;
                         }
-                        scopeObj?.Dispose();
-                        //RPC消息直接跳过，因为异常已经返回到前端了
-                        if (!isSuccess && messageType == Consts.UserMessage)
-                            throw exception;
-                    }
-                    break;
-                default: throw new Exception("Unknown message type");
+                        break;
+                    default: throw new Exception("Unknown message type");
+                }
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
             }
-            await channel.BasicAckAsync(ea.DeliveryTag, false);
-
+            catch (Exception ex)
+            {
+                Console.WriteLine($"消费消息异常, Message: {ex}");
+                await channel.BasicNackAsync(ea.DeliveryTag, false, true);
+            }
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
+
+            this.isBusying = false;
         };
         this.consumerTag = await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
@@ -336,47 +352,50 @@ class RabbitConsumer
         {
             if (this.cancellationSource.IsCancellationRequested)
                 return;
-
-            var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
-            var headers = ea.BasicProperties.Headers;
-            string exchange = null, routingKey = null, traceId = null;
-            if (headers.TryGetValue("Exchange", out var exchangeBytes))
-                exchange = Encoding.UTF8.GetString((byte[])exchangeBytes);
-            if (headers.TryGetValue("RoutingKey", out var routingKeyBytes))
-                routingKey = Encoding.UTF8.GetString((byte[])routingKeyBytes);
-            if (headers.TryGetValue("TraceId", out var traceIdBytes))
-                traceId = Encoding.UTF8.GetString((byte[])traceIdBytes);
-
-            var message = new Message
-            {
-                MessageId = ea.BasicProperties.MessageId,
-                Type = ea.BasicProperties.Type,
-                Exchange = exchange,
-                RoutingKey = routingKey,
-                TraceId = traceId,
-                ReplyTo = ea.BasicProperties.ReplyTo,
-                IsJsonMessage = true,
-                Body = jsonBody
-            };
-
-            var timeoutSeconds = this.parent.HeartbeatCycle.TotalSeconds;
-            var exMessage = $"转发消息超时, 耗时{timeoutSeconds}s, Now: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, Message: {message.ToJson()}, ";
-
+            this.isBusying = true;
+            string exMessage = null;
             try
             {
+                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+                var headers = ea.BasicProperties.Headers;
+                string exchange = null, routingKey = null, traceId = null;
+                if (headers.TryGetValue("Exchange", out var exchangeBytes))
+                    exchange = Encoding.UTF8.GetString((byte[])exchangeBytes);
+                if (headers.TryGetValue("RoutingKey", out var routingKeyBytes))
+                    routingKey = Encoding.UTF8.GetString((byte[])routingKeyBytes);
+                if (headers.TryGetValue("TraceId", out var traceIdBytes))
+                    traceId = Encoding.UTF8.GetString((byte[])traceIdBytes);
+
+                var message = new Message
+                {
+                    MessageId = ea.BasicProperties.MessageId,
+                    Type = ea.BasicProperties.Type,
+                    Exchange = exchange,
+                    RoutingKey = routingKey,
+                    TraceId = traceId,
+                    ReplyTo = ea.BasicProperties.ReplyTo,
+                    IsJsonMessage = true,
+                    Body = jsonBody
+                };
+
+                var timeoutSeconds = this.parent.HeartbeatCycle.TotalSeconds;
+                exMessage = $"转发消息超时, 耗时{timeoutSeconds}s, Now: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, Message: {message.ToJson()}";
                 message.Waiter = new TaskCompletionSource<bool>();
                 await this.parent.ProcessMessage(message);
                 await message.Waiter.WaitAsync(this.parent.HeartbeatCycle, exMessage, this.cancellationSource.Token);
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
             }
             catch (Exception ex)
             {
-                this.logger.LogTagError("BindTransferHandler", ex, exMessage);
+                this.logger.LogTagError("BindTransferHandler", ex, $"{exMessage}, Exception: {ex}");
                 Console.WriteLine(exMessage);
+                await channel.BasicNackAsync(ea.DeliveryTag, false, true);
             }
-            await channel.BasicAckAsync(ea.DeliveryTag, false);
+
             //再延迟停止
             if (this.isDeferClose)
                 await this.Close();
+            this.isBusying = false;
         };
         this.consumerTag = await channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }

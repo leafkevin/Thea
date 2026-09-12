@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -166,7 +167,7 @@ class MessageDrivenService : IMessageDriven
                                         await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, transferQueue, properties, jsonMessage);
                                     }
                                 }
-                                //如果是无状态队列的消息，直接发送交换机
+                                //如果是无状态队列的消息，直接发送交换机，没有可用的有状态队列当作无状态消息处理
                                 else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, jsonMessage);
 
                                 //防止条件问题阻塞后续消费
@@ -544,8 +545,8 @@ class MessageDrivenService : IMessageDriven
                 await this.rabbitProducer.CreateExchange(myBinding.ExchangeId, myBinding.BindType, myBinding.IsDelay);
 
             //转发交换机
-            var exchangeName = $"{Consts.TransferExchange}.{this.AppId}";
-            await this.rabbitProducer.CreateExchange(exchangeName, Consts.TopicBindingType);
+            //var exchangeName = $"{Consts.TransferExchange}.{this.AppId}";
+            //await this.rabbitProducer.CreateExchange(exchangeName, Consts.TopicBindingType);
             //心跳交换机
             await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
             //RPC交换机
@@ -575,6 +576,7 @@ class MessageDrivenService : IMessageDriven
             //创建转发队列
             if (this.queues.Exists(f => f.IsStateful && f.AppId == this.AppId))
             {
+                //转发队列使用SAC消费者
                 queueName = $"{Consts.TransferExchange}.{this.AppId}";
                 await this.rabbitProducer.CreateQueue(queueName, true, true, false);
             }
@@ -808,7 +810,7 @@ class MessageDrivenService : IMessageDriven
             if (!myRabbitConsumer.IsActivated || myRabbitConsumer.PrefetchCount != myQueue.PrefetchCount)
             {
                 myRabbitConsumer.PrefetchCount = myQueue.PrefetchCount;
-                await myRabbitConsumer.Shutdown(true);
+                await myRabbitConsumer.Shutdown(myQueue.IsSingleActiveConsumer);
                 await myRabbitConsumer.Start();
             }
         }
@@ -838,6 +840,7 @@ class MessageDrivenService : IMessageDriven
         {
             if (!myRabbitConsumer.IsActivated)
             {
+                //SAC消费者，可以直接杀掉
                 await myRabbitConsumer.Shutdown(true);
                 await myRabbitConsumer.Start();
             }
