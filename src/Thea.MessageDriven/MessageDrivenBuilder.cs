@@ -1,47 +1,41 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using System;
+using System.Reflection;
 
 namespace Thea.MessageDriven;
 
 public class MessageDrivenBuilder
 {
     private readonly MessageDrivenService messageDriven;
-    public IServiceProvider ServiceProvider { get; private set; }
+    private readonly IServiceProvider serviceProvider;
 
     public MessageDrivenBuilder(IServiceProvider serviceProvider)
     {
-        this.ServiceProvider = serviceProvider;
-        this.messageDriven = serviceProvider.GetService<IMessageDriven>() as MessageDrivenService;
+        this.serviceProvider = serviceProvider;
+        this.messageDriven = serviceProvider.GetRequiredService<MessageDrivenService>();
     }
-    public MessageDrivenBuilder UseRepository(IMessageDrivenRepository repository)
+    public MessageDrivenBuilder UseRepository(Func<IServiceProvider, IMessageDrivenRepository> repositoryInitializer)
     {
+        if (repositoryInitializer == null)
+            throw new ArgumentNullException(nameof(repositoryInitializer));
+        var repository = repositoryInitializer.Invoke(this.serviceProvider);
         this.messageDriven.UseRepository(repository);
         return this;
     }
-    public MessageDrivenBuilder UseRepository<TRepository>() where TRepository : IMessageDrivenRepository, new()
+
+    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, MethodInfo consumerHandler, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
     {
-        this.messageDriven.UseRepository(new TRepository());
+        this.messageDriven.UseStatefulConsumer(exchange, queue, consumerHandler, isSingleActiveConsumer, isQuorumQueue);
         return this;
     }
-    public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
+    public MessageDrivenBuilder UseSubscriber<TConsumer>(string queue, MethodInfo consumerHandler, bool isQuorumQueue = true)
     {
-        var consumer = ServiceProvider.GetService<TConsumer>();
-        var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseStatefulConsumer(exchange, queue, methodInfo, isSingleActiveConsumer, isQuorumQueue);
+        this.messageDriven.UseSubscriber(queue, consumerHandler, isQuorumQueue);
         return this;
     }
-    public MessageDrivenBuilder UseSubscriber<TConsumer>(string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isQuorumQueue = true)
+    public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, MethodInfo consumerHandler, bool isDelay = false, bool isQuorumQueue = true)
     {
-        var consumer = ServiceProvider.GetService<TConsumer>();
-        var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseSubscriber(queue, methodInfo, isQuorumQueue);
-        return this;
-    }
-    public MessageDrivenBuilder UseSubscriber<TConsumer>(string exchange, string queue, Func<TConsumer, Delegate> consumerHandlerSelector, bool isDelay = false, bool isQuorumQueue = true)
-    {
-        var consumer = ServiceProvider.GetService<TConsumer>();
-        var methodInfo = consumerHandlerSelector.Invoke(consumer).Method;
-        this.messageDriven.UseSubscriber(exchange, queue, methodInfo, isDelay, isQuorumQueue);
+        this.messageDriven.UseSubscriber(exchange, queue, consumerHandler, isDelay, isQuorumQueue);
         return this;
     }
     public MessageDrivenBuilder UseTransfer(string fromExchange, string toExchange, string routingKey)
@@ -54,4 +48,5 @@ public class MessageDrivenBuilder
         this.messageDriven.UseRpcConsumer();
         return this;
     }
+    internal MessageDrivenService Build() => this.messageDriven;
 }

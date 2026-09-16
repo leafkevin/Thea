@@ -7,8 +7,6 @@ namespace Thea.MessageDriven;
 public interface IMessageDriven
 {
     string ServiceId { get; }
-    void Start();
-    void Shutdown();
 
     Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null);
     Task RemoveQueue(string queueId, int minIndex, int maxIndex);
