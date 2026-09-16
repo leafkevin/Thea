@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -638,6 +639,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             //创建转发队列
             if (this.queues.Exists(f => f.IsStateful && f.AppId == this.AppId))
             {
+                //转发队列使用SAC消费者
                 queueName = $"{Consts.TransferExchange}.{this.AppId}";
                 await this.rabbitProducer.CreateQueue(queueName, true, true, false);
             }
