@@ -51,16 +51,16 @@ namespace WebAppTest.Controllers
             SpinWait.SpinUntil(() => current == totalCont, TimeSpan.FromSeconds(1));
             return TheaResponse.Success;
         }
-        [HttpGet]
-        public async Task<TheaResponse> TestTimeout()
-        {
-            var cts = new TaskCompletionSource<string>();
-            await cts.Wait(TimeSpan.FromSeconds(2));
-            Thread.Sleep(2500);
-            //this.logger.LogTagInformation("Index", "111111------------");
-            //await this.messageDriven.PublishAsync("cache.refresh", "1", "111");
-            return TheaResponse.Success;
-        }
+        //[HttpGet]
+        //public async Task<TheaResponse> TestTimeout()
+        //{
+        //    var cts = new TaskCompletionSource<string>();
+        //    await cts.WaitAsync(TimeSpan.FromSeconds(2));
+        //    Thread.Sleep(2500);
+        //    //this.logger.LogTagInformation("Index", "111111------------");
+        //    //await this.messageDriven.PublishAsync("cache.refresh", "1", "111");
+        //    return TheaResponse.Success;
+        //}
         [HttpGet]
         public async Task<TheaResponse> Index()
         {

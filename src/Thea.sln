@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.0.11217.181 d18.0
+VisualStudioVersion = 18.0.11217.181
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea", "Thea\Thea.csproj", "{21D72783-7F4A-41C5-82BA-6A1921F0A3F3}"
 EndProject
@@ -32,6 +32,8 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Thea.MessageDriven.MySqlRepository", "Thea.MessageDriven.MySqlRepository\Thea.MessageDriven.MySqlRepository.csproj", "{33114FFC-55E9-4632-88CD-38EBF10F2653}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebAppTest2", "WebAppTest2\WebAppTest2.csproj", "{3A9723B1-26B6-4308-882E-88BBA4BD33A3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thea.Alarm.ImageConverter", "Thea.Alarm.ImageConverter\Thea.Alarm.ImageConverter.csproj", "{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -87,6 +89,10 @@ Global
 		{3A9723B1-26B6-4308-882E-88BBA4BD33A3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3A9723B1-26B6-4308-882E-88BBA4BD33A3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3A9723B1-26B6-4308-882E-88BBA4BD33A3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
