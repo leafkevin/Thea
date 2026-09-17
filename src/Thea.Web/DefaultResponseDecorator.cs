@@ -18,48 +18,48 @@ class DefaultResponseDecorator : IResponseDecorator
         switch (statusCode)
         {
             case 400:
-                context.Response.StatusCode = 200;
+                myLogLevel = LogLevel.Warning;
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(statusCode, "请求地址未找到！");
                 break;
             case 401:
-                context.Response.StatusCode = 200;
+                myLogLevel = LogLevel.Warning;
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(statusCode, "未授权！");
                 break;
             case 403:
-                context.Response.StatusCode = 200;
+                myLogLevel = LogLevel.Warning;
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(statusCode, "禁止访问！");
                 break;
             case 404:
-                context.Response.StatusCode = 200;
+                myLogLevel = LogLevel.Warning;
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(statusCode, "内部服务器错误！");
                 break;
             case 500:
-                context.Response.StatusCode = 200;
+                myLogLevel = LogLevel.Warning;
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(statusCode, "内部服务器错误！");
                 break;
             case 502:
-                context.Response.StatusCode = 200;
+                myLogLevel = LogLevel.Warning;
                 context.Response.ContentType = "application/json;charset=utf-8";
                 response = TheaResponse.Fail(statusCode, "网关错误！");
                 break;
             case 200:
-                jsonResponse = await this.ReadBody(readableStream);
+                jsonResponse = await readableStream.ReadBody();
                 if (!string.IsNullOrEmpty(jsonResponse))
                     response = jsonResponse.JsonTo<TheaResponse>();
-                else response = TheaResponse.Success;
-                if (!response.IsSuccess && myLogLevel < LogLevel.Warning)
+                else Console.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, TraceId: {context.GetTraceId()}, Warning: Response body is empty.");
+
+                if (response != null && !response.IsSuccess && myLogLevel < LogLevel.Warning)
                     myLogLevel = LogLevel.Warning;
                 break;
         }
         if (exception != null)
         {
             context.Response.Clear();
-            context.Response.StatusCode = 200;
             context.Response.ContentType = "application/json;charset=utf-8";
             context.Response.OnStarting(state =>
             {
@@ -73,13 +73,5 @@ class DefaultResponseDecorator : IResponseDecorator
             response = TheaResponse.Fail(statusCode, "内部服务器错误！");
         }
         return (myLogLevel, response.ToJson());
-    }
-    private async Task<string> ReadBody(Stream stream)
-    {
-        stream.Position = 0;
-        var reader = new StreamReader(stream);
-        var result = await reader.ReadToEndAsync();
-        stream.Position = 0;
-        return result;
     }
 }

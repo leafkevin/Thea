@@ -23,8 +23,6 @@ public class TheaLogAlarmMiddleware
         this.next = next;
         this.alarmService = alarmService;
         this.logVisitUrl = configuration.GetValue<string>("Alarm:LogWebSite");
-        if (string.IsNullOrEmpty(this.logVisitUrl))
-            throw new ArgumentNullException("appsettings.json not found 'Alarm:LogWebSite' node or value is null.");
         var logLevel = configuration.GetValue<string>("Alarm:LogLevel");
         if (!string.IsNullOrEmpty(logLevel))
         {

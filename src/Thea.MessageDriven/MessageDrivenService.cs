@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -150,7 +149,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         if (message == null)
             throw new ArgumentNullException(nameof(message));
         var traceId = string.Empty;
-        if (ScopeState.TryGetState(out var scopeState))
+        if (ScopeLogger.TryGetScope(out var scopeState))
             traceId = scopeState.TraceId;
         await this.channel.Writer.WriteAsync(new Message
         {
@@ -173,7 +172,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             throw new ArgumentNullException(nameof(messageId));
 
         var traceId = string.Empty;
-        if (ScopeState.TryGetState(out var scopeState))
+        if (ScopeLogger.TryGetScope(out var scopeState))
             traceId = scopeState.TraceId;
         await this.channel.Writer.WriteAsync(new Message
         {
@@ -194,7 +193,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             throw new ArgumentNullException(nameof(request));
 
         var traceId = string.Empty;
-        if (ScopeState.TryGetState(out var scopeState))
+        if (ScopeLogger.TryGetScope(out var scopeState))
             traceId = scopeState.TraceId;
         var messageId = ObjectId.NewId();
 
@@ -226,7 +225,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             throw new ArgumentNullException(nameof(message));
 
         var traceId = string.Empty;
-        if (ScopeState.TryGetState(out var scopeState))
+        if (ScopeLogger.TryGetScope(out var scopeState))
             traceId = scopeState.TraceId;
         await this.channel.Writer.WriteAsync(new Message
         {

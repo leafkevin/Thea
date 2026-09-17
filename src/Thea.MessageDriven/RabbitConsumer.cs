@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using RabbitMQ.Client.Exceptions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -114,7 +113,7 @@ class RabbitConsumer : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine();
-            this.logger.LogTagError("RabbitConsumer", ex, $"启动RabbitMQ消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+            this.logger.LogTagError("RabbitConsumer", ex, $"StartAsync，启动RabbitMQ消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
         }
         finally
         {
@@ -130,7 +129,7 @@ class RabbitConsumer : IDisposable
         }
         catch (Exception ex)
         {
-            this.logger.LogTagError("RabbitConsumer", ex, $"关闭RabbitMQ消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+            this.logger.LogTagError("RabbitConsumer", ex, $"ShutdownAsync，关闭RabbitMQ消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
         }
         finally
         {
@@ -158,11 +157,7 @@ class RabbitConsumer : IDisposable
         {
             return await currentChannel.MessageCountAsync(this.QueueName);
         }
-        catch (AlreadyClosedException)
-        {
-            return 0;
-        }
-        catch (ObjectDisposedException)
+        catch
         {
             return 0;
         }
@@ -222,11 +217,11 @@ class RabbitConsumer : IDisposable
             }
             catch (Exception ex)
             {
-                this.logger.LogTagError("RabbitConsumer", ex, $"取消消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+                this.logger.LogTagError("RabbitConsumer", ex, $"ShutdownCoreAsync，取消消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
             }
         }
         if (await this.semaphoreWaiter.WaitAsync(this.shutdownTimeout))
-            this.logger.LogTagError("RabbitConsumer", $"等待消费者处理完成超时, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}, Timeout: {this.shutdownTimeout.TotalSeconds}s");
+            this.logger.LogTagError("RabbitConsumer", $"ShutdownCoreAsync，等待消费者处理完成超时, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}, Timeout: {this.shutdownTimeout.TotalSeconds}s");
         await this.DisposeAsync();
     }
     private async Task DisposeAsync()
@@ -247,7 +242,7 @@ class RabbitConsumer : IDisposable
             }
             catch (Exception ex)
             {
-                this.logger.LogTagError("RabbitConsumerClose", ex, $"关闭Channel失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+                this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Channel失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
             }
         }
         if (connectionToDispose != null)
@@ -258,7 +253,7 @@ class RabbitConsumer : IDisposable
             }
             catch (Exception ex)
             {
-                this.logger.LogTagError("RabbitConsumerClose", ex, $"关闭Connection失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+                this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Connection失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
             }
         }
         cancellationSourceToDispose?.Dispose();
@@ -272,7 +267,7 @@ class RabbitConsumer : IDisposable
         }
         catch (Exception ex)
         {
-            this.logger.LogTagError("RabbitConsumerNack", ex, $"拒绝消息失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}, DeliveryTag: {deliveryTag}");
+            this.logger.LogTagError("RabbitConsumer", ex, $"SafeNack，拒绝消息失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}, DeliveryTag: {deliveryTag}");
         }
     }
     private async Task BindUserMessageHandler()
@@ -285,6 +280,9 @@ class RabbitConsumer : IDisposable
         {
             this.semaphoreWaiter.Enter();
             IDisposable scopeObj = null;
+
+            string traceId = null;
+            string jsonBody = null;
             try
             {
                 //消费者关闭过程中收到的在途投递不再处理，Channel关闭后由RabbitMQ重新入队
@@ -293,17 +291,17 @@ class RabbitConsumer : IDisposable
                 var iLoop = 0;
                 Exception exception = null;
                 bool isSuccess = true;
-                var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
+                jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
 
                 //内部消息，交给消息总分发处处理
                 string result = null;
-                var createdAt = DateTime.Now;
+                var createdAt = DateTime.UtcNow;
                 var messageId = ea.BasicProperties.MessageId;
                 var messageType = ea.BasicProperties.Type;
                 var headers = ea.BasicProperties.Headers;
-                string traceId = null;
                 if (headers != null && headers.TryGetValue("TraceId", out var objValue))
                     traceId = Encoding.UTF8.GetString((byte[])headers["TraceId"]);
+
                 switch (messageType)
                 {
                     case Consts.UserMessage:
@@ -362,8 +360,8 @@ class RabbitConsumer : IDisposable
                                     }
                                 });
                             }
-                            var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
-                            if (!hasScopeState || hasScopeState && lastScopeState.IsEnabled)
+                            var hasScope = ScopeLogger.TryGetScope(out var lastScopeState);
+                            if (!hasScope || hasScope && lastScopeState.IsEnabled)
                             {
                                 var resultBody = isSuccess ? "success" : "failed";
                                 this.logger.LogEntity(new LogEntity
@@ -377,7 +375,7 @@ class RabbitConsumer : IDisposable
                                     Exception = exception,
                                     Request = jsonBody,
                                     Response = result,
-                                    Elapsed = (int)DateTime.Now.Subtract(createdAt).TotalMilliseconds
+                                    Elapsed = (int)DateTime.UtcNow.Subtract(createdAt).TotalMilliseconds
                                 });
                             }
                             if (messageType == Consts.RpcMessage)
@@ -406,7 +404,19 @@ class RabbitConsumer : IDisposable
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"消费消息异常, Message: {ex}");
+                var messageJson = new Message
+                {
+                    MessageId = ea.BasicProperties.MessageId,
+                    Type = ea.BasicProperties.Type,
+                    TraceId = traceId,
+                    Exchange = ea.Exchange,
+                    RoutingKey = ea.RoutingKey,
+                    ReplyTo = ea.BasicProperties.ReplyTo,
+                    IsJsonMessage = true,
+                    Body = jsonBody
+                }.ToJson();
+                this.logger.LogTagError("RabbitConsumer", ex, $"BindUserMessageHandler，处理用户消息异常, ConsumerId: {this.ConsumerId}, Message: {messageJson}");
+                Console.WriteLine($"处理用户消息异常, Message: {messageJson}, Exception: {ex}");
                 await this.SafeNack(consumerChannel, ea.DeliveryTag);
             }
             finally
@@ -443,7 +453,7 @@ class RabbitConsumer : IDisposable
             }
             catch (Exception ex)
             {
-                this.logger.LogTagError("RabbitHeartbeatConsumer", ex, $"处理心跳消息失败, ConsumerId: {this.ConsumerId}");
+                this.logger.LogTagError("RabbitConsumer", ex, $"BindHeartbeatHandler，处理心跳消息失败, ConsumerId: {this.ConsumerId}");
                 await this.SafeNack(consumerChannel, ea.DeliveryTag);
             }
             finally
@@ -477,7 +487,7 @@ class RabbitConsumer : IDisposable
             }
             catch (Exception ex)
             {
-                this.logger.LogTagError("RabbitRpcConsumer", ex, $"处理RPC结果失败, ConsumerId: {this.ConsumerId}");
+                this.logger.LogTagError("RabbitConsumer", ex, $"BindRpcResultHandler，处理RPC结果失败, ConsumerId: {this.ConsumerId}");
                 await this.SafeNack(consumerChannel, ea.DeliveryTag);
             }
             finally
@@ -533,7 +543,7 @@ class RabbitConsumer : IDisposable
             catch (Exception ex)
             {
                 Console.WriteLine($"{exMessage}, Exception: {ex}");
-                this.logger.LogTagError("BindTransferHandler", ex, $"{exMessage}, Exception: {ex}");
+                this.logger.LogTagError("RabbitConsumer", ex, $"BindTransferHandler，{exMessage}");
                 await this.SafeNack(consumerChannel, ea.DeliveryTag);
             }
             finally

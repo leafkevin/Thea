@@ -21,13 +21,13 @@ class RabbitProducer : IDisposable
     private IConnection connection;
     private readonly Channel<IChannel> channel;
     private int isShutdown;
-    public string ConnectionName { get; private set; }
+    public string ConnectionId { get; private set; }
 
-    private RabbitProducer(Channel<IChannel> channel, IConnection connection, string connectionName, ILogger<RabbitProducer> logger)
+    private RabbitProducer(Channel<IChannel> channel, IConnection connection, string ConnectionId, ILogger<RabbitProducer> logger)
     {
         this.channel = channel;
         this.connection = connection;
-        this.ConnectionName = connectionName;
+        this.ConnectionId = ConnectionId;
         this.logger = logger;
     }
 
@@ -154,7 +154,8 @@ class RabbitProducer : IDisposable
         }
         catch (Exception ex)
         {
-            this.logger.LogTagError("RabbitProducer", ex, $"关闭RabbitMQ生产者失败, ConnectionName: {this.ConnectionName}");
+            this.logger.LogTagError("RabbitProducer", ex, $"ShutdownAsync，关闭RabbitMQ生产者失败, ConnectionId: {this.ConnectionId}");
+            Console.WriteLine($"ShutdownAsync，关闭RabbitMQ生产者失败, ConnectionId: {this.ConnectionId}, Exception: {ex}");
         }
         finally
         {
@@ -175,7 +176,8 @@ class RabbitProducer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{errMessage}, Exception: {ex}");
+            this.logger.LogTagError("RabbitProducer", ex, $"TryTo，{errMessage}, ConnectionId: {this.ConnectionId}");
+            Console.WriteLine($"{errMessage}, ConnectionId: {this.ConnectionId}, Exception: {ex}");
             var failedChannel = rabbitChannel;
             rabbitChannel = null;
             await this.DisposeChannel(failedChannel);
@@ -188,7 +190,8 @@ class RabbitProducer : IDisposable
                 }
                 catch (Exception rebuildException)
                 {
-                    Console.WriteLine($"重建RabbitMQ Channel失败, ConnectionName: {this.ConnectionName}, Exception: {rebuildException}");
+                    this.logger.LogTagError("RabbitProducer", rebuildException, $"CreateChannelAsync，重建RabbitMQ Channel失败, ConnectionId: {this.ConnectionId}");
+                    Console.WriteLine($"重建RabbitMQ Channel失败, ConnectionId: {this.ConnectionId}, Exception: {rebuildException}");
                 }
             }
             throw;
@@ -221,7 +224,8 @@ class RabbitProducer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"CloseChannel, ConnectionName: {this.ConnectionName}, Exception: {ex}");
+            this.logger.LogTagError("RabbitProducer", ex, $"DisposeChannel，销毁Channel失败, ConnectionId: {this.ConnectionId}");
+            Console.WriteLine($"CloseChannel, ConnectionId: {this.ConnectionId}, Exception: {ex}");
         }
     }
 }

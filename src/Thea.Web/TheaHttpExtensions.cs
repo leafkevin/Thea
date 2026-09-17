@@ -1,18 +1,15 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
+using System.Threading.Tasks;
 
 namespace Thea.Web;
 
 public static class TheaHttpExtensions
 {
-    public static IHttpClientBuilder AddTraceId(this IHttpClientBuilder builder)
-    {
-        builder.AddHttpMessageHandler<TheaHttpMessageHandler>();
-        return builder;
-    }
     public static HttpClient CreateClient(this IHttpClientFactory clientFactory, string name = null, int timeoutSeconds = 30)
     {
         var httpClient = clientFactory.CreateClient(name);
@@ -29,13 +26,6 @@ public static class TheaHttpExtensions
         httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         return httpClient;
     }
-    public static string GetAuthorization(this IHttpContextAccessor contextAccessor)
-    {
-        if (contextAccessor == null)
-            throw new ArgumentNullException(nameof(contextAccessor));
-        return contextAccessor.HttpContext.Request.Headers.Authorization;
-    }
-
     public static void WithToken(this HttpContent content, string token)
     {
         if (string.IsNullOrEmpty(token))
@@ -68,6 +58,17 @@ public static class TheaHttpExtensions
             return traceId.ToString();
         return context.TraceIdentifier;
     }
+    public static async Task<string> ReadBody(this Stream stram)
+    {
+        if (stram == null)
+            return null;
+        stram.Position = 0;
+        var reader = new StreamReader(stram);
+        var result = await reader.ReadToEndAsync();
+        stram.Position = 0;
+        return result;
+    }
+
     public static string GetClientIp(this HttpContext context)
     {
         if (context == null)

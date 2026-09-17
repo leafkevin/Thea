@@ -84,7 +84,7 @@ public class TheaWebMiddleware
                     this.logger.LogEntity(logEntityInfo);
                     return;
                 }
-                if (!logEntityInfo.IsEnabled || ScopeState.TryGetState(out var lastScopeState) && !lastScopeState.IsEnabled)
+                if (!logEntityInfo.IsEnabled || ScopeLogger.TryGetScope(out var lastScopeState) && !lastScopeState.IsEnabled)
                 {
                     memoryStream.Position = 0;
                     await memoryStream.CopyToAsync(originalStream);
@@ -150,7 +150,7 @@ public class TheaWebMiddleware
             case (int)ApiType.HttpDelete:
             case (int)ApiType.HttpPost:
             case (int)ApiType.HttpPut:
-                logEntityInfo.Request = await this.ReadBody(context.Request.Body);
+                logEntityInfo.Request = await context.Request.Body.ReadBody();
                 break;
         }
         logEntityInfo.Headers = context.Request.Headers.ToJson();
@@ -166,22 +166,6 @@ public class TheaWebMiddleware
             }
         }
         return logEntityInfo;
-    }
-    private async Task<string> ReadBody(Stream stream)
-    {
-        try
-        {
-            if (stream == null) return string.Empty;
-            stream.Position = 0;
-            var reader = new StreamReader(stream, leaveOpen: true);
-            var result = await reader.ReadToEndAsync();
-            stream.Position = 0;
-            return result;
-        }
-        catch (Exception ex)
-        {
-            return ex.Message;
-        }
     }
     private static string GetHost()
     {

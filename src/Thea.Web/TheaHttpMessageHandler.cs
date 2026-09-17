@@ -1,11 +1,11 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Http;
 using Thea.Logging;
 
 namespace Thea.Web;
@@ -54,9 +54,10 @@ public sealed class TheaHttpMessageHandler : DelegatingHandler
         if (!request.Headers.Contains("TraceId"))
         {
             var context = this.contextAccessor.HttpContext;
-            var traceId = context?.TraceIdentifier;
-            if (ScopeState.TryGetState(out var scopeState))
-                traceId = scopeState.TraceId;
+            string traceId = null;
+            if (ScopeLogger.TryGetScope(out var logEntityInfo))
+                traceId = logEntityInfo.TraceId;
+            else traceId = context?.TraceIdentifier;
             if (!string.IsNullOrEmpty(traceId))
                 request.Headers.Add("TraceId", traceId);
         }

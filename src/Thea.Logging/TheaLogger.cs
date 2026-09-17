@@ -7,7 +7,6 @@ namespace Thea.Logging;
 
 public class TheaLogger : ILogger
 {
-    private readonly string name;
     private readonly string appId;
     private readonly string environment;
     private readonly LogLevel logLevel;
@@ -23,7 +22,6 @@ public class TheaLogger : ILogger
         this.logLevel = configuration.GetValue("Logging:LogLevel:Default", LogLevel.Information);
         this.aspnetLogLevel = configuration.GetValue("Logging:LogLevel:Microsoft.AspNetCore", LogLevel.Error);
         if (appId == null) throw new ArgumentNullException(nameof(appId));
-        this.name = name;
         this.environment = hostEnvironment.EnvironmentName;
         this.processor = processor;
     }
@@ -31,8 +29,8 @@ public class TheaLogger : ILogger
     {
         if (state == null || state is not LogEntity logEntityInfo)
             return null;
-        ScopeState.Push(logEntityInfo);
-        return new ScopeStateHolder(ScopeState.Pop);
+        ScopeLogger.Update(logEntityInfo);
+        return new ScopeLoggerHolder(ScopeLogger.Release);
     }
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
     {
@@ -46,8 +44,8 @@ public class TheaLogger : ILogger
         if (stateType.FullName.StartsWith("Microsoft.Extensions.Logging.LoggerMessage"))
             return;
 
-        var hasScopeState = ScopeState.TryGetState(out var lastScopeState);
-        if (hasScopeState && !lastScopeState.IsEnabled) return;
+        var hasScope = ScopeLogger.TryGetScope(out var lastLogEntityInfo);
+        if (hasScope && !lastLogEntityInfo.IsEnabled) return;
 
         var logEntityInfo = state as LogEntity;
         if (logEntityInfo == null)
@@ -63,10 +61,13 @@ public class TheaLogger : ILogger
         }
         logEntityInfo.AppId = this.appId;
         logEntityInfo.Environment = this.environment;
-        if (hasScopeState) logEntityInfo.DecorateFrom(lastScopeState);
+        if (hasScope) logEntityInfo.LoadFrom(lastLogEntityInfo);
         //有手动传进来的耗时，不再计算
         if (!logEntityInfo.Elapsed.HasValue)
-            logEntityInfo.Elapsed = (int)DateTime.Now.Subtract(logEntityInfo.LogTime).TotalMilliseconds;
+        {
+            var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            logEntityInfo.Elapsed = (int)(nowTimestamp - logEntityInfo.LogTime);
+        }
         this.processor.ExecuteAsync(logEntityInfo).Wait();
     }
 
@@ -74,12 +75,15 @@ public class TheaLogger : ILogger
     {
         if (logLevel < this.aspnetLogLevel)
             return false;
+        var hasScope = ScopeLogger.TryGetScope(out var scopeLogger);
+        if (hasScope && !scopeLogger.IsEnabled)
+            return false;
         return logLevel >= this.logLevel;
     }
-    private struct ScopeStateHolder : IDisposable
+    private struct ScopeLoggerHolder : IDisposable
     {
         private readonly Func<LogEntity> onDispose;
-        public ScopeStateHolder(Func<LogEntity> onDispose) => this.onDispose = onDispose;
+        public ScopeLoggerHolder(Func<LogEntity> onDispose) => this.onDispose = onDispose;
         public void Dispose() => this.onDispose.Invoke();
     }
 }

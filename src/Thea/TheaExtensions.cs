@@ -67,7 +67,6 @@ public static class TheaExtensions
         var message = exMessage ?? $"操作超时, 耗时{timeout.TotalSeconds}s";
         var ctr = cts.Token.Register(() =>
         {
-            tcs.TrySetException(new TimeoutException(message));
             if (cts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 tcs.TrySetException(new TimeoutException(message));
             else tcs.TrySetCanceled(cancellationToken);

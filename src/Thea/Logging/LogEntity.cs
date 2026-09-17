@@ -29,7 +29,7 @@ public class LogEntity
 
     [JsonIgnore]
     public object Exception { get; set; }
-    public DateTime LogTime { get; set; } = DateTime.Now;
+    public long LogTime { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     public int? Elapsed { get; set; }
     /// <summary>
     /// 为false时，可抛弃日志记录
@@ -38,7 +38,7 @@ public class LogEntity
 
     public override string ToString() => this.Body;
 
-    public LogEntity DecorateFrom(LogEntity lastScopeState)
+    public LogEntity LoadFrom(LogEntity lastScopeState)
     {
         if (string.IsNullOrEmpty(this.TraceId) && !string.IsNullOrEmpty(lastScopeState.TraceId))
             this.TraceId = lastScopeState.TraceId;

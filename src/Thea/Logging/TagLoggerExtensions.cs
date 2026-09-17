@@ -9,14 +9,14 @@ public static class TagLoggerExtensions
     public static void LogEntity(this ILogger logger, LogEntity logEntityInfo)
     {
         if (logEntityInfo == null) return;
-        if (ScopeState.TryGetState(out var lastScopeState) && !lastScopeState.IsEnabled)
+        if (ScopeLogger.TryGetScope(out var lastLogEntityInfo) && !lastLogEntityInfo.IsEnabled)
             return;
         logger.Log((LogLevel)logEntityInfo.LogLevel, 0, logEntityInfo, logEntityInfo.Exception as Exception, LogEntityFormatter);
     }
     public static void CancelScope(this ILogger logger)
     {
-        if (ScopeState.TryGetState(out var lastScopeState))
-            lastScopeState.IsEnabled = false;
+        if (ScopeLogger.TryGetScope(out var logEntityInfo))
+            logEntityInfo.IsEnabled = false;
     }
 
     public static void LogTagDebug(this ILogger logger, EventId eventId, string tag, Exception exception, string message, params object[] args)
@@ -78,6 +78,9 @@ public static class TagLoggerExtensions
     {
         if (logger == null)
             throw new ArgumentNullException(nameof(logger));
+        if (ScopeLogger.TryGetScope(out var logEntityInfo) && !logEntityInfo.IsEnabled)
+            return;
+
         var body = message;
         if (!string.IsNullOrEmpty(message))
         {
