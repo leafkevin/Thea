@@ -77,33 +77,10 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            this.stopTokenSource = new CancellationTokenSource();
-            await this.Register();
-            this.heartbeats.TryAdd(this.ServiceId, DateTime.UtcNow);
-            Console.WriteLine($"MessageDriven ServiceId: {this.ServiceId}已启动！");
-            await this.readyToStart.Task.WaitAsync(cancellationToken);
-            this.task = this.ExecuteAsync(this.stopTokenSource.Token);
-            if (this.task.IsCompleted)
-                await this.task;
-        }
-        catch (Exception ex)
-        {
-            Interlocked.Exchange(ref this.isStopping, 1);
-            try
-            {
-                await this.ShutdownConsumersAsync();
-                await this.CleanupAsync();
-            }
-            catch (Exception cleanupException)
-            {
-                this.logger.LogTagError("MessageDrivenService", cleanupException, "启动失败后的资源清理异常");
-            }
-            this.logger.LogTagError("MessageDrivenService", ex, "MessageDrivenService启动失败");
-            Console.WriteLine($"MessageDriven ServiceId: {this.ServiceId}，启动失败, {ex}");
-            throw;
-        }
+        this.stopTokenSource = new CancellationTokenSource();
+        this.task = this.ExecuteAsync(this.stopTokenSource.Token);
+        if (this.task.IsCompleted)
+            await this.task;
     }
     public async Task StopAsync(CancellationToken cancellationToken)
     {
@@ -125,6 +102,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             if (this.task != null)
             {
                 this.stopTokenSource?.Cancel();
+                //等待后台循环任务结束，即：cancellationToken已取消等待channel排空
                 try { await this.task.WaitAsync(cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -414,140 +392,163 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var logs = new List<ExecLog>();
-        while (!stoppingToken.IsCancellationRequested || this.channel.Reader.TryPeek(out _))
+        try
         {
             await this.readyToStart.Task.WaitAsync(stoppingToken);
-            Message message = null;
-            BasicProperties properties = null;
-            try
+            Console.WriteLine($"MessageDriven ServiceId: {this.ServiceId} 已启动！");
+            this.heartbeats.TryAdd(this.ServiceId, DateTime.UtcNow);
+            await this.Register();
+            var logs = new List<ExecLog>();
+            while (!stoppingToken.IsCancellationRequested || this.channel.Reader.TryPeek(out _))
             {
-                //如果已经开始Shutdown，不再检查消费者拓扑变化
-                if (Volatile.Read(ref this.isStopping) == 0 && DateTime.UtcNow - this.lastInitedTime >= this.heartbeatCycle)
+                await this.readyToStart.Task.WaitAsync(stoppingToken);
+                Message message = null;
+                BasicProperties properties = null;
+                try
                 {
-                    await this.topologyLock.WaitAsync(stoppingToken);
-                    try
+                    //如果已经开始Shutdown，不再检查消费者拓扑变化
+                    if (Volatile.Read(ref this.isStopping) == 0 && DateTime.UtcNow - this.lastInitedTime >= this.heartbeatCycle)
                     {
-                        if (Volatile.Read(ref this.isStopping) == 0)
+                        await this.topologyLock.WaitAsync(stoppingToken);
+                        try
                         {
-                            await this.StartConsumersAsync();
-                            this.lastInitedTime = DateTime.UtcNow;
+                            if (Volatile.Read(ref this.isStopping) == 0)
+                            {
+                                await this.StartConsumersAsync();
+                                this.lastInitedTime = DateTime.UtcNow;
+                            }
+                        }
+                        finally
+                        {
+                            this.topologyLock.Release();
                         }
                     }
-                    finally
+                    if ((DateTime.UtcNow - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
+                        || logs.Count >= 100)
                     {
-                        this.topologyLock.Release();
+                        await this.repository.WriteLogs(logs);
+                        logs.Clear();
+                        this.lastLoggedTime = DateTime.UtcNow;
                     }
+                    if (this.rpcWaiters.IsEmpty && DateTime.UtcNow.Subtract(this.lastClearRpcTime).TotalSeconds > 5)
+                    {
+                        var messageIds = this.rpcWaiters.Keys.ToList();
+                        foreach (var messageId in messageIds)
+                        {
+                            if (!this.rpcWaiters.TryGetValue(messageId, out var rpcWaiter))
+                                continue;
+                            if (DateTime.UtcNow.Subtract(rpcWaiter.CreatedAt).TotalSeconds < rpcWaiter.TimeoutSeconds)
+                                continue;
+                            this.rpcWaiters.TryRemove(messageId, out _);
+                            //只结束超时的RPC请求，不做清理工作，清理工作在Request方法中处理
+                            rpcWaiter.Waiter.TrySetException(new TimeoutException(rpcWaiter.TimeoutMessage));
+                        }
+                        this.lastClearRpcTime = DateTime.UtcNow;
+                    }
+                    for (int i = 0; i < 10; i++)
+                    {
+                        if (!this.channel.Reader.TryRead(out message))
+                            break;
+                        switch (message.Type)
+                        {
+                            case Consts.UserMessage:
+                            case Consts.RpcMessage:
+                                properties = new BasicProperties
+                                {
+                                    Persistent = true,
+                                    Type = message.Type,
+                                    DeliveryMode = DeliveryModes.Persistent,
+                                    AppId = this.AppId,
+                                    MessageId = message.MessageId,
+                                    Headers = new Dictionary<string, object> { { "TraceId", message.TraceId } }
+                                };
+                                if (message.ScheduleTimeUtc.HasValue)
+                                {
+                                    var delayMilliseconds = (long)message.ScheduleTimeUtc.Value.Subtract(DateTime.UtcNow).TotalMilliseconds;
+                                    properties.Headers.Add("x-delay", delayMilliseconds);
+                                }
+                                if (message.Type == Consts.RpcMessage)
+                                {
+                                    //RPC消息，设置回复队列和过期时间
+                                    properties.ReplyTo = message.ReplyTo;
+                                    properties.CorrelationId = message.MessageId;
+                                }
+                                var queueIds = this.bindings.Where(f => f.ExchangeId == message.Exchange)
+                                   .Select(f => f.QueueId).ToList();
+                                var statefalQeues = this.queues.FindAll(f => queueIds.Contains(f.QueueId) && f.IsStateful && f.IsEnabled);
+
+                                var jsonMessage = message.IsJsonMessage ? message.Body.ToString() : message.Body.ToJson();
+                                if (statefalQeues != null && statefalQeues.Count > 0)
+                                {
+                                    var myQueue = statefalQeues[0];
+                                    if (myQueue.AppId == this.AppId)
+                                    {
+                                        //如果存在有状态队列，根据消息的RoutingKey进行一致性哈希，路由到对应的队列中
+                                        var routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, myQueue.WorkloadTotal);
+                                        message.RoutingKey = routingKey.ToString();
+                                        await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, jsonMessage);
+                                    }
+                                    else
+                                    {
+                                        //如果队列消费者是其他应用的，发到转发队列中
+                                        properties.Headers.Add("Exchange", message.Exchange);
+                                        properties.Headers.Add("RoutingKey", message.RoutingKey);
+                                        var transferQueue = $"{Consts.TransferExchange}.{myQueue.AppId}";
+                                        await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, transferQueue, properties, jsonMessage);
+                                    }
+                                }
+                                //如果是无状态队列的消息，直接发送交换机
+                                else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, jsonMessage);
+
+                                //防止条件问题阻塞后续消费
+                                message.Waiter?.TrySetResult(true);
+                                break;
+                            case Consts.Heartbeat:
+                                //用户消息堆积，心跳消息也会阻塞，此节点会被认为是异常节点，将会从可用节点中移除
+                                this.heartbeats.AddOrUpdate((string)message.Body, DateTime.UtcNow, (k, o) => DateTime.UtcNow);
+                                break;
+                            case Consts.Logs:
+                                logs.Add(message.Body as ExecLog);
+                                break;
+                        }
+                    }
+                    if (!this.channel.Reader.TryPeek(out _))
+                        await Task.Delay(1);
                 }
-                if ((DateTime.UtcNow - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0)
-                    || logs.Count >= 100)
+                catch (Exception ex)
+                {
+                    var exception = ex.InnerException ?? ex;
+                    this.logger.LogTagError("MessageDriven", exception, $"Message: {message.ToJson()}, Properties: {properties.ToJson()}");
+                    logs.Clear();
+                }
+            }
+            if (logs.Count > 0 && this.repository != null)
+            {
+                try
                 {
                     await this.repository.WriteLogs(logs);
-                    logs.Clear();
-                    this.lastLoggedTime = DateTime.UtcNow;
                 }
-                if (this.rpcWaiters.IsEmpty && DateTime.UtcNow.Subtract(this.lastClearRpcTime).TotalSeconds > 5)
+                catch (Exception ex)
                 {
-                    var messageIds = this.rpcWaiters.Keys.ToList();
-                    foreach (var messageId in messageIds)
-                    {
-                        if (!this.rpcWaiters.TryGetValue(messageId, out var rpcWaiter))
-                            continue;
-                        if (DateTime.UtcNow.Subtract(rpcWaiter.CreatedAt).TotalSeconds < rpcWaiter.TimeoutSeconds)
-                            continue;
-                        this.rpcWaiters.TryRemove(messageId, out _);
-                        //只结束超时的RPC请求，不做清理工作，清理工作在Request方法中处理
-                        rpcWaiter.Waiter.TrySetException(new TimeoutException(rpcWaiter.TimeoutMessage));
-                    }
-                    this.lastClearRpcTime = DateTime.UtcNow;
+                    this.logger.LogTagError("MessageDriven", ex, "退出时写入消息日志失败");
                 }
-                for (int i = 0; i < 10; i++)
-                {
-                    if (!this.channel.Reader.TryRead(out message))
-                        break;
-                    switch (message.Type)
-                    {
-                        case Consts.UserMessage:
-                        case Consts.RpcMessage:
-                            properties = new BasicProperties
-                            {
-                                Persistent = true,
-                                Type = message.Type,
-                                DeliveryMode = DeliveryModes.Persistent,
-                                AppId = this.AppId,
-                                MessageId = message.MessageId,
-                                Headers = new Dictionary<string, object> { { "TraceId", message.TraceId } }
-                            };
-                            if (message.ScheduleTimeUtc.HasValue)
-                            {
-                                var delayMilliseconds = (long)message.ScheduleTimeUtc.Value.Subtract(DateTime.UtcNow).TotalMilliseconds;
-                                properties.Headers.Add("x-delay", delayMilliseconds);
-                            }
-                            if (message.Type == Consts.RpcMessage)
-                            {
-                                //RPC消息，设置回复队列和过期时间
-                                properties.ReplyTo = message.ReplyTo;
-                                properties.CorrelationId = message.MessageId;
-                            }
-                            var queueIds = this.bindings.Where(f => f.ExchangeId == message.Exchange)
-                               .Select(f => f.QueueId).ToList();
-                            var statefalQeues = this.queues.FindAll(f => queueIds.Contains(f.QueueId) && f.IsStateful && f.IsEnabled);
-
-                            var jsonMessage = message.IsJsonMessage ? message.Body.ToString() : message.Body.ToJson();
-                            if (statefalQeues != null && statefalQeues.Count > 0)
-                            {
-                                var myQueue = statefalQeues[0];
-                                if (myQueue.AppId == this.AppId)
-                                {
-                                    //如果存在有状态队列，根据消息的RoutingKey进行一致性哈希，路由到对应的队列中
-                                    var routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, myQueue.WorkloadTotal);
-                                    message.RoutingKey = routingKey.ToString();
-                                    await this.rabbitProducer.PublishAsync(message.Exchange, routingKey.ToString(), properties, jsonMessage);
-                                }
-                                else
-                                {
-                                    //如果队列消费者是其他应用的，发到转发队列中
-                                    properties.Headers.Add("Exchange", message.Exchange);
-                                    properties.Headers.Add("RoutingKey", message.RoutingKey);
-                                    var transferQueue = $"{Consts.TransferExchange}.{myQueue.AppId}";
-                                    await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, transferQueue, properties, jsonMessage);
-                                }
-                            }
-                            //如果是无状态队列的消息，直接发送交换机
-                            else await this.rabbitProducer.PublishAsync(message.Exchange, message.RoutingKey, properties, jsonMessage);
-
-                            //防止条件问题阻塞后续消费
-                            message.Waiter?.TrySetResult(true);
-                            break;
-                        case Consts.Heartbeat:
-                            //用户消息堆积，心跳消息也会阻塞，此节点会被认为是异常节点，将会从可用节点中移除
-                            this.heartbeats.AddOrUpdate((string)message.Body, DateTime.UtcNow, (k, o) => DateTime.UtcNow);
-                            break;
-                        case Consts.Logs:
-                            logs.Add(message.Body as ExecLog);
-                            break;
-                    }
-                }
-                if (!this.channel.Reader.TryPeek(out _))
-                    await Task.Delay(1);
-            }
-            catch (Exception ex)
-            {
-                var exception = ex.InnerException ?? ex;
-                this.logger.LogTagError("MessageDriven", exception, $"Message: {message.ToJson()}, Properties: {properties.ToJson()}");
-                logs.Clear();
             }
         }
-        if (logs.Count > 0 && this.repository != null)
+        catch (Exception ex)
         {
+            Interlocked.Exchange(ref this.isStopping, 1);
             try
             {
-                await this.repository.WriteLogs(logs);
+                await this.ShutdownConsumersAsync();
+                await this.CleanupAsync();
             }
-            catch (Exception ex)
+            catch (Exception cleanupException)
             {
-                this.logger.LogTagError("MessageDriven", ex, "退出时写入消息日志失败");
+                this.logger.LogTagError("MessageDriven", cleanupException, "启动失败后的资源清理异常");
             }
+            this.logger.LogTagError("MessageDriven", ex, "MessageDrivenService启动失败");
+            Console.WriteLine($"MessageDriven ServiceId: {this.ServiceId}，启动失败, {ex}");
+            throw;
         }
     }
     private async Task Register()

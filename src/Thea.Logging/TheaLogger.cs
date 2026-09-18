@@ -7,6 +7,7 @@ namespace Thea.Logging;
 
 public class TheaLogger : ILogger
 {
+    private readonly string name;
     private readonly string appId;
     private readonly string environment;
     private readonly LogLevel logLevel;
@@ -17,6 +18,7 @@ public class TheaLogger : ILogger
     public TheaLogger(string name, IConfiguration configuration, IHostEnvironment hostEnvironment, ILoggerProcessor processor)
     {
         if (name == null) throw new ArgumentNullException(nameof(name));
+		        this.name = name;
         this.appId = configuration["AppId"];
         this.isEnabled = configuration.GetValue("Logging:IsEnabled", false);
         this.logLevel = configuration.GetValue("Logging:LogLevel:Default", LogLevel.Information);
@@ -73,7 +75,7 @@ public class TheaLogger : ILogger
 
     public bool IsEnabled(LogLevel logLevel)
     {
-        if (logLevel < this.aspnetLogLevel)
+        if (this.name == "Microsoft.AspNetCore" && logLevel < this.aspnetLogLevel)
             return false;
         var hasScope = ScopeLogger.TryGetScope(out var scopeLogger);
         if (hasScope && !scopeLogger.IsEnabled)
