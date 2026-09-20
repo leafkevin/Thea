@@ -478,9 +478,11 @@ class RabbitConsumer : IDisposable
 
                 var result = Encoding.UTF8.GetString(ea.Body.Span);
                 //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                this.parent.SetRpcResult(ea.BasicProperties.MessageId, new RpcResponse
+                await this.parent.ProcessMessage(new Message
                 {
+                    MessageId = ea.BasicProperties.MessageId,
                     Type = ea.BasicProperties.Type,
+                    IsJsonMessage = ea.BasicProperties.Type == Consts.RpcResponse,
                     Body = result
                 });
                 await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
@@ -533,11 +535,11 @@ class RabbitConsumer : IDisposable
                     Body = jsonBody
                 };
 
-                var timeoutSeconds = this.parent.HeartbeatCycle.TotalSeconds;
+                var timeoutSeconds = this.parent.heartbeatCycle.TotalSeconds;
                 exMessage = $"转发消息超时, 耗时{timeoutSeconds}s, Now: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, Message: {message.ToJson()}";
                 message.Waiter = new TaskCompletionSource<bool>();
                 await this.parent.ProcessMessage(message);
-                await message.Waiter.WaitAsync(this.parent.HeartbeatCycle, exMessage);
+                await message.Waiter.WaitAsync(this.parent.heartbeatCycle, exMessage);
                 await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
             }
             catch (Exception ex)

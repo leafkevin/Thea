@@ -25,6 +25,10 @@ public class Binding
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
+    /// 是否有状态
+    /// </summary>
+    public bool IsStateful { get; set; }
+    /// <summary>
     /// 是否延时消费者
     /// </summary>
     public bool IsDelay { get; set; }
@@ -42,10 +46,6 @@ public class Queue
     /// 应用ID
     /// </summary>
     public string AppId { get; set; }
-    /// <summary>
-    /// 是否有状态
-    /// </summary>
-    public bool IsStateful { get; set; }
     /// <summary>
     /// 工作负荷个数
     /// </summary>
@@ -74,17 +74,17 @@ public class Queue
     public bool IsSingleActiveConsumer { get; set; }
 }
 class ConfigInfo
-{
+{  
     public List<string> EndPoints { get; set; }
     public string User { get; set; }
     public string Password { get; set; }
     public int SacCount { get; set; } = 2;
-    public int Heartbeat { get; set; } = 10;
-    public int RpcTimeout { get; set; } = 30;
+    public int Heartbeat { get; set; } = 10; 
     public string DbKey { get; set; }
     public bool IsAllowCreateQueue { get; set; } = true;
     public bool IsAllowCreateExchange { get; set; } = true;
     public bool IsAllowCreateBinding { get; set; } = true;
+    public bool IsEnabled { get; set; }
 }
 class QueueState
 {

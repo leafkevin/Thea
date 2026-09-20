@@ -17,8 +17,8 @@ public class TheaLogger : ILogger
 
     public TheaLogger(string name, IConfiguration configuration, IHostEnvironment hostEnvironment, ILoggerProcessor processor)
     {
+        this.name = name;
         if (name == null) throw new ArgumentNullException(nameof(name));
-		        this.name = name;
         this.appId = configuration["AppId"];
         this.isEnabled = configuration.GetValue("Logging:IsEnabled", false);
         this.logLevel = configuration.GetValue("Logging:LogLevel:Default", LogLevel.Information);

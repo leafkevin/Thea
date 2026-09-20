@@ -36,7 +36,7 @@ struct RpcResponse
 class RpcWaiter
 {
     public string MessageId { get; set; }
-    public TaskCompletionSource<RpcResponse> Waiter { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<Message> Waiter { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int TimeoutSeconds { get; set; } = 30;
     public string TimeoutMessage { get; set; }

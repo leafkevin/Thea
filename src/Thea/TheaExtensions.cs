@@ -64,20 +64,16 @@ public static class TheaExtensions
     }
     public static async Task<T> WaitAsync<T>(this TaskCompletionSource<T> tcs, TimeSpan timeout, string exMessage, CancellationToken cancellationToken = default)
     {
-        var cts = new CancellationTokenSource(timeout);
-        var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cts.Token);
+        using var cts = new CancellationTokenSource(timeout);
+        using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cts.Token);
         var message = exMessage ?? $"操作超时, 耗时{timeout.TotalSeconds}s";
-        var ctr = cts.Token.Register(() =>
+        using var ctr = cts.Token.Register(() =>
         {
             if (cts.Token.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 tcs.TrySetException(new TimeoutException(message));
             else tcs.TrySetCanceled(cancellationToken);
         });
-        var result = await tcs.Task;
-        ctr.Dispose();
-        combinedCts.Dispose();
-        cts.Dispose();
-        return result;
+        return await tcs.Task;
     }
     public static string ToMd5(this byte[] dataBytes)
     {
