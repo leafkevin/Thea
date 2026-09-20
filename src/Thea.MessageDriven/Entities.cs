@@ -32,6 +32,16 @@ public class Binding
     /// 是否延时消费者
     /// </summary>
     public bool IsDelay { get; set; }
+
+
+    /// <summary>
+    /// 应用ID
+    /// </summary>
+    public string AppId { get; set; }
+    /// <summary>
+    /// 是否启用
+    /// </summary>
+    public bool IsEnabled { get; set; }
 }
 /// <summary>
 /// 队列表，描述所有的队列基本信息
@@ -73,17 +83,15 @@ public class Queue
     /// </summary>
     public bool IsSingleActiveConsumer { get; set; }
 }
-class ConfigInfo
-{  
-    public List<string> EndPoints { get; set; }
-    public string User { get; set; }
-    public string Password { get; set; }
-    public int SacCount { get; set; } = 2;
-    public int Heartbeat { get; set; } = 10; 
-    public string DbKey { get; set; }
-    public bool IsAllowCreateQueue { get; set; } = true;
-    public bool IsAllowCreateExchange { get; set; } = true;
-    public bool IsAllowCreateBinding { get; set; } = true;
+public class Setting
+{
+    public string ExchangeId { get; set; }
+    public string QueueId { get; set; }
+    public string AppId { get; set; }
+    public string BindType { get; set; }
+    public int WorkloadTotal { get; set; }
+    public int PrefetchCount { get; set; }
+    public bool IsStateful { get; set; }
     public bool IsEnabled { get; set; }
 }
 class QueueState
