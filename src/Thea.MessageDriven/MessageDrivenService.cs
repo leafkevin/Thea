@@ -41,9 +41,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private List<Binding> bindings = new();
     private List<Queue> queues = new();
     private List<ExchangeTransfer> exchangeTransfers = new();
-    private Dictionary<string, QueueState> localQueueStates;
-    private List<Setting> settings = new();
-
+    private List<Setting> lastSettings;
+    private List<Setting> settings;
 
     private RabbitConsumer heartbeatConsumer;
     private RabbitConsumer rpcConsumer;
@@ -640,7 +639,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private async Task Register()
     {
         await this.repository.Register(this.queues, this.bindings);
-        //捞取数据库或是配置中心的集群信息        
+        //捞取数据库或是配置中心的集群信息
         this.settings = await this.repository.GetSettings(false);
 
         //创建交换机和队列及绑定
@@ -663,7 +662,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         //一个交换机对应一块业务
         //一个交换机可以绑定多个无状态队列
         //多个交换机只能绑定同一个有状态队列，一个交换机只能绑定一个有状态队列，不能绑定多个有状态队列
-        var exchangeQueues = this.settings.Where(f => f.IsStateful && f.IsEnabled)
+        var exchangeQueues = this.settings.Where(f => f.IsStateful)
             .GroupBy(f => f.ExchangeId).ToDictionary(f => f.Key, f => f.Select(t => t.QueueId).ToList())
             .Where(f => f.Value.Count > 1).ToList();
         if (exchangeQueues.Count > 0)
@@ -699,7 +698,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 if (myQueue.IsStateful)
                 {
                     //数据库配置的负载个数为准，创建有状态队列
-                    for (int i = 0; i < myQueue.WorkloadTotal; i++)
+                    var mySetting = this.settings.Find(f => f.QueueId == myQueue.QueueId);
+                    for (int i = 0; i < mySetting.WorkloadTotal; i++)
                     {
                         queueName = $"{myQueue.QueueId}.{i}";
                         await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
@@ -709,7 +709,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
 
             //创建转发队列
-            if (this.queues.Exists(f => f.IsStateful && f.AppId == this.AppId))
+            if (this.queues.Exists(f => f.IsStateful))
             {
                 //转发队列使用SAC消费者
                 queueName = $"{Consts.TransferExchange}.{this.AppId}";
@@ -722,40 +722,35 @@ class MessageDrivenService : IMessageDriven, IHostedService
             await this.heartbeatConsumer.StartAsync();
         }
 
-        //创建队列绑定        
-        if (this.configInfo.IsAllowCreateBinding)
+        //创建队列绑定
+        if (this.isAllowCreateBinding)
         {
             //创建工作负载队列绑定
-            foreach (var myQueue in myQueues)
+            foreach (var mySetting in this.settings)
             {
-                var myBindings = this.bindings.Where(f => f.QueueId == myQueue.QueueId).ToList();
-                if (myQueue.IsStateful)
+                if (mySetting.IsStateful)
                 {
-                    for (int i = 0; i < myQueue.WorkloadTotal; i++)
+                    for (int i = 0; i < mySetting.WorkloadTotal; i++)
                     {
-                        foreach (var myBinding in myBindings)
-                        {
-                            queueName = $"{myQueue.QueueId}.{i}";
-                            await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
-                        }
+                        queueName = $"{mySetting.QueueId}.{i}";
+                        await this.rabbitProducer.BindQueue(mySetting.ExchangeId, queueName, i.ToString());
                     }
                 }
-                else await this.rabbitProducer.BindQueue(myBindings[0].ExchangeId, myQueue.QueueId, Consts.DirectRoutingKey);
+                else await this.rabbitProducer.BindQueue(mySetting.ExchangeId, mySetting.QueueId, Consts.FanoutRoutingKey);
             }
-            //创建转发队列绑定
-
-            queueName = $"{Consts.TransferExchange}.{this.AppId}";
-            await this.rabbitProducer.BindQueue(queueName, queueName, Consts.DirectRoutingKey);
 
             //创建心跳队列绑定
             queueName = $"{Consts.HeartbeatExchange}.{this.AppId}.{this.ServiceId}";
             await this.rabbitProducer.BindQueue(Consts.HeartbeatExchange, queueName, this.AppId);
 
-            //创建交换机转发绑定
-            foreach (var transfer in this.exchangeTransfers)
-                await this.rabbitProducer.BindExchange(transfer.FromExchange, transfer.ToExchange, transfer.RoutingKey);
+            if (this.exchangeTransfers.Count > 0)
+            {
+                //创建交换机转发绑定
+                foreach (var transfer in this.exchangeTransfers)
+                    await this.rabbitProducer.BindExchange(transfer.FromExchange, transfer.ToExchange, transfer.RoutingKey);
+            }
         }
-        this.lastQueues = this.queues;
+        this.lastSettings = this.settings;
     }
     private async Task StartConsumersAsync()
     {
@@ -768,14 +763,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             AppId = this.AppId,
             MessageId = ObjectId.NewId()
         }, this.ServiceId);
-        (this.queues, this.bindings) = await this.repository.GetSettings();
-        foreach (var myQueue in this.queues)
-        {
-            if (!this.localQueueStates.TryGetValue(myQueue.QueueId, out var queueState))
-                continue;
-            myQueue.IsQuorumQueue = queueState.IsQuorumQueue;
-            myQueue.IsSingleActiveConsumer = queueState.IsSingleActiveConsumer;
-        }
+        this.settings = await this.repository.GetSettings();
         if (!this.hasConsumer) return;
 
         //启动消费者
@@ -798,32 +786,38 @@ class MessageDrivenService : IMessageDriven, IHostedService
         var validQueueNames = new HashSet<string>();
 
         //先创建有状态队列消费者(包括SAC和非SAC消费者)
-        var myQueues = this.queues.Where(f => f.AppId == this.AppId && f.IsEnabled
-            && f.IsStateful).OrderBy(f => f.QueueId).ToList();
-
-        foreach (var myQueue in myQueues)
+        var queueIds = this.queues.Where(f => f.IsStateful).Select(f => f.QueueId).OrderBy(f => f).ToList();
+        var lastQueues = this.lastSettings.Where(f => queueIds.Contains(f.QueueId))
+            .Select(f => new Queue
+            {
+                QueueId = f.QueueId,
+                WorkloadTotal = f.WorkloadTotal
+            }).Distinct().ToDictionary(f => f.QueueId, f => f);
+        foreach (var myQueue in lastQueues.Values)
         {
             for (int i = 0; i < myQueue.WorkloadTotal; i++)
                 validQueueNames.Add($"{myQueue.QueueId}.{i}");
         }
-
         //创建新增的队列和绑定
-        foreach (var lastQueue in this.lastQueues)
+        var myQueues = this.settings.Where(f => queueIds.Contains(f.QueueId))
+             .Select(f => new Queue
+             {
+                 QueueId = f.QueueId,
+                 WorkloadTotal = f.WorkloadTotal
+             }).Distinct().ToList();
+        foreach (var myQueue in myQueues)
         {
-            if (lastQueue.AppId != this.AppId) continue;
-
-            var lastWorkloadTotal = lastQueue.WorkloadTotal;
-            var myQueue = myQueues.Find(f => f.QueueId == lastQueue.QueueId);
-            if (myQueue == null || lastWorkloadTotal >= myQueue.WorkloadTotal)
+            var lastWorkloadTotal = lastQueues[myQueue.QueueId].WorkloadTotal;
+            if (lastWorkloadTotal >= myQueue.WorkloadTotal)
                 continue;
 
-            var myBindings = this.bindings.FindAll(f => f.QueueId == lastQueue.QueueId);
+            var myBindings = this.settings.FindAll(f => f.QueueId == myQueue.QueueId);
             for (int i = lastWorkloadTotal; i < myQueue.WorkloadTotal; i++)
             {
                 var queueName = $"{myQueue.QueueId}.{i}";
-                if (this.configInfo.IsAllowCreateQueue)
+                if (this.isAllowCreateQueue)
                     await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
-                if (this.configInfo.IsAllowCreateBinding)
+                if (this.isAllowCreateBinding)
                 {
                     foreach (var myBinding in myBindings)
                         await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
@@ -831,11 +825,20 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
 
-        //创建有状态队列消费者
+        int index = 0, nodeCount = nodeIds.Count;
+        string nodeId = null, consumerId = null;
+        List<RabbitConsumer> rabbitConsumers = null;
+        RabbitConsumer myRabbitConsumer = null;
+        var consumerIds = new Dictionary<string, List<string>>();
+
+        //先创建有状态队列消费者
         foreach (var myQueue in myQueues)
         {
             for (int i = 0; i < myQueue.WorkloadTotal; i++)
             {
+                nodeId = nodeCount > 1 ? nodeIds[index % nodeCount] : this.ServiceId;
+                index++;
+                if (nodeId != this.ServiceId) continue;
                 var queueName = $"{myQueue.QueueId}.{i}";
                 var consumerId = $"{queueName}.{this.ServiceId}.0";
                 await this.CreateConsumer(index, myQueue, queueName, consumerId, nodeIds, consumerIds);

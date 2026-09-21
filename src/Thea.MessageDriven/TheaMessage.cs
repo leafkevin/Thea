@@ -27,11 +27,8 @@ class Message
     public object Body { get; set; }
     [JsonIgnore]
     public TaskCompletionSource<bool> Waiter { get; set; }
-}
-struct RpcResponse
-{
-    public string Type { get; set; }
-    public string Body { get; set; }
+    [JsonIgnore]
+    public int RetryTimes { get; set; }
 }
 class RpcWaiter
 {

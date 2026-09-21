@@ -40,8 +40,8 @@ public class DefaultRepository : IMessageDrivenRepository
                     BindType = a.BindType,
                     WorkloadTotal = b.WorkloadTotal,
                     PrefetchCount = b.PrefetchCount,
-                    IsStateful = a.IsStateful,
-                    IsEnabled = b.IsEnabled
+                    IsStateful = b.IsStateful,
+                    IsSingleActiveConsumer = b.IsSingleActiveConsumer
                 })
                 .ToListAsync();
         });
@@ -52,8 +52,8 @@ public class DefaultRepository : IMessageDrivenRepository
         if (queues != null && queues.Count > 0)
         {
             await repository.Create<Queue>()
-                .IgnoreInto()
                 .WithBulk(queues)
+                .OnDuplicateKeyUpdate(t => t.Set(f => new { IsStateful = t.Values(f.IsStateful) }))
                 .ExecuteAsync();
         }
         if (bindings != null && bindings.Count > 0)
@@ -63,7 +63,7 @@ public class DefaultRepository : IMessageDrivenRepository
                 .OnDuplicateKeyUpdate(t => t.Set(f => new
                 {
                     BindType = t.Values(f.BindType),
-                    IsStateful = t.Values(f.IsStateful),
+                    BindingKey = t.Values(f.BindingKey),
                     IsDelay = t.Values(f.IsDelay)
                 }))
                 .ExecuteAsync();

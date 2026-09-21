@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace Thea.MessageDriven;
 
@@ -25,23 +24,9 @@ public class Binding
     /// </summary>
     public string BindingKey { get; set; }
     /// <summary>
-    /// 是否有状态
-    /// </summary>
-    public bool IsStateful { get; set; }
-    /// <summary>
     /// 是否延时消费者
     /// </summary>
     public bool IsDelay { get; set; }
-
-
-    /// <summary>
-    /// 应用ID
-    /// </summary>
-    public string AppId { get; set; }
-    /// <summary>
-    /// 是否启用
-    /// </summary>
-    public bool IsEnabled { get; set; }
 }
 /// <summary>
 /// 队列表，描述所有的队列基本信息
@@ -65,13 +50,13 @@ public class Queue
     /// </summary>
     public int PrefetchCount { get; set; }
     /// <summary>
+    /// 是否有状态
+    /// </summary>
+    public bool IsStateful { get; set; }
+    /// <summary>
     /// 是否开启日志
     /// </summary>
     public bool IsLogEnabled { get; set; }
-    /// <summary>
-    /// 是否启用
-    /// </summary>
-    public bool IsEnabled { get; set; }
 
 
     /// <summary>
@@ -92,7 +77,7 @@ public class Setting
     public int WorkloadTotal { get; set; }
     public int PrefetchCount { get; set; }
     public bool IsStateful { get; set; }
-    public bool IsEnabled { get; set; }
+    public bool IsSingleActiveConsumer { get; set; }
 }
 class QueueState
 {
