@@ -5,14 +5,12 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Trolley;
 using Trolley.MySqlConnector;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Thea.MessageDriven;
 
 public class DefaultRepository : IMessageDrivenRepository
 {
     private readonly string dbKey;
-    private readonly string appId;
     private readonly IOrmDbFactory dbFactory;
     private readonly IDistributedCache redisCache;
     public DefaultRepository(IServiceProvider serviceProvider)
@@ -20,31 +18,33 @@ public class DefaultRepository : IMessageDrivenRepository
         this.dbFactory = serviceProvider.GetService<IOrmDbFactory>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         this.dbKey = configuration.GetValue<string>("MessageDriven:DbKey");
-        this.appId = configuration.GetValue<string>("AppId");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
-    public virtual async Task<List<Setting>> GetSettings(bool useCache = true)
+    public virtual async Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true)
     {
-        var cacheKey = "thea.settings.all";
+        var cacheKey = "thea.queue.all";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        return await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        {
+            var repository = this.dbFactory.Create(this.dbKey);
+            return await repository.QueryAsync<Queue>();
+        });
+        cacheKey = "thea.binding.all";
+        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
+        var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
             return await repository.From<Binding, Queue>()
                 .Where((a, b) => a.QueueId == b.QueueId)
-                .Select((a, b) => new Setting
+                .SelectFlattenTo((a, b) => new Binding
                 {
-                    ExchangeId = a.ExchangeId,
-                    QueueId = a.QueueId,
                     AppId = b.AppId,
-                    BindType = a.BindType,
-                    WorkloadTotal = b.WorkloadTotal,
-                    PrefetchCount = b.PrefetchCount,
                     IsStateful = b.IsStateful,
-                    IsSingleActiveConsumer = b.IsSingleActiveConsumer
+                    WorkloadTotal = b.WorkloadTotal
                 })
                 .ToListAsync();
         });
+        return (queues, bindings);
     }
     public virtual async Task Register(List<Queue> queues, List<Binding> bindings)
     {

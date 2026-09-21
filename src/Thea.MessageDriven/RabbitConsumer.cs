@@ -157,7 +157,11 @@ class RabbitConsumer : IDisposable
         {
             return await currentChannel.MessageCountAsync(this.QueueName);
         }
-        catch
+        catch (AlreadyClosedException)
+        {
+            return 0;
+        }
+        catch (ObjectDisposedException)
         {
             return 0;
         }

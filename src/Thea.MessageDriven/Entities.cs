@@ -27,6 +27,20 @@ public class Binding
     /// 是否延时消费者
     /// </summary>
     public bool IsDelay { get; set; }
+
+
+    /// <summary>
+    /// 应用ID
+    /// </summary>
+    public string AppId { get; set; }
+    /// <summary>
+    /// 是否有状态
+    /// </summary>
+    public bool IsStateful { get; set; }
+    /// <summary>
+    /// 工作负荷个数
+    /// </summary>
+    public int WorkloadTotal { get; set; }
 }
 /// <summary>
 /// 队列表，描述所有的队列基本信息
@@ -59,28 +73,6 @@ public class Queue
     public bool IsLogEnabled { get; set; }
 
 
-    /// <summary>
-    /// 是否仲裁队列
-    /// </summary>
-    public bool IsQuorumQueue { get; set; }
-    /// <summary>
-    /// 是否单一激活消费者
-    /// </summary>
-    public bool IsSingleActiveConsumer { get; set; }
-}
-public class Setting
-{
-    public string ExchangeId { get; set; }
-    public string QueueId { get; set; }
-    public string AppId { get; set; }
-    public string BindType { get; set; }
-    public int WorkloadTotal { get; set; }
-    public int PrefetchCount { get; set; }
-    public bool IsStateful { get; set; }
-    public bool IsSingleActiveConsumer { get; set; }
-}
-class QueueState
-{
     /// <summary>
     /// 是否仲裁队列
     /// </summary>
