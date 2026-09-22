@@ -130,7 +130,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             await this.topologyLock.WaitAsync(cancellationToken);
             try
             {
-                await this.StartConsumersAsync();
+                await this.StartConsumersAsync(true);
                 this.lastInitedTime = DateTime.Now;
             }
             finally
@@ -589,14 +589,14 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 }
                 if (Volatile.Read(ref this.appState) == 1)
                 {
-                    if (DateTime.UtcNow - this.lastInitedTime >= this.heartbeatCycle * 3)
+                    if (DateTime.UtcNow - this.lastInitedTime >= this.heartbeatCycle * 2)
                     {
                         await this.topologyLock.WaitAsync(stoppingToken);
                         try
                         {
                             if (Volatile.Read(ref this.appState) == 1)
                             {
-                                await this.StartConsumersAsync();
+                                await this.StartConsumersAsync(false);
                                 this.lastInitedTime = DateTime.UtcNow;
                             }
                         }
@@ -762,15 +762,16 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
     }
-    private async Task StartConsumersAsync()
+    private async Task StartConsumersAsync(bool isFirst)
     {
         await this.SendHeartbeat();
         (var dbQueues, var dbBindings) = await this.repository.GetSettings();
         this.statefulBindings = dbBindings.Where(f => f.IsStateful).ToDictionary(f => f.ExchangeId, f => f);
         if (!this.hasConsumer) return;
 
+        var timeout = isFirst ? this.heartbeatCycle : this.heartbeatCycle * 2;
         var removedKeys = this.heartbeats
-            .Where(f => f.Key != this.ServiceId && DateTime.UtcNow.Subtract(f.Value) > this.heartbeatCycle * 2)
+            .Where(f => f.Key != this.ServiceId && DateTime.UtcNow.Subtract(f.Value) > timeout)
             .Select(f => f.Key).ToList();
         if (removedKeys.Count > 0)
             removedKeys.ForEach(f => this.heartbeats.TryRemove(f, out _));
@@ -1040,6 +1041,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task SendHeartbeat()
     {
+        //正在关闭中的pod不再发送心跳消息，只处理发送业务消息
+        if (Volatile.Read(ref this.appState) == 2) return;
         if (DateTime.UtcNow - this.lastHeartbeatTime >= this.heartbeatCycle)
         {
             //发送心跳消息
