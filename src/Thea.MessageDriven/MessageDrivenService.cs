@@ -215,7 +215,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = message,
+            Body = message.ToJson(),
             Waiter = new()
         };
         await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
@@ -243,7 +243,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = request,
+            Body = request.ToJson(),
             Waiter = new()
         };
         await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
@@ -272,7 +272,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             TraceId = traceId,
             Exchange = exchange,
             RoutingKey = routingKey,
-            Body = request,
+            Body = request.ToJson(),
             Waiter = new()
         };
         var exMessage = $"RPC请求超时, 耗时{timeoutSeconds}s, message: {request.ToJson()}, exchange: {exchange}, routingKey: {routingKey}";
@@ -306,7 +306,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             Exchange = exchange,
             RoutingKey = routingKey,
             ScheduleTimeUtc = enqueueTimeUtc,
-            Body = message,
+            Body = message.ToJson(),
             Waiter = new()
         };
         await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
@@ -531,8 +531,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                                     properties.ReplyTo = message.ReplyTo;
                                     properties.CorrelationId = message.MessageId;
                                 }
-                                //通常都是json格式，只有rpc消费者返回的结果，可能是json，也可能是字符串响应
-                                var jsonMessage = message.IsJsonMessage ? message.Body.ToString() : message.Body.ToJson();
+                                var jsonMessage = message.Body.ToString();
                                 if (this.statefulBindings.TryGetValue(message.Exchange, out var myBinding))
                                 {
                                     if (myBinding.AppId == this.AppId)
@@ -618,7 +617,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                                 continue;
                             this.rpcWaiters.TryRemove(messageId, out _);
                             //只结束超时的RPC请求，不做清理工作，清理工作在Request方法中处理
-                            rpcWaiter.Waiter.TrySetException(new TimeoutException($"RPC请求超时, 耗时{timeElapsed}s"));
+                            rpcWaiter.Waiter.TrySetException(new TimeoutException(rpcWaiter.TimeoutMessage));
                         }
                         this.lastClearRpcTime = DateTime.UtcNow;
                     }
@@ -708,7 +707,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         string queueName = null;
         if (this.isAllowCreateQueue)
         {
-            //创建工作负载队列            
+            //创建工作负载队列
             foreach (var myQueue in this.queues)
             {
                 var dbQueue = dbQueues.Find(f => f.QueueId == myQueue.QueueId);
@@ -906,7 +905,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
             else
             {
-                //缩容有状态队列，不应该存在的队列，等待队列没有消息后，再过2个心跳周期，删除所有消费者，此过程中，0
+                //缩容有状态队列，不应该存在的队列，等待队列没有消息后，再过2个心跳周期，删除所有消费者
                 var hasMessage = false;
                 foreach (var myConsumer in rabbitConsumers)
                 {

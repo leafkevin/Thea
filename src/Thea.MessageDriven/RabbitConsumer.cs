@@ -417,7 +417,6 @@ class RabbitConsumer : IDisposable
                     Exchange = ea.Exchange,
                     RoutingKey = ea.RoutingKey,
                     ReplyTo = ea.BasicProperties.ReplyTo,
-                    IsJsonMessage = true,
                     Body = jsonBody
                 }.ToJson();
                 this.logger.LogTagError("RabbitConsumer", ex, $"BindUserMessageHandler，处理用户消息异常, ConsumerId: {this.ConsumerId}, Message: {messageJson}");
@@ -487,7 +486,6 @@ class RabbitConsumer : IDisposable
                 {
                     MessageId = ea.BasicProperties.MessageId,
                     Type = ea.BasicProperties.Type,
-                    IsJsonMessage = ea.BasicProperties.Type == Consts.RpcResponse,
                     Body = result
                 });
                 await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
@@ -536,13 +534,12 @@ class RabbitConsumer : IDisposable
                     RoutingKey = routingKey,
                     TraceId = traceId,
                     ReplyTo = ea.BasicProperties.ReplyTo,
-                    IsJsonMessage = true,
                     Body = jsonBody
                 };
 
                 var timeoutSeconds = this.parent.heartbeatCycle.TotalSeconds;
                 exMessage = $"转发消息超时, 耗时{timeoutSeconds}s, Now: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, Message: {message.ToJson()}";
-                message.Waiter = new TaskCompletionSource<bool>();
+                message.Waiter = new();
                 await this.parent.ProcessMessage(message);
                 await message.Waiter.WaitAsync(this.parent.heartbeatCycle, exMessage);
                 await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);

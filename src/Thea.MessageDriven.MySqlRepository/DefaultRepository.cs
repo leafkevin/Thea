@@ -53,7 +53,11 @@ public class DefaultRepository : IMessageDrivenRepository
         {
             await repository.Create<Queue>()
                 .WithBulk(queues)
-                .OnDuplicateKeyUpdate(t => t.Set(f => new { IsStateful = t.Values(f.IsStateful) }))
+                .OnDuplicateKeyUpdate(t => t.Set(f => new
+                {
+                    AppId = t.Values(f.AppId),
+                    IsStateful = t.Values(f.IsStateful)
+                }))
                 .ExecuteAsync();
         }
         if (bindings != null && bindings.Count > 0)

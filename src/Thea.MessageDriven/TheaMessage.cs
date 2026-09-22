@@ -23,7 +23,6 @@ class Message
     public string Exchange { get; set; }
     public string RoutingKey { get; set; }
     public DateTime? ScheduleTimeUtc { get; set; }
-    public bool IsJsonMessage { get; set; }
     public object Body { get; set; }
     [JsonIgnore]
     public TaskCompletionSource<bool> Waiter { get; set; }

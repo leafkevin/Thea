@@ -8,7 +8,6 @@ class Consts
     public const string TransferExchange = "transfer";
 
     public const string TopicBindingType = "topic";
-    public const string FanoutBindingType = "fanout";
     public const string DelayBindingType = "x-delayed-message";
 
     public const string FanoutRoutingKey = "#";
