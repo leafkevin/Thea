@@ -18,8 +18,10 @@ public static class TheaMessageDrivenExtensions
     public static IApplicationBuilder UseMessageDriven(this IApplicationBuilder app, Action<MessageDrivenBuilder> builderInitializer)
     {
         var builder = new MessageDrivenBuilder(app.ApplicationServices);
+        var service = builder.Build();
+        if (!service.IsEnabled) return app;
         builderInitializer.Invoke(builder);
-        builder.Build().Start();
+        service.Start();
         return app;
     }
     public static MessageDrivenBuilder UseStatefulConsumer<TConsumer>(this MessageDrivenBuilder buidler, string exchange, string queue, Expression<Func<TConsumer, Delegate>> consumerHandlerSelector, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)

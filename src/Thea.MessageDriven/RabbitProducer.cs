@@ -181,12 +181,11 @@ class RabbitProducer : IDisposable
             var failedChannel = rabbitChannel;
             rabbitChannel = null;
             await this.DisposeChannel(failedChannel);
-            var currentConnection = this.connection;
-            if (Volatile.Read(ref this.isShutdown) == 0 && (currentConnection?.IsOpen ?? false))
+            if (Volatile.Read(ref this.isShutdown) == 0 && (this.connection?.IsOpen ?? false))
             {
                 try
                 {
-                    rabbitChannel = await currentConnection.CreateChannelAsync();
+                    rabbitChannel = await this.connection.CreateChannelAsync();
                 }
                 catch (Exception rebuildException)
                 {
@@ -198,21 +197,8 @@ class RabbitProducer : IDisposable
         }
         finally
         {
-            try
-            {
-                if (rabbitChannel != null)
-                {
-                    if (Volatile.Read(ref this.isShutdown) == 0 && rabbitChannel.IsOpen
-                        && this.channel.Writer.TryWrite(rabbitChannel))
-                        rabbitChannel = null;
-                    if (rabbitChannel != null)
-                        await this.DisposeChannel(rabbitChannel);
-                }
-            }
-            finally
-            {
-                this.semaphoreWaiter.Exit();
-            }
+            this.channel.Writer.TryWrite(rabbitChannel);
+            this.semaphoreWaiter.Exit();
         }
     }
     private async Task DisposeChannel(IChannel rabbitChannel)

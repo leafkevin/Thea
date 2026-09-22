@@ -16,7 +16,7 @@ using Thea.Logging;
 
 namespace Thea.MessageDriven;
 
-class RabbitConsumer : IDisposable
+class RabbitConsumer
 {
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
@@ -167,7 +167,6 @@ class RabbitConsumer : IDisposable
             return 0;
         }
     }
-    public void Dispose() => this.ShutdownAsync().GetAwaiter().GetResult();
     private async Task StartCoreAsync()
     {
         if (this.IsActivated) return;
@@ -324,7 +323,7 @@ class RabbitConsumer : IDisposable
                                     var parameters = TheaJsonSerializer.Deserialize(jsonBody, parameterType);
                                     if (messageType == Consts.RpcMessage)
                                     {
-                                        //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                        //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, ReplyTo:{ea.BasicProperties.ReplyTo}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                                         //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
                                         var rpcResult = await typedHandler.Invoke(parameters);
                                         result = rpcResult.ToJson();
@@ -361,7 +360,7 @@ class RabbitConsumer : IDisposable
                                         Result = result,
                                         RetryTimes = iLoop,
                                         UpdatedBy = this.parent.AppId,
-                                        UpdatedAt = DateTime.Now
+                                        UpdatedAt = DateTime.UtcNow
                                     }
                                 });
                             }
@@ -385,7 +384,7 @@ class RabbitConsumer : IDisposable
                             }
                             if (messageType == Consts.RpcMessage)
                             {
-                                //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, From:{message.From}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                                //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, ReplyTo:{replyToQueue}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                                 var replyToQueue = ea.BasicProperties.ReplyTo;
                                 var rpcMessageType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
                                 await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
@@ -481,7 +480,7 @@ class RabbitConsumer : IDisposable
                     return;
 
                 var result = Encoding.UTF8.GetString(ea.Body.Span);
-                //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, From:{message.From}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, ReplyTo:{ea.BasicProperties.ReplyTo}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                 await this.parent.ProcessMessage(new Message
                 {
                     MessageId = ea.BasicProperties.MessageId,
