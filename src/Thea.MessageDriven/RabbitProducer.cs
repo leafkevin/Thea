@@ -22,6 +22,7 @@ class RabbitProducer : IDisposable
     private readonly Channel<IChannel> channel;
     private int isShutdown;
     public string ConnectionId { get; private set; }
+    public bool IsActivated => this.connection?.IsOpen ?? false;
 
     private RabbitProducer(Channel<IChannel> channel, IConnection connection, string ConnectionId, ILogger<RabbitProducer> logger)
     {
@@ -162,7 +163,6 @@ class RabbitProducer : IDisposable
             this.shutdownLock.Release();
         }
     }
-    public void Dispose() => this.ShutdownAsync().GetAwaiter().GetResult();
     private async Task TryTo(string errMessage, Func<IChannel, Task> work)
     {
         if (!this.semaphoreWaiter.TryEnter(() => Volatile.Read(ref this.isShutdown) == 0))

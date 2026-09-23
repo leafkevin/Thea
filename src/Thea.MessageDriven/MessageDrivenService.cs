@@ -36,6 +36,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private readonly bool isAllowCreateQueue = false;
     private readonly bool isAllowCreateExchange = false;
     private readonly bool isAllowCreateBinding = false;
+    private bool isProducer = false;
     private bool isRpcConsumer = false;
 
     private List<Binding> bindings = new();
@@ -120,13 +121,13 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 for (int i = 0; i < 3; i++)
                 {
                     await this.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, this.AppId, new BasicProperties
-                {
-                    Persistent = false,
-                    Type = Consts.Heartbeat,
-                    DeliveryMode = DeliveryModes.Transient,
-                    AppId = this.AppId,
-                    MessageId = ObjectId.NewId()
-                }, this.ServiceId);
+                    {
+                        Persistent = false,
+                        Type = Consts.Heartbeat,
+                        DeliveryMode = DeliveryModes.Transient,
+                        AppId = this.AppId,
+                        MessageId = ObjectId.NewId()
+                    }, this.ServiceId);
                     await Task.Delay(this.heartbeatCycle / 3, cancellationToken);
                 }
 
@@ -211,7 +212,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
             await this.CleanupAsync();
             this.shutdownLock.Release();
         }
-    }
     }
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
@@ -325,6 +325,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
         await theaMessage.Waiter.Task;
     }
+    public void UseProducer() => this.isProducer = true;
     public void UseTransfer(string fromExchange, string toExchange, string routingKey)
     {
         if (this.exchangeTransfers.Exists(f => f.FromExchange == fromExchange && f.ToExchange == toExchange))
@@ -777,6 +778,13 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 }
                 else await this.rabbitProducer.BindQueue(myBinding.ExchangeId, myBinding.QueueId, Consts.FanoutRoutingKey);
             }
+        }
+        this.queues = dbQueues;
+        this.bindings = dbBindings;
+        if (!this.isProducer)
+        {
+            await this.rabbitProducer.ShutdownAsync();
+            this.rabbitProducer = null;
         }
     }
     private async Task StartConsumersAsync(bool isFirst)
