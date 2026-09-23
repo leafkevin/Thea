@@ -12,7 +12,7 @@ using Thea.Logging;
 
 namespace Thea.MessageDriven;
 
-class RabbitProducer : IDisposable
+class RabbitProducer
 {
     private readonly ILogger<RabbitProducer> logger;
     private readonly SemaphoreSlim shutdownLock = new(1, 1);
@@ -22,7 +22,6 @@ class RabbitProducer : IDisposable
     private readonly Channel<IChannel> channel;
     private int isShutdown;
     public string ConnectionId { get; private set; }
-    public bool IsActivated => this.connection?.IsOpen ?? false;
 
     private RabbitProducer(Channel<IChannel> channel, IConnection connection, string ConnectionId, ILogger<RabbitProducer> logger)
     {
@@ -34,7 +33,7 @@ class RabbitProducer : IDisposable
 
     public static async Task<RabbitProducer> CreateAsync(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 15)
     {
-        var connectionId = $"producer.{parent.ServiceId}";
+        var connectionId = $"producer.{parent.AppId}.{parent.ServiceId}";
         var configuration = serviceProvider.GetService<IConfiguration>();
         var logger = serviceProvider.GetService<ILogger<RabbitProducer>>();
         var user = configuration.GetValue<string>("MessageDriven:User");

@@ -6,7 +6,11 @@ class AlarmChannel
     public string Type { get; set; }
     public object Value { get; set; }
 }
-class HttpPusherChannel
+class AlarmChannel<T> : AlarmChannel
 {
-    public string PushUrl { get; set; }
+    public new T Value
+    {
+        get { return (T)base.Value; }
+        set { base.Value = value; }
+    }
 }

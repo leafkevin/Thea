@@ -113,7 +113,7 @@ public class TheaWebMiddleware
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}, TraceId:{traceId}, 请求{url}异常，Details: {ex}");
+            Console.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, TraceId:{traceId}, 请求{url}异常，Details: {ex}");
         }
     }
     private string CreateTraceId(HttpContext context)

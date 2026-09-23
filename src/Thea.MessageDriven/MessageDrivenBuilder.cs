@@ -22,7 +22,11 @@ public class MessageDrivenBuilder
         this.messageDriven.UseRepository(repository);
         return this;
     }
-
+    public MessageDrivenBuilder UseProducer()
+    {
+        this.messageDriven.UseProducer();
+        return this;
+    }
     public MessageDrivenBuilder UseStatefulConsumer<TConsumer>(string exchange, string queue, MethodInfo consumerHandler, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
     {
         this.messageDriven.UseStatefulConsumer(exchange, queue, consumerHandler, isSingleActiveConsumer, isQuorumQueue);

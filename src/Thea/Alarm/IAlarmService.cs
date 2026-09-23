@@ -17,7 +17,7 @@ public class AlarmRequest
     public int SenceKey { get; set; }
     public string Title { get; set; }
     public List<KeyValuePair<string, string>> Content { get; set; }
-    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int FiredTimes { get; set; }
 }
 public interface IAlarmImageConverter

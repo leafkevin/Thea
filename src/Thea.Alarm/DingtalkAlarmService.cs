@@ -28,7 +28,7 @@ class DingtalkAlarmService : IAlarmService
         this.isEnabled = configuration.GetValue("Alarm:IsEnabled", true);
         this.clientFactory = clientFactory;
         this.apiUrl = configuration.GetValue("Alarm:Url", "https://oapi.dingtalk.com/robot/send?access_token=");
-        var myChannels = configuration.GetSection("Alarm:Channels").Get<List<AlarmChannel>>();
+        var myChannels = configuration.GetSection("Alarm:Channels").Get<List<AlarmChannel<DingtalkChannel>>>();
         if (myChannels == null || myChannels.Count == 0)
             throw new ArgumentNullException("appsettings.json中缺少配置项Alarm:Channels");
         myChannels = myChannels.FindAll(f => f.Type == "Dingtalk");
@@ -37,8 +37,7 @@ class DingtalkAlarmService : IAlarmService
 
         foreach (var channel in myChannels)
         {
-            var channelInfo = channel.Value.JsonTo<DingtalkChannel>();
-            this.channels.TryAdd(channel.ChannelId, channelInfo);
+            this.channels.TryAdd(channel.ChannelId, channel.Value);
         }
     }
     public async Task PostAsync(AlarmRequest request)
@@ -118,7 +117,7 @@ class DingtalkAlarmService : IAlarmService
     }
     private string Sign(string secret, out long timestamp)
     {
-        timestamp = (DateTime.Now.ToUniversalTime().Ticks - 621355968000000000) / 10000;
+        timestamp = (DateTime.UtcNow.Ticks - 621355968000000000) / 10000;
         var signKey = timestamp + "\n" + secret;
         byte[] keyByte = Encoding.UTF8.GetBytes(secret);
         byte[] contentBytes = Encoding.UTF8.GetBytes(signKey);

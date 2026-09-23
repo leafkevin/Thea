@@ -65,7 +65,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
                 try
                 {
                     if (logEntities.Count >= batchCount
-                        || DateTime.Now.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
+                        || DateTime.UtcNow.Subtract(this.lastPushedTime) > TimeSpan.FromSeconds(10))
                     {
                         if (logEntities.Count > 0)
                         {
@@ -86,7 +86,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
                             await this.SendToAsync(logEntities);
                             logEntities.Clear();
                         }
-                        this.lastPushedTime = DateTime.Now;
+                        this.lastPushedTime = DateTime.UtcNow;
                     }
 
                     if (this.channel.Reader.TryRead(out var logEntityInfo))
@@ -97,7 +97,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
                 {
                     Console.WriteLine(ex.ToString());
                     logEntities.Clear();
-                    this.lastPushedTime = DateTime.Now;
+                    this.lastPushedTime = DateTime.UtcNow;
                 }
             }
         }, this.stopTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);

@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -24,14 +23,17 @@ public class WechatAlarmService : IAlarmService
         this.isEnabled = configuration.GetValue("Alarm:IsEnabled", true);
         this.httpClient = clientFactory.CreateClient();
         this.imageConverter = imageConverter;
-        var myChannels = configuration.GetSection("Alarm:Channels").Get<List<AlarmChannel>>();
+        var myChannels = configuration.GetSection("Alarm:Channels").Get<List<AlarmChannel<HttpPusherChannel>>>();
         if (myChannels == null || myChannels.Count == 0)
             throw new ArgumentNullException("appsettings.json中缺少配置项Alarm:Channels");
         var httpChannels = myChannels.FindAll(f => f.Type == "Wechat");
         if (httpChannels == null || httpChannels.Count == 0)
             throw new ArgumentNullException("appsettings.json中缺少配置项Alarm:Channels，且至少包含一个Type为Wechat的Channel");
-        this.channels = httpChannels.Select(f => new { f.ChannelId, PushUrl = f.Value.ToString() })
-            .ToDictionary(f => f.ChannelId, f => f.PushUrl);
+
+        foreach (var channel in myChannels)
+        {
+            this.channels[channel.ChannelId] = channel.Value.PushUrl;
+        }
     }
     public async Task PostAsync(AlarmRequest request)
     {
@@ -83,5 +85,9 @@ public class WechatAlarmService : IAlarmService
         }, options: TheaJsonSerializer.SerializerOptions);
         var respMessage = await this.httpClient.PostAsync(pushUrl, jsonContent);
         respMessage.EnsureSuccessStatusCode();
+    }
+    class HttpPusherChannel
+    {
+        public string PushUrl { get; set; }
     }
 }

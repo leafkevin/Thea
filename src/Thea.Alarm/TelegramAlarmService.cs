@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -13,34 +14,51 @@ namespace Thea.Alarm;
 
 public class TelegramAlarmService : IAlarmService
 {
+    private readonly IConfiguration configuration;
     private readonly Dictionary<string, TelegramBotClient> alarmBots = new();
+    private readonly IHttpClientFactory clientFactory;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, AlarmRequest>> requests = new();
     private readonly Dictionary<string, TelegramChannel> channels = new();
     private readonly bool isEnabled;
 
     public TelegramAlarmService(IConfiguration configuration, IHttpClientFactory clientFactory)
     {
+        this.configuration = configuration;
+        this.clientFactory = clientFactory;
         this.isEnabled = configuration.GetValue("Alarm:IsEnabled", true);
-        var httpProxy = configuration.GetValue<string>("HttpProxy");
-        var myChannels = configuration.GetSection("Alarm:Channels").Get<List<AlarmChannel>>();
+        var myChannels = configuration.GetSection("Alarm:Channels").Get<List<AlarmChannel<TelegramChannel>>>();
         if (myChannels == null || myChannels.Count == 0)
             throw new ArgumentNullException("appsettings.json中缺少配置项Alarm:Channels");
         myChannels = myChannels.FindAll(f => f.Type == "Telegram");
         if (myChannels == null || myChannels.Count == 0)
             throw new ArgumentNullException("appsettings.json中缺少配置项Alarm:Channels，且至少包含一个Type为Telegram的Channel");
 
-        HttpClient httpClient = null;
-        if (!string.IsNullOrEmpty(httpProxy))
-            httpClient = clientFactory.CreateClient("ProxyClient");
         foreach (var channel in myChannels)
         {
-            var channelInfo = channel.Value.JsonTo<TelegramChannel>();
-            this.channels.TryAdd(channel.ChannelId, channelInfo);
-            if (this.alarmBots.ContainsKey(channelInfo.Token))
-                continue;
-            var botClient = new TelegramBotClient(channelInfo.Token, httpClient);
-            this.alarmBots.TryAdd(channelInfo.Token, botClient);
+            channel.Value.ChannelId = channel.ChannelId;
+            this.channels[channel.ChannelId] = channel.Value;
         }
+    }
+    public List<TelegramChannel> GetChannels()
+        => this.channels.Values.ToList();
+    public void RegisterBotClients(List<TelegramBotClient> botClients)
+    {
+        foreach (var botClient in botClients)
+        {
+            if (this.alarmBots.ContainsKey(botClient.Token))
+                continue;
+            this.alarmBots.TryAdd(botClient.Token, botClient);
+        }
+    }
+    public void RegisterBotClient(TelegramBotClient botClient)
+        => this.alarmBots[botClient.Token] = botClient;
+    public TelegramBotClient CreateBotClient(string token)
+    {
+        var httpProxy = this.configuration.GetValue<string>("HttpProxy");
+        HttpClient httpClient = null;
+        if (!string.IsNullOrEmpty(httpProxy))
+            httpClient = this.clientFactory.CreateClient("ProxyClient");
+        return new TelegramBotClient(token, httpClient);
     }
     public async Task PostAsync(AlarmRequest request)
     {
@@ -125,9 +143,10 @@ public class TelegramAlarmService : IAlarmService
             Console.WriteLine($"content: {request.Content.ToJson()}, PublishMessage Exception Detail: {ex}");
         }
     }
-    class TelegramChannel
-    {
-        public long ChatId { get; set; }
-        public string Token { get; set; }
-    }
+}
+public class TelegramChannel
+{
+    public string ChannelId { get; set; }
+    public long ChatId { get; set; }
+    public string Token { get; set; }
 }
