@@ -96,6 +96,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
         }
         try
         {
+            if (!this.isProducer && !this.hasConsumer)
+                throw new Exception("消息驱动，至少使用生产者或是消费者，至少调用一次UseProducer/UseSubscriber/UseStatefulConsumer方法");
             await this.readyToStart.Task.WaitAsync(cancellationToken);
             Console.WriteLine($"MessageDriven, ServiceId[{this.ServiceId}] is started！");
             await this.Register();
@@ -670,6 +672,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task Register()
     {
+        if (!this.isProducer && !this.hasConsumer)
+            throw new Exception("消息驱动，至少使用生产者或是消费者，至少调用一次UseProducer/UseSubscriber/UseStatefulConsumer方法");
+
         if (this.hasConsumer)
             await this.repository.Register(this.queues, this.bindings);
         //捞取数据库或是配置中心的集群信息
