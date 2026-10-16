@@ -450,10 +450,16 @@ class MessageDrivenService : IMessageDriven, IHostedService
             });
         }
     }
-    public void UseRpcConsumer()
+    public void UseRpcConsumer(MethodInfo methodInfo = null)
     {
         this.isProducer = true;
         this.isRpcConsumer = true;
+        if (methodInfo != null)
+        {
+            var queueName = $"{Consts.RpcExchange}.{this.AppId}.{this.ServiceId}";
+            var myConsumerHandler = this.consumerHandlers[queueName] = new();
+            myConsumerHandler[Consts.RpcExchange] = methodInfo;
+        }
     }
     public async Task Change(string queue, int workloadTotal, int? prefetchCount = null, bool? isLogEnabled = null)
     {
@@ -1028,7 +1034,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
         else
         {
             //新增消费者，直接启动
-            var exchangeHandlers = this.consumerHandlers[queueId];
+            if (!this.consumerHandlers.TryGetValue(queueId, out var exchangeHandlers))
+                return;
             myRabbitConsumer = new RabbitConsumer(queueName, consumerId, this, this.serviceProvider, QueueType.Message, myQueue.PrefetchCount, exchangeHandlers) { IsLogEnabled = myQueue.IsLogEnabled };
             rabbitConsumers.Add(myRabbitConsumer);
             await myRabbitConsumer.StartAsync();

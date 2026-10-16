@@ -51,7 +51,11 @@ public class TelegramAlarmService : IAlarmService
         }
     }
     public void RegisterBotClient(TelegramBotClient botClient)
-        => this.alarmBots[botClient.Token] = botClient;
+    {
+        if (this.alarmBots.ContainsKey(botClient.Token))
+            return;
+        this.alarmBots[botClient.Token] = botClient;
+    }
     public TelegramBotClient CreateBotClient(string token)
     {
         var httpProxy = this.configuration.GetValue<string>("HttpProxy");
@@ -92,6 +96,44 @@ public class TelegramAlarmService : IAlarmService
         catch (Exception ex)
         {
             Console.WriteLine($"content: {request.ToJson()}, Exception Detail: {ex}");
+        }
+    }
+    public async Task PostAsync(string token, long chatId, string title, List<KeyValuePair<string, string>> content)
+    {
+        try
+        {
+            if (!this.alarmBots.TryGetValue(token, out var botClient))
+                throw new KeyNotFoundException($"Token {token} is not configured.");
+
+            var builder = new StringBuilder();
+            builder.AppendLine($"*{this.Escape(title)}*");
+            foreach (var item in content)
+            {
+                builder.AppendLine($"`{item.Key}`：{this.Escape(item.Value)}");
+            }
+            int index = 0;
+            var message = builder.ToString();
+            var myChatId = new ChatId(chatId);
+            while (index < message.Length)
+            {
+                var length = Math.Min(4096, message.Length - index);
+                if (length == 4096)
+                {
+                    var lastChar = message.Substring(index + length - 1, 1);
+                    while (lastChar == "\\")
+                    {
+                        length--;
+                        lastChar = message.Substring(index + length - 1, 1);
+                    }
+                }
+                var myMessage = message.Substring(index, length);
+                await botClient.SendMessage(myChatId, myMessage, ParseMode.MarkdownV2);
+                index += length;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"content: {content.ToJson()}, PublishMessage Exception Detail: {ex}");
         }
     }
     public string Escape(string message)

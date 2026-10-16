@@ -1,9 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System;
-using System.Collections.Concurrent;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
@@ -13,9 +11,9 @@ namespace Thea.Cache;
 public class RedisCache : IDistributedCache
 {
     private readonly string appId;
-    private Func<string, int> databaseSelector; 
+    private Func<string, int> databaseSelector;
     private readonly ConnectionMultiplexer connection;
-    private readonly ConcurrentDictionary<string, ConcurrentQueue<TaskCompletionSource<object>>> valueWaiters = new();
+    //private readonly ConcurrentDictionary<string, ConcurrentQueue<TaskCompletionSource<object>>> valueWaiters = new();
 
     public RedisCache(IServiceProvider serviceProvider)
     {
@@ -72,27 +70,34 @@ public class RedisCache : IDistributedCache
             throw new ArgumentNullException(key);
 
         var database = connection.GetDatabase(this.databaseSelector(key));
-        var randomSeconds = Random.Shared.Next(-60, 60);
-        var expires = TimeSpan.FromMinutes(lifetimeMinutes).Add(TimeSpan.FromSeconds(randomSeconds));
-        database.StringSet(key, value.ToJson(), expires);
+        TimeSpan? expires = null;
+        var jsonValue = value.ToJson();
+        if (value == null) jsonValue = string.Empty;
+        if (lifetimeMinutes > 0)
+        {
+            //增加随机秒数，避免缓存雪崩
+            var randomSeconds = Random.Shared.Next(-60, 60);
+            expires = TimeSpan.FromMinutes(lifetimeMinutes)
+                .Add(TimeSpan.FromSeconds(randomSeconds));
+        }
+        database.StringSet(key, jsonValue, expires);
     }
     public async Task SetAsync(string key, object value, int lifetimeMinutes = 120)
     {
         if (string.IsNullOrEmpty(key))
             throw new ArgumentNullException(key);
-        if (value == null)
-            throw new ArgumentNullException(key);
-
         var database = connection.GetDatabase(this.databaseSelector(key));
-        if (lifetimeMinutes == -1)
-            await database.StringSetAsync(key, value.ToJson());
-        else
+        TimeSpan? expires = null;
+        var jsonValue = value.ToJson();
+        if (value == null) jsonValue = string.Empty;
+        if (lifetimeMinutes > 0)
         {
             //增加随机秒数，避免缓存雪崩
             var randomSeconds = Random.Shared.Next(-60, 60);
-            var expires = TimeSpan.FromMinutes(lifetimeMinutes).Add(TimeSpan.FromSeconds(randomSeconds));
-            await database.StringSetAsync(key, value.ToJson(), expires);
+            expires = TimeSpan.FromMinutes(lifetimeMinutes)
+                .Add(TimeSpan.FromSeconds(randomSeconds));
         }
+        await database.StringSetAsync(key, jsonValue, expires);
     }
     public bool TryGet<T>(string key, out T result)
     {
@@ -101,7 +106,7 @@ public class RedisCache : IDistributedCache
 
         var database = connection.GetDatabase(this.databaseSelector(key));
         var redisValue = database.StringGet(key);
-        if (redisValue.IsNull)
+        if (redisValue.IsNullOrEmpty)
         {
             result = default;
             return false;
@@ -116,21 +121,21 @@ public class RedisCache : IDistributedCache
     }
     public T GetOrCreate<T>(string key, Func<T> cacheGetter, int lifetimeMinutes = 120)
     {
-        if (!this.TryGet<T>(key, out var result))
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentNullException(key);
+
+        var database = connection.GetDatabase(this.databaseSelector(key));
+        var redisValue = database.StringGet(key);
+        if (redisValue.IsNull)
         {
-            //防止单进程缓存穿透
-            var myWaiters = this.valueWaiters.GetOrAdd(key, f => new ConcurrentQueue<TaskCompletionSource<object>>());
-            var myWaiter = new TaskCompletionSource<object>();
-            myWaiters.Enqueue(myWaiter);
-            if (myWaiters.Count > 1)
-                return (T)myWaiter.Task.Result;
-            result = cacheGetter.Invoke();
-            while (myWaiters.TryDequeue(out var waiter))
-                waiter.TrySetResult(result);
-            if (result == null) return default;
+            var result = cacheGetter.Invoke();
             this.Set(key, result, lifetimeMinutes);
+            return result;
         }
-        return result;
+        //有值，只不过是空字符串，缓存了null值
+        if (redisValue.IsNullOrEmpty)
+            return default;
+        return redisValue.ToString().JsonTo<T>();
     }
     public async Task<(bool, T)> GetAsync<T>(string key)
     {
@@ -139,7 +144,8 @@ public class RedisCache : IDistributedCache
 
         var database = connection.GetDatabase(this.databaseSelector(key));
         var redisValue = await database.StringGetAsync(key);
-        if (redisValue.IsNull) return (false, default);
+        if (redisValue.IsNullOrEmpty)
+            return (false, default);
         return (true, redisValue.ToString().JsonTo<T>());
     }
     public async Task<T> GetOrCreateAsync<T>(string key, Func<Task<T>> cacheGetter, int lifetimeMinutes = 120)
@@ -152,18 +158,21 @@ public class RedisCache : IDistributedCache
         if (redisValue.IsNull)
         {
             //防止单进程缓存穿透
-            var myWaiters = this.valueWaiters.GetOrAdd(key, f => new ConcurrentQueue<TaskCompletionSource<object>>());
-            var myWaiter = new TaskCompletionSource<object>();
-            myWaiters.Enqueue(myWaiter);
-            if (myWaiters.Count > 1)
-                return (T)await myWaiter.Task;
+            //var myWaiters = this.valueWaiters.GetOrAdd(key, f => new ConcurrentQueue<TaskCompletionSource<object>>());
+            //var myWaiter = new TaskCompletionSource<object>();
+            //myWaiters.Enqueue(myWaiter);
+            //if (myWaiters.Count > 1)
+            //    return (T)await myWaiter.Task;
             var value = await cacheGetter.Invoke();
-            while (myWaiters.TryDequeue(out var waiter))
-                waiter.TrySetResult(value);
-            if (value == null) return default;
+            //while (myWaiters.TryDequeue(out var waiter))
+            //    waiter.TrySetResult(value);
+            //if (value == null) return default;
             await this.SetAsync(key, value, lifetimeMinutes);
             return value;
         }
+        //有值，只不过是空字符串，缓存了null值
+        if (redisValue.IsNullOrEmpty)
+            return default;
         return redisValue.ToString().JsonTo<T>();
     }
     public long Increment(string key, long value = 1)

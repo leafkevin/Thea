@@ -21,8 +21,8 @@ class RabbitConsumer
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly QueueType queueType;
-    private readonly Dictionary<string, (Type, Type, Func<object, Task<object>>)> exchangeHandlers;
-
+    private readonly Dictionary<string, Func<string, Task<string>>> exchangeHandlers;
+    private readonly MethodInfo rpcMethofInfo = null;
     private ConnectionFactory factory;
     private CancellationTokenSource cancellationSource = null;
     private IConnection connection = null;
@@ -53,37 +53,11 @@ class RabbitConsumer
         this.shutdownTimeout = parent.heartbeatCycle * 2;
         if (exchangeMethodInfos != null)
         {
-            exchangeHandlers = new();
+            this.exchangeHandlers = new();
             foreach (var exchange in exchangeMethodInfos.Keys)
             {
-                var consumerInvoker = exchangeMethodInfos[exchange];
-                var targetType = consumerInvoker.DeclaringType;
-                var target = serviceProvider.GetService(targetType);
-                var methodExecutor = ObjectMethodExecutor.Create(consumerInvoker, targetType.GetTypeInfo());
-                var messageType = consumerInvoker.GetParameters().FirstOrDefault().ParameterType;
-                var returnType = consumerInvoker.ReturnType;
-                var isVoid = returnType == typeof(void) || returnType == typeof(Task) || returnType == typeof(ValueTask);
-                Func<object, Task<object>> consumerHandler = null;
-                if (isVoid)
-                {
-                    returnType = typeof(object);
-                    consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-                    {
-                        await methodExecutor.ExecuteAsync(target, [message]);
-                        return null;
-                    }
-                    : message =>
-                    {
-                        methodExecutor.Execute(target, [message]);
-                        return Task.FromResult<object>(null);
-                    };
-                }
-                else
-                {
-                    consumerHandler = methodExecutor.IsMethodAsync ? async message =>
-                        await methodExecutor.ExecuteAsync(target, [message]) : message => Task.FromResult(methodExecutor.Execute(target, [message]));
-                }
-                this.exchangeHandlers.TryAdd(exchange, (messageType, returnType, consumerHandler));
+                var consumerHandler = this.CreateConsumerHandler(serviceProvider, exchangeMethodInfos[exchange]);
+                this.exchangeHandlers.TryAdd(exchange, consumerHandler);
             }
         }
 
@@ -305,7 +279,6 @@ class RabbitConsumer
                 var headers = ea.BasicProperties.Headers;
                 if (headers != null && headers.TryGetValue("TraceId", out var objValue))
                     traceId = Encoding.UTF8.GetString((byte[])headers["TraceId"]);
-
                 switch (messageType)
                 {
                     case Consts.UserMessage:
@@ -319,16 +292,9 @@ class RabbitConsumer
                             {
                                 try
                                 {
-                                    (var parameterType, var returnType, var typedHandler) = this.exchangeHandlers[ea.Exchange];
-                                    var parameters = TheaJsonSerializer.Deserialize(jsonBody, parameterType);
-                                    if (messageType == Consts.RpcMessage)
-                                    {
-                                        //Console.WriteLine($"RpcMessage, MessageId: {message.MessageId}, ReplyTo:{ea.BasicProperties.ReplyTo}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
-                                        //处理RPC消息完毕，发送RPC结果给RPC结果队列，并设置来时请求结果
-                                        var rpcResult = await typedHandler.Invoke(parameters);
-                                        result = rpcResult.ToJson();
-                                    }
-                                    else await typedHandler.Invoke(parameters);
+                                    var typedConsumerHandler = this.exchangeHandlers[ea.Exchange];
+                                    result = await typedConsumerHandler.Invoke(jsonBody);
+
                                     isSuccess = true;
                                     break;
                                 }
@@ -341,6 +307,7 @@ class RabbitConsumer
                             }
                             if (!isSuccess) result = exception.ToString();
                             var logId = ObjectId.NewId();
+
                             if (this.IsLogEnabled || !isSuccess)
                             {
                                 await this.parent.ProcessMessage(new Message
@@ -471,6 +438,10 @@ class RabbitConsumer
         var consumerChannel = this.channel;
         var consumerCancellationSource = this.cancellationSource;
         this.consumer = new AsyncEventingBasicConsumer(consumerChannel);
+        if (this.rpcMethofInfo != null)
+        {
+            var consumerHander = this.exchangeHandlers[this.QueueName];
+        }
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
             this.semaphoreWaiter.Enter();
@@ -555,5 +526,54 @@ class RabbitConsumer
             }
         };
         this.consumerTag = await consumerChannel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+    }
+    private Func<string, Task<string>> CreateConsumerHandler(IServiceProvider serviceProvider, MethodInfo methodInfo)
+    {
+        var targetType = methodInfo.DeclaringType;
+        var target = serviceProvider.GetService(targetType);
+        var methodExecutor = ObjectMethodExecutor.Create(methodInfo, targetType.GetTypeInfo());
+        var messageType = methodInfo.GetParameters().FirstOrDefault().ParameterType;
+        var returnType = methodInfo.ReturnType;
+        var isVoid = returnType == typeof(void) || returnType == typeof(Task) || returnType == typeof(ValueTask);
+        Func<string, Task<string>> consumerHandler = null;
+        Func<string, object> parametersGetter = messageType == typeof(string) ? f => f : f => TheaJsonSerializer.Deserialize(f, messageType);
+        if (isVoid)
+        {
+            consumerHandler = methodExecutor.IsMethodAsync ? async message =>
+            {
+                var parameters = parametersGetter.Invoke(message);
+                await methodExecutor.ExecuteAsync(target, [parameters]);
+                return null;
+            }
+            : message =>
+            {
+                var parameters = parametersGetter.Invoke(message);
+                methodExecutor.Execute(target, [parameters]);
+                return Task.FromResult<string>(null);
+            };
+        }
+        else
+        {
+            Func<object, string> resultGetter = returnType == typeof(string) ? f => f.ToString() : f => f.ToJson();
+            if (methodExecutor.IsMethodAsync)
+            {
+                consumerHandler = async message =>
+                {
+                    var parameters = parametersGetter.Invoke(message);
+                    var result = await methodExecutor.ExecuteAsync(target, [parameters]);
+                    return resultGetter.Invoke(result);
+                };
+            }
+            else
+            {
+                consumerHandler = message =>
+                {
+                    var parameters = parametersGetter.Invoke(message);
+                    var result = methodExecutor.Execute(target, [parameters]);
+                    return Task.FromResult(resultGetter.Invoke(result));
+                };
+            }
+        }
+        return consumerHandler;
     }
 }

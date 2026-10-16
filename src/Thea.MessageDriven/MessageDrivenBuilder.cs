@@ -47,9 +47,9 @@ public class MessageDrivenBuilder
         this.messageDriven.UseTransfer(fromExchange, toExchange, routingKey);
         return this;
     }
-    public MessageDrivenBuilder UseRpcConsumer()
+    public MessageDrivenBuilder UseRpcConsumer(MethodInfo consumerHandler)
     {
-        this.messageDriven.UseRpcConsumer();
+        this.messageDriven.UseRpcConsumer(consumerHandler);
         return this;
     }
     internal MessageDrivenService Build() => this.messageDriven;
