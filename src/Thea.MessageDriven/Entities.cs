@@ -68,6 +68,10 @@ public class Queue
     /// </summary>
     public bool IsStateful { get; set; }
     /// <summary>
+    /// 是否转发队列
+    /// </summary>
+    public bool IsTransfer { get; set; }
+    /// <summary>
     /// 是否开启日志
     /// </summary>
     public bool IsLogEnabled { get; set; }
@@ -81,12 +85,14 @@ public class Queue
     /// 是否单一激活消费者
     /// </summary>
     public bool IsSingleActiveConsumer { get; set; }
-}
-class ExchangeTransfer
-{
-    public string FromExchange { get; set; }
-    public string ToExchange { get; set; }
-    public string RoutingKey { get; set; }
+    /// <summary>
+    /// 变更类型，扩容/缩容
+    /// </summary>
+    public ChangeType ChangeType { get; set; }
+    /// <summary>
+    /// 上次负载个数
+    /// </summary>
+    public int LastWorkloadTotal { get; set; }
 }
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志

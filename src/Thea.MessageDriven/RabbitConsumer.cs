@@ -6,6 +6,7 @@ using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -18,39 +19,43 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
+    private int workers = 0;
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
-    private readonly QueueType queueType;
     private readonly Dictionary<string, Func<string, Task<string>>> exchangeHandlers;
-    private readonly MethodInfo rpcMethofInfo = null;
     private ConnectionFactory factory;
-    private CancellationTokenSource cancellationSource = null;
-    private IConnection connection = null;
-    private IChannel channel = null;
-    private AsyncEventingBasicConsumer consumer = null;
+    private IConnection connection;
+    private IChannel channel;
+    private AsyncEventingBasicConsumer consumer;
     private string consumerTag;
-    private readonly SemaphoreSlim lifecycleLock = new(1, 1);
-    private readonly SemaphoreWaiter semaphoreWaiter = new();
-    private readonly TimeSpan shutdownTimeout;
+    //0:未启动, 1:运行中, 2:关闭中, 3:延迟关闭
+    private int state = 0;
+    private CancellationTokenSource cancellationSource = null;
+    private TaskCompletionSource<bool> shutdownSource;
+
+    private DispatchInfo dispatchInfo;
+    //是否等待所有消息处理完再关闭消费者，true:等待, false:不等待
+    private volatile bool isWaitForClearMessages;
     public volatile int PrefetchCount;
     public volatile bool IsLogEnabled;
-    public string ConsumerId { get; private set; }
-    public string QueueName { get; private set; }
-    public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false) && (this.consumer?.IsRunning ?? false);
-    public bool IsBusying => this.semaphoreWaiter.IsBusying;
 
-    public RabbitConsumer(string queueName, string consumerId, MessageDrivenService parent, IServiceProvider serviceProvider, QueueType queueType, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
+    private QueueType queueType => this.dispatchInfo.QueueType;
+    public string QueueId => this.dispatchInfo.Queue.QueueId;
+    public int QueueIndex => this.dispatchInfo.QueueIndex;
+    public string QueueName => this.dispatchInfo.QueueName;
+    public string ConsumerId { get; private set; }
+    public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false) && (this.consumer?.IsRunning ?? false);
+
+    public RabbitConsumer(DispatchInfo dispatchInfo, MessageDrivenService parent, IServiceProvider serviceProvider, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
         this.parent = parent;
-        this.QueueName = queueName;
-        this.ConsumerId = consumerId;
+        this.dispatchInfo = dispatchInfo;
+        this.ConsumerId = ObjectId.NewId();
         this.PrefetchCount = prefetchCount;
-        this.queueType = queueType;
         this.logger = serviceProvider.GetService<ILogger<RabbitConsumer>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         var user = configuration.GetValue<string>("MessageDriven:User");
         var password = configuration.GetValue<string>("MessageDriven:Password");
-        this.shutdownTimeout = parent.heartbeatCycle * 2;
         if (exchangeMethodInfos != null)
         {
             this.exchangeHandlers = new();
@@ -73,83 +78,18 @@ class RabbitConsumer
             ContinuationTimeout = TimeSpan.FromSeconds(120),
             ClientProperties = new Dictionary<string, object>()
             {
-                { "connection_name", this.ConsumerId},
+                { "connection_name", this.QueueName},
                 { "client_api", "Thea.MessageDriven" }
             }
         };
     }
     public async Task StartAsync()
     {
-        await this.lifecycleLock.WaitAsync();
-        try
-        {
-            await this.StartCoreAsync();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine();
-            this.logger.LogTagError("RabbitConsumer", ex, $"StartAsync，启动RabbitMQ消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
-        }
-        finally
-        {
-            this.lifecycleLock.Release();
-        }
-    }
-    public async Task ShutdownAsync()
-    {
-        await this.lifecycleLock.WaitAsync();
-        try
-        {
-            await this.ShutdownCoreAsync();
-        }
-        catch (Exception ex)
-        {
-            this.logger.LogTagError("RabbitConsumer", ex, $"ShutdownAsync，关闭RabbitMQ消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
-        }
-        finally
-        {
-            this.lifecycleLock.Release();
-        }
-    }
-    public async Task RestartAsync()
-    {
-        await this.lifecycleLock.WaitAsync();
-        try
-        {
-            await this.ShutdownCoreAsync();
-            await this.StartCoreAsync();
-        }
-        finally
-        {
-            this.lifecycleLock.Release();
-        }
-    }
-    public async Task<uint> MessageCount()
-    {
-        var currentChannel = this.channel;
-        if (!(currentChannel?.IsOpen ?? false)) return 0;
-        try
-        {
-            return await currentChannel.MessageCountAsync(this.QueueName);
-        }
-        catch (AlreadyClosedException)
-        {
-            return 0;
-        }
-        catch (ObjectDisposedException)
-        {
-            return 0;
-        }
-    }
-    private async Task StartCoreAsync()
-    {
         if (this.IsActivated) return;
-        if (this.cancellationSource != null)
-            await this.ShutdownCoreAsync();
-        else await this.DisposeAsync();
         try
         {
             this.cancellationSource = new();
+            this.shutdownSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
             this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
             this.channel = await this.connection.CreateChannelAsync();
             await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
@@ -168,6 +108,7 @@ class RabbitConsumer
                     await this.BindRpcResultHandler();
                     break;
             }
+            Interlocked.Exchange(ref this.state, 1);
         }
         catch
         {
@@ -175,73 +116,102 @@ class RabbitConsumer
             throw;
         }
     }
-    private async Task ShutdownCoreAsync()
+    public async Task ShutdownAsync(bool isWaitForClearMessages = false)
     {
-        var currentCancellationSource = this.cancellationSource;
-        if (currentCancellationSource == null)
+        if (Interlocked.Exchange(ref this.state, 2) > 1)
+            return;
+
+        //先关闭用户消息消费者，再关闭RPC结果消费者，RPC结果消费者消费完当前消息就可以关闭
+        //最后关闭转发和心跳消费者，不再处理用户消息，这两个消费者随时可以关闭
+        this.isWaitForClearMessages = isWaitForClearMessages;
+        if (this.queueType == QueueType.Message && isWaitForClearMessages)
+        {
+            await this.parent.ProcessMessage(new Message
+            {
+                MessageId = ObjectId.NewId(),
+                Type = Consts.SendShutdownMessages,
+                Body = this.QueueName
+            });
+        }
+        //等待结束信号或临时结束信号
+        if (Interlocked.Increment(ref this.workers) > 1)
+            await this.shutdownSource.Task;
+        else await this.ShutdownCoreAsync();
+        if (!isWaitForClearMessages)
         {
             await this.DisposeAsync();
-            return;
+            Interlocked.Exchange(ref this.state, 0);
         }
-        currentCancellationSource.Cancel();
+        Interlocked.Decrement(ref this.workers);
+    }
+    public async Task<uint> MessageCount()
+    {
         var currentChannel = this.channel;
-        var currentConsumerTag = this.consumerTag;
-        if (!string.IsNullOrEmpty(currentConsumerTag) && (currentChannel?.IsOpen ?? false))
+        if (!(currentChannel?.IsOpen ?? false)) return 0;
+        try
         {
-            try
-            {
-                using var cancelTimeoutSource = new CancellationTokenSource(this.shutdownTimeout);
-                await currentChannel.BasicCancelAsync(currentConsumerTag, false, cancelTimeoutSource.Token);
-            }
-            catch (Exception ex)
-            {
-                this.logger.LogTagError("RabbitConsumer", ex, $"ShutdownCoreAsync，取消消费者失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
-            }
+            return await currentChannel.MessageCountAsync(this.QueueName);
         }
-        if (await this.semaphoreWaiter.WaitAsync(this.shutdownTimeout))
-            this.logger.LogTagError("RabbitConsumer", $"ShutdownCoreAsync，等待消费者处理完成超时, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}, Timeout: {this.shutdownTimeout.TotalSeconds}s");
-        await this.DisposeAsync();
+        catch (AlreadyClosedException)
+        {
+            return 0;
+        }
+        catch (ObjectDisposedException)
+        {
+            return 0;
+        }
+    }
+    private async Task ShutdownCoreAsync()
+    {
+        if (this.IsActivated)
+            await this.channel.BasicCancelAsync(this.consumerTag);
+        this.cancellationSource?.Cancel();
+        if (this.isWaitForClearMessages)
+        {
+            await this.DisposeAsync();
+            Interlocked.Exchange(ref this.state, 0);
+        }
+        else this.shutdownSource?.TrySetResult(true);
     }
     private async Task DisposeAsync()
     {
-        var channelToDispose = this.channel;
-        var connectionToDispose = this.connection;
-        var cancellationSourceToDispose = this.cancellationSource;
-        this.channel = null;
-        this.connection = null;
-        this.cancellationSource = null;
-        this.consumer = null;
-        this.consumerTag = null;
-        if (channelToDispose != null)
+        this.cancellationSource?.Cancel();
+        if (this.channel != null)
         {
             try
             {
-                await channelToDispose.DisposeAsync();
+                await this.channel.DisposeAsync();
             }
             catch (Exception ex)
             {
                 this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Channel失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
             }
         }
-        if (connectionToDispose != null)
+        if (this.connection != null)
         {
             try
             {
-                await connectionToDispose.DisposeAsync();
+                await this.connection.DisposeAsync();
             }
             catch (Exception ex)
             {
                 this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Connection失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
             }
         }
-        cancellationSourceToDispose?.Dispose();
+        this.cancellationSource?.Dispose();
+
+        this.channel = null;
+        this.connection = null;
+        this.cancellationSource = null;
+        this.consumer = null;
+        this.consumerTag = null;
     }
-    private async Task SafeNack(IChannel consumerChannel, ulong deliveryTag)
+    private async Task SafeNack(IChannel rabbitChannel, ulong deliveryTag)
     {
         try
         {
-            if (consumerChannel?.IsOpen ?? false)
-                await consumerChannel.BasicNackAsync(deliveryTag, false, true);
+            if (rabbitChannel?.IsOpen ?? false)
+                await rabbitChannel.BasicNackAsync(deliveryTag, false, true);
         }
         catch (Exception ex)
         {
@@ -250,21 +220,21 @@ class RabbitConsumer
     }
     private async Task BindUserMessageHandler()
     {
-        var consumerChannel = this.channel;
-        var consumerCancellationSource = this.cancellationSource;
-        this.consumer = new AsyncEventingBasicConsumer(consumerChannel);
+        this.consumer = new AsyncEventingBasicConsumer(this.channel);
         //用户消息队列
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            this.semaphoreWaiter.Enter();
-            IDisposable scopeObj = null;
+            Interlocked.Increment(ref this.workers);
 
+            IDisposable scopeObj = null;
             string traceId = null;
             string jsonBody = null;
+            var messageId = ea.BasicProperties.MessageId;
+            var messageType = ea.BasicProperties.Type;
             try
             {
                 //消费者关闭过程中收到的在途投递不再处理，Channel关闭后由RabbitMQ重新入队
-                if (consumerCancellationSource.IsCancellationRequested)
+                if (this.cancellationSource.IsCancellationRequested)
                     return;
                 var iLoop = 0;
                 Exception exception = null;
@@ -274,8 +244,6 @@ class RabbitConsumer
                 //内部消息，交给消息总分发处处理
                 string result = null;
                 var createdAt = DateTime.UtcNow;
-                var messageId = ea.BasicProperties.MessageId;
-                var messageType = ea.BasicProperties.Type;
                 var headers = ea.BasicProperties.Headers;
                 if (headers != null && headers.TryGetValue("TraceId", out var objValue))
                     traceId = Encoding.UTF8.GetString((byte[])headers["TraceId"]);
@@ -294,7 +262,6 @@ class RabbitConsumer
                                 {
                                     var typedConsumerHandler = this.exchangeHandlers[ea.Exchange];
                                     result = await typedConsumerHandler.Invoke(jsonBody);
-
                                     isSuccess = true;
                                     break;
                                 }
@@ -370,8 +337,27 @@ class RabbitConsumer
                                 throw exception;
                         }
                         break;
+                    case Consts.Shutdown:
+                        if (Volatile.Read(ref this.state) >= 2)
+                        {
+                            await this.channel.BasicAckAsync(ea.DeliveryTag, false);
+                            await this.ShutdownCoreAsync();
+                            return;
+                        }
+                        break;
                 }
-                await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
+                await this.channel.BasicAckAsync(ea.DeliveryTag, false);
+                Interlocked.Decrement(ref this.workers);
+                if (Volatile.Read(ref this.state) == 2)
+                {
+                    if (this.isWaitForClearMessages)
+                    {
+                        //临时关闭，先让主服务继续处理其他消费者的关闭，当前消费者自己延迟关闭
+                        this.shutdownSource.TrySetResult(true);
+                        Interlocked.Exchange(ref this.state, 3);
+                    }
+                    else await this.ShutdownCoreAsync();
+                }
             }
             catch (Exception ex)
             {
@@ -387,28 +373,26 @@ class RabbitConsumer
                 }.ToJson();
                 this.logger.LogTagError("RabbitConsumer", ex, $"BindUserMessageHandler，处理用户消息异常, ConsumerId: {this.ConsumerId}, Message: {messageJson}");
                 Console.WriteLine($"处理用户消息异常, Message: {messageJson}, Exception: {ex}");
-                await this.SafeNack(consumerChannel, ea.DeliveryTag);
+                await this.SafeNack(this.channel, ea.DeliveryTag);
             }
             finally
             {
                 scopeObj?.Dispose();
-                this.semaphoreWaiter.Exit();
             }
         };
-        this.consumerTag = await consumerChannel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindHeartbeatHandler()
     {
-        var consumerChannel = this.channel;
-        var consumerCancellationSource = this.cancellationSource;
-        this.consumer = new AsyncEventingBasicConsumer(consumerChannel);
+        this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            this.semaphoreWaiter.Enter();
+            Interlocked.Increment(ref this.workers);
             try
             {
-                if (consumerCancellationSource.IsCancellationRequested)
+                if (this.cancellationSource.IsCancellationRequested)
                     return;
+
                 var serviceId = Encoding.UTF8.GetString(ea.Body.Span);
                 if (ea.BasicProperties.AppId == this.parent.AppId)
                 {
@@ -419,37 +403,29 @@ class RabbitConsumer
                         Body = serviceId
                     });
                 }
-                await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
+                await this.channel.BasicAckAsync(ea.DeliveryTag, false);
+                Interlocked.Decrement(ref this.workers);
+                if (Volatile.Read(ref this.state) == 2)
+                    await this.ShutdownCoreAsync();
             }
             catch (Exception ex)
             {
                 this.logger.LogTagError("RabbitConsumer", ex, $"BindHeartbeatHandler，处理心跳消息失败, ConsumerId: {this.ConsumerId}");
-                await this.SafeNack(consumerChannel, ea.DeliveryTag);
-            }
-            finally
-            {
-                this.semaphoreWaiter.Exit();
+                await this.SafeNack(this.channel, ea.DeliveryTag);
             }
         };
-        this.consumerTag = await consumerChannel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindRpcResultHandler()
     {
-        var consumerChannel = this.channel;
-        var consumerCancellationSource = this.cancellationSource;
-        this.consumer = new AsyncEventingBasicConsumer(consumerChannel);
-        if (this.rpcMethofInfo != null)
-        {
-            var consumerHander = this.exchangeHandlers[this.QueueName];
-        }
+        this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            this.semaphoreWaiter.Enter();
+            Interlocked.Increment(ref this.workers);
             try
             {
-                if (consumerCancellationSource.IsCancellationRequested)
+                if (this.cancellationSource.IsCancellationRequested)
                     return;
-
                 var result = Encoding.UTF8.GetString(ea.Body.Span);
                 //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, ReplyTo:{ea.BasicProperties.ReplyTo}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                 await this.parent.ProcessMessage(new Message
@@ -458,32 +434,28 @@ class RabbitConsumer
                     Type = ea.BasicProperties.Type,
                     Body = result
                 });
-                await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
+                await this.channel.BasicAckAsync(ea.DeliveryTag, false);
+                Interlocked.Decrement(ref this.workers);
+                if (Volatile.Read(ref this.state) == 2)
+                    await this.ShutdownCoreAsync();
             }
             catch (Exception ex)
             {
                 this.logger.LogTagError("RabbitConsumer", ex, $"BindRpcResultHandler，处理RPC结果失败, ConsumerId: {this.ConsumerId}");
-                await this.SafeNack(consumerChannel, ea.DeliveryTag);
-            }
-            finally
-            {
-                this.semaphoreWaiter.Exit();
+                await this.SafeNack(this.channel, ea.DeliveryTag);
             }
         };
-        this.consumerTag = await consumerChannel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private async Task BindTransferHandler()
     {
-        var consumerChannel = this.channel;
-        var consumerCancellationSource = this.cancellationSource;
-        this.consumer = new AsyncEventingBasicConsumer(consumerChannel);
+        this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            this.semaphoreWaiter.Enter();
-            string exMessage = null;
+            Interlocked.Increment(ref this.workers);
             try
             {
-                if (consumerCancellationSource.IsCancellationRequested)
+                if (this.cancellationSource.IsCancellationRequested)
                     return;
 
                 var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
@@ -496,7 +468,7 @@ class RabbitConsumer
                 if (headers.TryGetValue("TraceId", out var traceIdBytes))
                     traceId = Encoding.UTF8.GetString((byte[])traceIdBytes);
 
-                var message = new Message
+                await this.parent.ProcessMessage(new Message
                 {
                     MessageId = ea.BasicProperties.MessageId,
                     Type = ea.BasicProperties.Type,
@@ -505,27 +477,19 @@ class RabbitConsumer
                     TraceId = traceId,
                     ReplyTo = ea.BasicProperties.ReplyTo,
                     Body = jsonBody
-                };
-
-                var timeoutSeconds = this.parent.heartbeatCycle.TotalSeconds;
-                exMessage = $"转发消息超时, 耗时{timeoutSeconds}s, Now: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, Message: {message.ToJson()}";
-                message.Waiter = new();
-                await this.parent.ProcessMessage(message);
-                await message.Waiter.WaitAsync(this.parent.heartbeatCycle, exMessage);
-                await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
+                });
+                await this.channel.BasicAckAsync(ea.DeliveryTag, false);
+                Interlocked.Decrement(ref this.workers);
+                if (Volatile.Read(ref this.state) == 2)
+                    await this.ShutdownCoreAsync();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{exMessage}, Exception: {ex}");
-                this.logger.LogTagError("RabbitConsumer", ex, $"BindTransferHandler，{exMessage}");
-                await this.SafeNack(consumerChannel, ea.DeliveryTag);
-            }
-            finally
-            {
-                this.semaphoreWaiter.Exit();
+                this.logger.LogTagError("RabbitConsumer", ex, "转发消息失败");
+                await this.SafeNack(this.channel, ea.DeliveryTag);
             }
         };
-        this.consumerTag = await consumerChannel.BasicConsumeAsync(this.QueueName, false, this.consumer);
+        this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
     private Func<string, Task<string>> CreateConsumerHandler(IServiceProvider serviceProvider, MethodInfo methodInfo)
     {

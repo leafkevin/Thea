@@ -4,6 +4,26 @@ using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
 
+public enum ChangeType
+{
+    None,
+    ScalingUp,
+    ScalingDown
+}
+class ExchangeTransfer
+{
+    public string FromExchange { get; set; }
+    public string ToExchange { get; set; }
+    public string RoutingKey { get; set; }
+}
+class DispatchInfo
+{
+    public QueueType QueueType { get; set; }
+    public Queue Queue { get; set; }
+    public int QueueIndex { get; set; }
+    public string QueueName { get; set; }
+    public int ConsumerCount { get; set; }
+}
 enum QueueType
 {
     Message,

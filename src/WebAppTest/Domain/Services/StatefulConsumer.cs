@@ -29,13 +29,14 @@ public class StatefulConsumer
         //this.logger.LogInformation("2222222");
         return Task.FromResult(key);
     }
-    public Task<AwardInfo> TakeAward(AwardInfo awardInfo)
+    public async Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {
         //Thread.Sleep(10);
         Console.WriteLine($"TakeAward: 我要领奖 {awardInfo.ToJson()}    --   {awardInfo.AwardId}");
-        //this.messageDriven.Request<string, string>("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
-        this.messageDriven.PublishAsync("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
-        return Task.FromResult(awardInfo);
+        await Task.Delay(10);
+        //await this.messageDriven.RequestAsync<string, string>("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
+        //this.messageDriven.PublishAsync("cache.refresh", awardInfo.AwardId, awardInfo.AwardId);
+        return awardInfo;
     }
     public Task<TheaResponse<AwardInfo>> IssueAward(AwardInfo awardInfo)
     {

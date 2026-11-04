@@ -1,7 +1,10 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Thea.Cache;
 using Thea.MessageDriven;
 using Thea.MessageDriven.MySqlRepository;
 using Trolley;
+using WebAppTest2.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -10,8 +13,9 @@ builder.Services.AddSingleton(f =>
 {
     var connString = configuration["ConnectionStrings:default"];
     return new OrmDbFactoryBuilder()
-        .Register(OrmProviderType.MySql, "default", connString, true)
-        .Build();
+        .Register("default", OrmProviderType.MySql, f => f.Use(connString), true)
+        .UseMapping<ModelConfiguration>(OrmProviderType.MySql)
+        .UseInterceptor<MyDbInterceptor>().Build();
 });
 builder.Services.AddMessageDriven();
 builder.Services.AddRedisCache();
@@ -32,8 +36,7 @@ app.UseSwaggerUI();
 app.UseMessageDriven(f =>
 {
     f.UseTrolleyRepository("default")
-    .UseProducer("cache.refresh", "award.issue")
-    .UseProducer("award.take", true);
+     .UseProducer().UseRpcConsumer();
 });
 app.UseAuthorization();
 

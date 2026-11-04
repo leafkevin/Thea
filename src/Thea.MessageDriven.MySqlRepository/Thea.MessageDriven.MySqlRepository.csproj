@@ -6,10 +6,8 @@
 		<None Remove="mds.sql" />
 	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Include="Trolley" Version="2.0.8" />
-		<PackageReference Include="Trolley.MySqlConnector" Version="2.0.8" />
-	</ItemGroup>
-	<ItemGroup>
+		<ProjectReference Include="..\..\..\Trolley\src\Trolley.MySqlConnector\Trolley.MySqlConnector.csproj" />
+		<ProjectReference Include="..\..\..\Trolley\src\Trolley\Trolley.csproj" />
 		<ProjectReference Include="..\Thea.Cache\Thea.Cache.csproj" />
 		<ProjectReference Include="..\Thea.MessageDriven\Thea.MessageDriven.csproj" />
 	</ItemGroup>

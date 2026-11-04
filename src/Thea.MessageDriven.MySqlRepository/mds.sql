@@ -2,11 +2,11 @@
 -- DROP TABLE IF EXISTS `mds_binding`;
 CREATE TABLE `mds_binding`
 (
-    `exchange_id` VARCHAR(50) NOT NULL COMMENT '信箱ID',
+    `exchange_id` VARCHAR(50) NOT NULL COMMENT '交换机ID',
     `queue_id` VARCHAR(50) NOT NULL COMMENT '队列ID',
     `bind_type` VARCHAR(50) NULL COMMENT '绑定类型',
     `binding_key` VARCHAR(50) NULL COMMENT '绑定KEY',
-    `is_delay` TINYINT(1) NULL DEFAULT 0 COMMENT '是否延时消费者'
+    `is_delay` TINYINT(1) NULL DEFAULT 0 COMMENT '是否延时消费者',
     CONSTRAINT `pk_mds_binding` PRIMARY KEY(`exchange_id`,`queue_id`)
 );
 ALTER TABLE `mds_binding` COMMENT '绑定表，描述交换机与队列的绑定关系';
@@ -21,6 +21,7 @@ CREATE TABLE `mds_queue`
     `queue_id` VARCHAR(50) NOT NULL COMMENT '队列ID',
     `app_id` VARCHAR(50) NULL COMMENT '应用ID',
     `is_stateful` TINYINT(1) NULL DEFAULT 0 COMMENT '是否有状态',
+    `is_transfer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否转发队列',
     `workload_total` INTEGER NULL COMMENT '工作负荷个数',
     `prefetch_count` INTEGER NULL COMMENT '预取个数',
     `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',

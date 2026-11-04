@@ -35,6 +35,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebAppTest2", "WebAppTest2\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thea.Alarm.ImageConverter", "Thea.Alarm.ImageConverter\Thea.Alarm.ImageConverter.csproj", "{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trolley", "..\..\Trolley\src\Trolley\Trolley.csproj", "{6428E843-68C8-D484-5E5E-98E0D42326AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trolley.MySqlConnector", "..\..\Trolley\src\Trolley.MySqlConnector\Trolley.MySqlConnector.csproj", "{E104F048-A676-A364-49B5-9F2C9809C13D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -93,6 +97,14 @@ Global
 		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0E59DEBF-8F4C-4A79-9A5D-3474D7B95471}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6428E843-68C8-D484-5E5E-98E0D42326AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6428E843-68C8-D484-5E5E-98E0D42326AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6428E843-68C8-D484-5E5E-98E0D42326AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6428E843-68C8-D484-5E5E-98E0D42326AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E104F048-A676-A364-49B5-9F2C9809C13D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E104F048-A676-A364-49B5-9F2C9809C13D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E104F048-A676-A364-49B5-9F2C9809C13D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E104F048-A676-A364-49B5-9F2C9809C13D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

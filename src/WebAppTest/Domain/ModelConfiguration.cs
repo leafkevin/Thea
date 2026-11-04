@@ -1,11 +1,10 @@
 ﻿using Trolley;
-using WebAppTest.Domain.Models;
 
 namespace WebAppTest.Domain;
 
-class ModelConfiguration : IModelConfiguration
+class ModelConfiguration : DefaultModelMappingConfiguration
 {
-    public void OnModelCreating(ModelBuilder builder)
+    public override void OnModelCreating(ModelBuilder builder)
     {
         //builder
         //    .Entity<Cluster>(f => f.ToTable("mds_cluster"))

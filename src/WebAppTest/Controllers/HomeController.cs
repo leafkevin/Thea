@@ -10,7 +10,6 @@ using Thea;
 using Thea.Logging;
 using Thea.MessageDriven;
 using Trolley;
-using Trolley.PostgreSql;
 using WebAppTest.Domain.Models;
 using WebAppTest.Domain.Services;
 using WebAppTest.Dtos;
@@ -62,7 +61,7 @@ namespace WebAppTest.Controllers
         //    return TheaResponse.Success;
         //}
         [HttpGet]
-        public async Task<TheaResponse> Index()
+        public async Task<TheaResponse> Publish()
         {
             Thread.Sleep(200);
             this.logger.LogTagInformation("Index", "111111------------");
@@ -107,7 +106,7 @@ namespace WebAppTest.Controllers
         public async Task<TheaResponse> TakeAward(string awardId)
         {
             var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId, new AwardInfo { AwardId = awardId, Quantity = 2 });
-            Console.WriteLine($"TakeAward {result} completed");
+            Console.WriteLine($"TakeAward {result.ToJson()} completed");
             return TheaResponse.Succeed(result);
         }
         [HttpGet]

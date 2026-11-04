@@ -32,6 +32,11 @@ public class MessageDrivenBuilder
         this.messageDriven.UseStatefulConsumer(exchange, queue, consumerHandler, isSingleActiveConsumer, isQuorumQueue);
         return this;
     }
+    public MessageDrivenBuilder UseTransferConsumer(int workloadTotal = 1, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
+    {
+        this.messageDriven.UseTransferConsumer(workloadTotal, isSingleActiveConsumer, isQuorumQueue);
+        return this;
+    }
     public MessageDrivenBuilder UseSubscriber<TConsumer>(string queue, MethodInfo consumerHandler, bool isQuorumQueue = true)
     {
         this.messageDriven.UseSubscriber(queue, consumerHandler, isQuorumQueue);
@@ -47,7 +52,7 @@ public class MessageDrivenBuilder
         this.messageDriven.UseTransfer(fromExchange, toExchange, routingKey);
         return this;
     }
-    public MessageDrivenBuilder UseRpcConsumer(MethodInfo consumerHandler)
+    public MessageDrivenBuilder UseRpcConsumer(MethodInfo consumerHandler = null)
     {
         this.messageDriven.UseRpcConsumer(consumerHandler);
         return this;

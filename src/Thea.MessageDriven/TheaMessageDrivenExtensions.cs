@@ -30,6 +30,11 @@ public static class TheaMessageDrivenExtensions
         buidler.UseStatefulConsumer<TConsumer>(exchange, queue, consumerHandler, isSingleActiveConsumer, isQuorumQueue);
         return buidler;
     }
+    public static MessageDrivenBuilder UseTransferConsumer(this MessageDrivenBuilder buidler, int workloadTotal = 1, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
+    {
+        buidler.UseTransferConsumer(workloadTotal, isSingleActiveConsumer, isQuorumQueue);
+        return buidler;
+    }
     public static MessageDrivenBuilder UseSubscriber<TConsumer>(this MessageDrivenBuilder buidler, string queue, Expression<Func<TConsumer, Delegate>> consumerHandlerSelector, bool isQuorumQueue = true)
     {
         var consumerHandler = VisitExpr(consumerHandlerSelector.Body);

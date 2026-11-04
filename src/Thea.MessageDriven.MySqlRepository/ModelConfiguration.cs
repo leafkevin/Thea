@@ -2,9 +2,9 @@
 
 namespace Thea.MessageDriven.MySqlRepository;
 
-class ModelConfiguration : IModelConfiguration
+class ModelConfiguration : DefaultModelMappingConfiguration
 {
-    public void OnModelCreating(ModelBuilder builder)
+    public override void OnModelCreating(ModelBuilder builder)
     {
         builder
             .Entity<Binding>(f => f.ToTable("mds_binding"))

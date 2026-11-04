@@ -12,7 +12,7 @@ public static class TheaMessageDrivenExtensions
         {
             var dbFactory = f.GetRequiredService<IOrmDbFactory>();
             if (dbFactory == null) throw new Exception("请先注册Trolley Orm组件");
-            dbFactory.Configure(dbKey, new ModelConfiguration());
+            dbFactory.UseMapping<ModelConfiguration>(dbKey);
             dbFactory.Build();
             return new DefaultRepository(f);
         });

@@ -1,6 +1,8 @@
-using System.Diagnostics;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using Thea;
 using Thea.MessageDriven;
 
@@ -26,10 +28,10 @@ public class HomeController : ControllerBase
             {
                 var message = $"message-{i}-{j}";
                 await this.messageDriven.PublishAsync("cache.refresh", "1", message);
-                var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", i.ToString(), new AwardInfo { AwardId = message, Quantity = i % 5 });
-                Console.WriteLine($"Request {result.ToJson()}, time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+                await this.messageDriven.PublishAsync("award.take", i.ToString(), new AwardInfo { AwardId = message, Quantity = i % 5 });
+                //Console.WriteLine($"Request {result.ToJson()}, time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
             }
-            Thread.Sleep(1000);
+            Thread.Sleep(1);
         }
         return TheaResponse.Succeed("ok");
     }
@@ -39,7 +41,8 @@ public class HomeController : ControllerBase
         //await this.messageDriven.PublishAsync("cache.refresh", "1", new { AwardId = awardId.ToString(), Quantity = awardId % 5 });
         var stopwatch = Stopwatch.StartNew();
         stopwatch.Start();
-        var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId.ToString(), new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
+        var result = await this.messageDriven.RequestAsync<AwardInfo, AwardInfo>("award.take", awardId.ToString(),
+            new AwardInfo { AwardId = awardId.ToString(), Quantity = awardId % 5 });
         stopwatch.Stop();
         Console.WriteLine($"Request time: {stopwatch.ElapsedMilliseconds}ms");
         return TheaResponse.Succeed(result);

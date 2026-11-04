@@ -1,18 +1,15 @@
-﻿using System;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Caching.Memory;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System;
 using Thea.Auth;
 using Thea.Cache;
+using Thea.Logging;
 using Thea.MessageDriven;
 using Thea.MessageDriven.MySqlRepository;
 using Thea.Web;
-using Thea.Logging;
 using Trolley;
 using WebAppTest.Domain.Services;
-using Microsoft.AspNetCore.Http;
-using Thea;
 
 namespace WebAppTest.Domain;
 
@@ -24,8 +21,9 @@ public static class Startup
         {
             var connString = configuration["ConnectionStrings:default"];
             return new OrmDbFactoryBuilder()
-                .Register(OrmProviderType.MySql, "default", connString, true)
-                .Configure<ModelConfiguration>(OrmProviderType.MySql)
+                .Register("default", OrmProviderType.MySql, f => f.Use(connString), true)
+                .UseMapping<ModelConfiguration>(OrmProviderType.MySql)
+                //.UseInterceptor<MyDbInterceptor>()
                 .Build();
         });
         services.AddMemoryCache();
@@ -59,10 +57,10 @@ public static class Startup
         {
             f.UseTrolleyRepository("default")
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
-             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward, true, false)
-             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward, true, false)
+             .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
+             .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward)
              .UseStatefulConsumer<StatefulConsumer>("sequence", "sequence", f => f.UpdateSequence)
-             .UseRpcConsumer();
+             .UseTransferConsumer(2).UseProducer().UseRpcConsumer();
         });
     }
 }

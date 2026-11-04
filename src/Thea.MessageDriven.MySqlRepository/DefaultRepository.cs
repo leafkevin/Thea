@@ -13,6 +13,7 @@ public class DefaultRepository : IMessageDrivenRepository
     private readonly string dbKey;
     private readonly IOrmDbFactory dbFactory;
     private readonly IDistributedCache redisCache;
+
     public DefaultRepository(IServiceProvider serviceProvider)
     {
         this.dbFactory = serviceProvider.GetService<IOrmDbFactory>();
@@ -22,26 +23,21 @@ public class DefaultRepository : IMessageDrivenRepository
     }
     public virtual async Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true)
     {
-        var cacheKey = "thea.queue.all";
+        var cacheKey = "thea.queue.all1";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
         var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
             return await repository.QueryAsync<Queue>();
         });
-        cacheKey = "thea.binding.all";
+        cacheKey = "thea.binding.all1";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
         var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
             return await repository.From<Binding, Queue>()
                 .Where((a, b) => a.QueueId == b.QueueId)
-                .SelectFlattenTo((a, b) => new Binding
-                {
-                    AppId = b.AppId,
-                    IsStateful = b.IsStateful,
-                    WorkloadTotal = b.WorkloadTotal
-                })
+                .SelectTo<Binding>()
                 .ToListAsync();
         });
         return (queues, bindings);
@@ -53,23 +49,26 @@ public class DefaultRepository : IMessageDrivenRepository
         {
             await repository.Create<Queue>()
                 .WithBulk(queues)
-                .OnDuplicateKeyUpdate(t => t.Set(f => new
+                .OnDuplicateKeyUpdate()
+                .Set(f => new
                 {
-                    AppId = t.Values(f.AppId),
-                    IsStateful = t.Values(f.IsStateful)
-                }))
+                    AppId = f.Values(f.AppId),
+                    IsStateful = f.Values(f.IsStateful),
+                    IsTransfer = f.Values(f.IsTransfer)
+                })
                 .ExecuteAsync();
         }
         if (bindings != null && bindings.Count > 0)
         {
             await repository.Create<Binding>()
                 .WithBulk(bindings)
-                .OnDuplicateKeyUpdate(t => t.Set(f => new
+                .OnDuplicateKeyUpdate()
+                .Set(f => new
                 {
-                    BindType = t.Values(f.BindType),
-                    BindingKey = t.Values(f.BindingKey),
-                    IsDelay = t.Values(f.IsDelay)
-                }))
+                    BindType = f.Values(f.BindType),
+                    BindingKey = f.Values(f.BindingKey),
+                    IsDelay = f.Values(f.IsDelay)
+                })
                 .ExecuteAsync();
         }
     }
@@ -90,7 +89,7 @@ public class DefaultRepository : IMessageDrivenRepository
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
     {
-        var repository = this.dbFactory.CreateRepository(this.dbKey);
+        var repository = this.dbFactory.Create(this.dbKey);
         await repository.CreateAsync<ExecLog>(logInfos);
     }
 }
