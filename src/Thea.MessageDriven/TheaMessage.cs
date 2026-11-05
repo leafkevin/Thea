@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
@@ -56,4 +57,10 @@ class RpcWaiter
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int TimeoutSeconds { get; set; } = 30;
     public string TimeoutMessage { get; set; }
+}
+class TimedConsumers
+{
+    public List<RabbitConsumer> Consumers { get; set; } = new();
+    public bool HasMessages { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

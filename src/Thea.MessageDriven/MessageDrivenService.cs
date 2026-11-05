@@ -24,7 +24,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
 
     private readonly TaskCompletionSource<bool> readyToStart = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
-    private readonly ConcurrentDictionary<string, ConcurrentQueue<RabbitConsumer>> shutdownConsumers = new();
+    private readonly ConcurrentDictionary<string, TimedConsumers> shutdownConsumers = new();
     private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
     private Channel<Message> channel = null;
@@ -308,29 +308,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
                                 //本地pod消费者变更通知已更新，相应的队列和绑定都已创建，其他的pod不同步也没有关系
                                 (statefulBindings, transferQueues) = ((Dictionary<string, Binding>, Dictionary<string, Queue>))message.Body;
                                 break;
-                            case Consts.DrainCompleted:
-                                //向缩容队列发送排空标志
-                                queueName = message.Body as string;
-                                await this.rabbitProducer.PublishAsync(Consts.DefaultExchange, queueName, new BasicProperties
-                                {
-                                    Persistent = true,
-                                    Type = Consts.DrainCompleted,
-                                    DeliveryMode = DeliveryModes.Persistent,
-                                    AppId = this.AppId,
-                                    MessageId = message.MessageId
-                                }, queueName);
-                                break;
-                            case Consts.CloseConsumers:
-                                //通过心跳交换机广播所有pod发送关闭消费者通知，删除本pod中queueName队列的消费者
-                                await this.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, this.AppId, new BasicProperties
-                                {
-                                    Persistent = true,
-                                    Type = Consts.CloseConsumers,
-                                    DeliveryMode = DeliveryModes.Persistent,
-                                    AppId = this.AppId,
-                                    MessageId = message.MessageId
-                                }, queueName);
-                                break;
                             case Consts.Shutdown:
                                 //所有内存中的消息都已经发布出去，可以关闭了
                                 message.Waiter.TrySetResult(true);
@@ -370,9 +347,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
         if (this.hasConsumer)
         {
             var tasks = this.consumers.Values.SelectMany(f => f)
-                .Concat(this.shutdownConsumers.Values.SelectMany(x => x))
+                .Concat(this.shutdownConsumers.Values.SelectMany(x => x.Consumers))
                 .Concat([this.heartbeatConsumer]).Distinct()
-                .Select(f => f.ShutdownAsync(false)).ToList();
+                .Select(f => f.ShutdownAsync()).ToList();
             await Task.WhenAll(tasks);
         }
         //关闭主控循环和心跳循环
@@ -751,17 +728,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 //心跳队列发来的消息
                 await this.channel.Writer.WriteAsync(message);
                 break;
-            case Consts.CloseConsumers:
-                //SAC激活消费者和心跳消费者发来的消息
-                var queueName = message.Body as string;
-                if (!this.shutdownConsumers.TryRemove(queueName, out var rabbitConsumers))
-                    break;
-                //队列消息已经排空，先关闭本pod中的SAC激活消费者
-                var closeTasks = new List<Task>();
-                while (rabbitConsumers.TryDequeue(out var rabbitConsumer))
-                    closeTasks.Add(rabbitConsumer.ShutdownAsync(false));
-                await Task.WhenAll(closeTasks);
-                break;
         }
     }
 
@@ -918,7 +884,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             var changedQueues = dbQueues.Where(f => this.localQueueIds.Contains(f.QueueId) || f.AppId != this.AppId).ToList();
             var changedBindings = dbBindings.Where(f => this.localExchangeIds.Contains(f.ExchangeId) || f.AppId != this.AppId).ToList();
 
-            var removeQueues = new List<string>();
+            var removeKeys = new List<string>();
             if (this.hasConsumer)
             {
                 var localQueues = changedQueues.FindAll(f => f.AppId == this.AppId);
@@ -1018,10 +984,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
                         {
                             myRabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
                             myRabbitConsumer.PrefetchCount = myQueue.PrefetchCount;
-                            Console.WriteLine($"消费者参数变更---1，{myRabbitConsumer.QueueId}, ConsumerId:{myRabbitConsumer.ConsumerId}已重启");
-                            await myRabbitConsumer.ShutdownAsync(false);
+                            await myRabbitConsumer.ShutdownAsync();
                             await myRabbitConsumer.StartAsync();
-                            Console.WriteLine($"消费者参数变更---2，{myRabbitConsumer.QueueId}, ConsumerId:{myRabbitConsumer.ConsumerId}已重启");
+                            Console.WriteLine($"消费者参数变更，{myRabbitConsumer.QueueId}, ConsumerId:{myRabbitConsumer.ConsumerId}已重启");
                         }
                     }
                     if (rabbitConsumers.Count < consumerCount)
@@ -1038,37 +1003,33 @@ class MessageDrivenService : IMessageDriven, IHostedService
                             var rabbitConsumer = rabbitConsumers[i];
                             if (isScalingDown)
                             {
-                                if (!removeQueues.Contains(rabbitConsumer.QueueName))
-                                    removeQueues.Add(rabbitConsumer.QueueName);
-                                var myShutdownConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new());
-                                myShutdownConsumers.Enqueue(rabbitConsumer);
+                                var timedConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new());
+                                timedConsumers.Consumers.Add(rabbitConsumer);
+                                timedConsumers.HasMessages = true;
                                 Console.WriteLine($"缩容队列，多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}延迟关闭");
                             }
-                            else Console.WriteLine($"多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}已关闭");
+                            else
+                            {
+                                await rabbitConsumer.ShutdownAsync();
+                                rabbitConsumers.Remove(rabbitConsumer);
+                                Console.WriteLine($"多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}已关闭");
+                            }
                             removeConsumers.Add(rabbitConsumer);
-                            await rabbitConsumer.ShutdownAsync(isScalingDown);
                         }
-                    }
-                    if (removeConsumers.Count > 0)
-                    {
-                        removeConsumers.ForEach(f => rabbitConsumers.Remove(f));
-                        removeConsumers.Clear();
                     }
                 }
 
-                //删除未分配的多余消费者
-                var removeKeys = new List<string>();
+                //删除未分配的多余消费者             
                 foreach (var queueName in this.consumers.Keys)
                 {
                     if (localConsumers.ContainsKey(queueName))
                         continue;
+                    removeKeys.Add(queueName);
 
                     var rabbitConsumers = this.consumers[queueName];
                     if (rabbitConsumers == null || rabbitConsumers.Count == 0)
-                    {
-                        removeKeys.Add(queueName);
                         continue;
-                    }
+
                     var queueId = rabbitConsumers[0].QueueId;
                     var myQueue = localQueues.Find(f => f.QueueId == queueId);
                     foreach (var rabbitConsumer in rabbitConsumers)
@@ -1077,25 +1038,25 @@ class MessageDrivenService : IMessageDriven, IHostedService
                             && rabbitConsumer.QueueIndex >= myQueue.WorkloadTotal;
                         if (isScalingDown)
                         {
-                            if (!removeQueues.Contains(rabbitConsumer.QueueName))
-                                removeQueues.Add(rabbitConsumer.QueueName);
-                            var myShutdownConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new());
-                            myShutdownConsumers.Enqueue(rabbitConsumer);
+                            var timedConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new());
+                            timedConsumers.Consumers.Add(rabbitConsumer);
+                            timedConsumers.HasMessages = true;
                             Console.WriteLine($"缩容队列，多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}延迟关闭");
                         }
-                        else Console.WriteLine($"多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}已关闭");
-                        removeConsumers.Add(rabbitConsumer);
-                        await rabbitConsumer.ShutdownAsync(isScalingDown);
+                        else
+                        {
+                            await rabbitConsumer.ShutdownAsync();
+                            rabbitConsumers.Remove(rabbitConsumer);
+                            Console.WriteLine($"多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}已关闭");
+                        }
                     }
-                    if (removeConsumers.Count > 0)
-                    {
-                        removeConsumers.ForEach(f => rabbitConsumers.Remove(f));
-                        removeConsumers.Clear();
-                    }
-                    removeKeys.Add(queueName);
                 }
+
                 if (removeKeys.Count > 0)
+                {
                     removeKeys.ForEach(f => this.consumers.TryRemove(f, out _));
+                    removeKeys.Clear();
+                }
             }
 
             if (this.isProducer)
@@ -1114,21 +1075,29 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     Body = (statefulBindings, transferQueues)
                 });
             }
-            if (removeQueues.Count > 0)
+
+            foreach (var queueName in this.shutdownConsumers.Keys)
             {
-                //向缩容队列发送
-                foreach (var queueName in removeQueues)
+                var timedConsumers = this.shutdownConsumers[queueName];
+                var rabbitConsumer = timedConsumers.Consumers[0];
+                var hasMessages = await rabbitConsumer.HasMessage();
+                if (timedConsumers.HasMessages != hasMessages)
                 {
-                    await this.channel.Writer.WriteAsync(new Message
-                    {
-                        MessageId = ObjectId.NewId(),
-                        Type = Consts.DrainCompleted,
-                        Exchange = Consts.DefaultExchange,
-                        RoutingKey = queueName,
-                        Body = queueName
-                    });
+                    timedConsumers.HasMessages = hasMessages;
+                    if (!hasMessages) timedConsumers.UpdatedAt = DateTime.UtcNow;
                 }
+                if (hasMessages) continue;
+
+                if (DateTime.UtcNow.Subtract(timedConsumers.UpdatedAt) < this.heartbeatCycle * 4)
+                    continue;
+                foreach (var myConsumer in timedConsumers.Consumers)
+                    await myConsumer.ShutdownAsync();
+
+                removeKeys.Add(queueName);
+                Console.WriteLine($"缩容队列{queueName}，所有消费者已关闭");
             }
+            if (removeKeys.Count > 0)
+                removeKeys.ForEach(f => this.shutdownConsumers.TryRemove(f, out _));
 
             this.queues = changedQueues;
             this.bindings = changedBindings;
@@ -1160,6 +1129,20 @@ class MessageDrivenService : IMessageDriven, IHostedService
     {
         //新增消费者，直接启动
         var myQueue = dispatchInfo.Queue;
+        var queueName = dispatchInfo.QueueName;
+        if (this.shutdownConsumers.TryGetValue(queueName, out var timedConsumers))
+        {
+            if (timedConsumers.Consumers.Count > 0)
+            {
+                var rabbitConsumer = timedConsumers.Consumers[0];
+                rabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
+                rabbitConsumers.Add(rabbitConsumer);
+                timedConsumers.Consumers.RemoveAt(0);
+            }
+            if (timedConsumers.Consumers.Count == 0)
+                this.shutdownConsumers.TryRemove(queueName, out _);
+            return;
+        }
         var queueId = myQueue.QueueId;
         //转发队列没有消费者处理程序，直接转发到目标队列
         this.consumerHandlers.TryGetValue(queueId, out var exchangeHandlers);
@@ -1172,32 +1155,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
         var consumerId = $"{dispatchInfo.QueueName}.{this.ServiceId}";
         Console.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, {queueType}状态队列{dispatchInfo.QueueName} 消费者{consumerId}已启动，当前消费者数量：{rabbitConsumers.Count}");
     }
-    //private async Task CreateTransferConsumer(int index, List<string> nodeIds, Dictionary<string, List<string>> consumerIds)
-    //{
-    //    var nodeId = nodeIds.Count > 1 ? nodeIds[index % nodeIds.Count] : this.ServiceId;
-    //    if (nodeId != this.ServiceId) return;
-
-    //    var queueName = $"{Consts.TransferExchange}.{this.AppId}";
-    //    var consumerId = $"{queueName}.{this.ServiceId}.{index}";
-    //    var rabbitConsumers = this.consumers.GetOrAdd(queueName, f => new List<RabbitConsumer>());
-    //    if (!consumerIds.TryGetValue(queueName, out var myConsumerIds))
-    //        consumerIds.TryAdd(queueName, myConsumerIds = new());
-    //    myConsumerIds.Add(consumerId);
-    //    var myRabbitConsumer = rabbitConsumers.Find(f => f.ConsumerId == consumerId);
-    //    if (myRabbitConsumer != null)
-    //    {
-    //        if (!myRabbitConsumer.IsActivated)
-    //            await myRabbitConsumer.RestartAsync();
-    //    }
-    //    else
-    //    {
-    //        //新增消费者，直接启动
-    //        myRabbitConsumer = new RabbitConsumer(queueName, consumerId, this, this.serviceProvider, QueueType.Transfer);
-    //        rabbitConsumers.Add(myRabbitConsumer);
-    //        await myRabbitConsumer.StartAsync();
-    //        Console.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, 转发队列消费者{consumerId}已启动，当前消费者数量：{rabbitConsumers.Count}");
-    //    }
-    //}
     private void EnsureAvailable()
     {
         if (!this.IsEnabled)
