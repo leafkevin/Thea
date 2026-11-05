@@ -18,7 +18,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
     private readonly Task task;
     private LoggerHandlerDelegate next;
     private readonly CancellationTokenSource stopTokenSource = new();
-    private readonly Channel<LogEntity> channel = Channel.CreateBounded<LogEntity>(new BoundedChannelOptions(200)
+    private readonly Channel<LogEntity> channel = Channel.CreateBounded<LogEntity>(new BoundedChannelOptions(50000)
     {
         FullMode = BoundedChannelFullMode.Wait,
         SingleWriter = false,
