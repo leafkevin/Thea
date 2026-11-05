@@ -1,11 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
-using System.Threading;
 using System.Threading.Tasks;
 using Thea;
 using Thea.MessageDriven;
-using Trolley;
 
 namespace WebAppTest.Domain.Services;
 
@@ -22,12 +20,13 @@ public class StatefulConsumer
         this.redisCache = redisCache;
         this.logger = logger;
     }
-    public Task<string> RemoveCache(string key)
+    public async Task<string> RemoveCache(string key)
     {
         //Thread.Sleep(10);
         Console.WriteLine($"RemoveCache: {key}");
         //this.logger.LogInformation("2222222");
-        return Task.FromResult(key);
+        await Task.Delay(10);
+        return key;
     }
     public async Task<AwardInfo> TakeAward(AwardInfo awardInfo)
     {

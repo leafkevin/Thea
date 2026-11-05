@@ -736,12 +736,17 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 var serviceId = message.Body as string;
                 this.heartbeats[serviceId] = DateTime.UtcNow;
                 break;
+            case Consts.UserMessage:
+            case Consts.RpcMessage:
+            case Consts.Logs:
+                //只要转发消息和日志进入channel中排队
+                await this.channel.Writer.WriteAsync(message);
+                break;
             case Consts.RpcResponse:
             case Consts.RpcFailure:
                 if (this.rpcWaiters.TryRemove(message.MessageId, out var rpcWaiter))
                     rpcWaiter.Waiter.TrySetResult(message);
                 break;
-
             case Consts.ChangeConsumers:
                 //心跳队列发来的消息
                 await this.channel.Writer.WriteAsync(message);
@@ -756,10 +761,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 while (rabbitConsumers.TryDequeue(out var rabbitConsumer))
                     closeTasks.Add(rabbitConsumer.ShutdownAsync(false));
                 await Task.WhenAll(closeTasks);
-                break;
-            case Consts.Logs:
-                //只要转发消息和日志进入channel中排队
-                await this.channel.Writer.WriteAsync(message);
                 break;
         }
     }
