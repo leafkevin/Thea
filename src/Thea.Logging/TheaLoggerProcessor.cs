@@ -94,8 +94,8 @@ public class TheaLoggerProcessor : ILoggerProcessor
                             break;
                         logEntities.Add(logEntityInfo);
                     }
-                    if (logEntities.Count == 0 || this.channel.Reader.TryPeek(out _))
-                    else Thread.Sleep(1);
+                    if (logEntities.Count == 0)
+                        await Task.Delay(1);
                 }
                 catch (Exception ex)
                 {
