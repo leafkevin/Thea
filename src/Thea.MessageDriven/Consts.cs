@@ -19,7 +19,8 @@ class Consts
     public const string RpcFailure = "RpcFailure";
     public const string Heartbeat = "Heartbeat";
     public const string ChangeConsumers = "ChangeConsumers";
-    public const string SendShutdownMessages = "SendShutdownMessages";
+    public const string DrainCompleted = "DrainCompleted";
     public const string Shutdown = "Shutdown";
+    public const string CloseConsumers = "CloseConsumers";
     public const string Logs = "Logs";
 }

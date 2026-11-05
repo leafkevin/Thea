@@ -14,19 +14,18 @@ namespace Thea.MessageDriven;
 
 class RabbitProducer
 {
-    //private Task task;
     private readonly MessageDrivenService parent;
     private readonly ConnectionFactory factory;
     private IConnection connection;
-    //private Channel<Message> messageQueue;
-    private CancellationTokenSource stoppingToken = new();
     private readonly BlockingCollection<IChannel> channelQueue;
     private readonly ILogger<RabbitProducer> logger;
-    //private volatile Dictionary<string, Binding> statefulBindings;
+    private readonly SemaphoreSlim lifecycleSemaphore = new(1, 1);
+    private readonly TaskCompletionSource<bool> recycleWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    //0:正在运行，1:正在关闭中，2:已完成关闭
-    private int state;
     private int channelSize;
+    //0:运行中, 1:关闭中, 2:已关闭
+    private int state;
+    private int workers;
     public string ConnectionId { get; private set; }
 
     public RabbitProducer(MessageDrivenService parent, IServiceProvider serviceProvider, int channelSize = 20)
@@ -52,12 +51,6 @@ class RabbitProducer
                 { "client_api", "Thea.MessageDriven" }
             }
         };
-        //this.messageQueue = Channel.CreateBounded<Message>(new BoundedChannelOptions(5000)
-        //{
-        //    FullMode = BoundedChannelFullMode.Wait,
-        //    SingleWriter = false,
-        //    SingleReader = true
-        //});
         this.channelQueue = new(channelSize);
         this.logger = serviceProvider.GetService<ILogger<RabbitProducer>>();
     }
@@ -80,128 +73,21 @@ class RabbitProducer
             throw;
         }
     }
-    //public async Task StartLoopAsync()
-    //{
-    //    this.task = Task.Run(async () =>
-    //    {
-    //        while (!this.stoppingToken.IsCancellationRequested || this.messageQueue.Reader.TryPeek(out _))
-    //        {
-    //            Message message = null;
-    //            BasicProperties properties = null;
-    //            try
-    //            {
-    //                for (int i = 0; i < 10; i++)
-    //                {
-    //                    if (!this.messageQueue.Reader.TryRead(out message))
-    //                        break;
-    //                    try
-    //                    {
-    //                        switch (message.Type)
-    //                        {
-    //                            case Consts.UserMessage:
-    //                            case Consts.RpcMessage:
-    //                                properties = new BasicProperties
-    //                                {
-    //                                    Persistent = true,
-    //                                    Type = message.Type,
-    //                                    DeliveryMode = DeliveryModes.Persistent,
-    //                                    AppId = this.parent.AppId,
-    //                                    MessageId = message.MessageId,
-    //                                    Headers = new Dictionary<string, object> { { "TraceId", message.TraceId } }
-    //                                };
-    //                                if (message.ScheduleTimeUtc.HasValue)
-    //                                {
-    //                                    var delayMilliseconds = (long)message.ScheduleTimeUtc.Value.Subtract(DateTime.UtcNow).TotalMilliseconds;
-    //                                    properties.Headers.Add("x-delay", delayMilliseconds);
-    //                                }
-    //                                if (message.Type == Consts.RpcMessage)
-    //                                {
-    //                                    //RPC消息，设置回复队列和过期时间
-    //                                    properties.ReplyTo = message.ReplyTo;
-    //                                    properties.CorrelationId = message.MessageId;
-    //                                }
-    //                                var jsonMessage = message.Body.ToString();
-    //                                if (this.statefulBindings.TryGetValue(message.Exchange, out var myBinding))
-    //                                {
-    //                                    if (myBinding.AppId == this.parent.AppId)
-    //                                    {
-    //                                        //如果存在有状态队列，根据消息的RoutingKey进行一致性哈希，路由到对应的队列中
-    //                                        var routingKey = JumpConsistentHash.GetBucket(message.RoutingKey, myBinding.WorkloadTotal);
-    //                                        await this.PublishAsync(message.Exchange, routingKey.ToString(), properties, jsonMessage);
-    //                                    }
-    //                                    else
-    //                                    {
-    //                                        //如果队列消费者是其他应用的，发到转发队列中
-    //                                        properties.Headers.Add("Exchange", message.Exchange);
-    //                                        properties.Headers.Add("RoutingKey", message.RoutingKey);
-    //                                        var transferQueue = $"{Consts.TransferExchange}.{myBinding.AppId}";
-    //                                        await this.PublishAsync(Consts.DefaultExchange, transferQueue, properties, jsonMessage);
-    //                                    }
-    //                                }
-    //                                //如果是无状态队列的消息，直接发送交换机
-    //                                else await this.PublishAsync(message.Exchange, message.RoutingKey, properties, jsonMessage);
-    //                                message.Waiter?.TrySetResult(true);
-    //                                break;
-    //                            case Consts.SendShutdownMessages:
-    //                                //TODO: 发送关闭消息给消费者
-
-    //                                break;
-    //                            case Consts.ChangeConsumers:
-    //                                this.statefulBindings = message.Body as Dictionary<string, Binding>;
-    //                                break;
-    //                            case Consts.Shutdown:
-    //                                Interlocked.Exchange(ref this.state, 2);
-    //                                message.Waiter.TrySetResult(true);
-    //                                break;
-    //                        }
-    //                    }
-    //                    catch (Exception ex)
-    //                    {
-    //                        if (message.Type == Consts.UserMessage || message.Type == Consts.RpcMessage)
-    //                        {
-    //                            message.RetryTimes++;
-    //                            if (message.RetryTimes > 3)
-    //                            {
-    //                                var exception = ex.InnerException ?? ex;
-    //                                var errMessage = $"发送消息失败，RetryTimes: {message.RetryTimes - 1}，Message: {message.ToJson()}";
-    //                                this.logger.LogTagError("MessageDriven", exception, errMessage);
-    //                                message.Waiter?.TrySetException(new Exception(errMessage, exception));
-    //                            }
-    //                            else if (!this.messageQueue.Writer.TryWrite(message))
-    //                            {
-    //                                var retryException = new InvalidOperationException("消息发送失败且内部Channel已关闭，无法重新入队。", ex);
-    //                                message.Waiter?.TrySetException(retryException);
-    //                                this.logger.LogTagError("MessageDriven", retryException, $"Message: {message.ToJson()}");
-    //                            }
-    //                        }
-    //                    }
-    //                }
-    //                if (!this.messageQueue.Reader.TryPeek(out _))
-    //                    await Task.Delay(1);
-    //            }
-    //            catch (Exception ex)
-    //            {
-    //                var exception = ex.InnerException ?? ex;
-    //                this.logger.LogTagError("MessageDriven", exception, $"ExecuteAsync is failled");
-    //            }
-    //        }
-    //    }, this.stoppingToken.Token);
-    //}
     public async Task CreateExchange(string exchangeName, string bindType, bool isDelay = false)
     {
-        await this.TryTo($"CreateExchange失败，exchange: {exchangeName}，bindType：{bindType}，isDelay：{isDelay}", async (channel, cancellationToken) =>
+        await this.TryTo($"CreateExchange失败，exchange: {exchangeName}，bindType：{bindType}，isDelay：{isDelay}", async channel =>
         {
             Dictionary<string, object> arguments = null;
             if (isDelay) arguments = new Dictionary<string, object> { { "x-delayed-type", "topic" } };
-            await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments, cancellationToken: cancellationToken);
+            await channel.ExchangeDeclareAsync(exchangeName, bindType, true, false, arguments);
         });
     }
     public async Task CreateQueue(string queueName, bool isQuorumQueue, bool isSingleActiveConsumer, bool isExclusive)
     {
-        await this.TryTo($"CreateQueue失败，queueName: {queueName}，isQuorumQueue：{isQuorumQueue}，isSingleActiveConsumer：{isSingleActiveConsumer}，isExclusive：{isExclusive}", async (channel, cancellationToken) =>
+        await this.TryTo($"CreateQueue失败，queueName: {queueName}，isQuorumQueue：{isQuorumQueue}，isSingleActiveConsumer：{isSingleActiveConsumer}，isExclusive：{isExclusive}", async channel =>
         {
             IDictionary<string, object> arguments = null;
-            if (isExclusive) await channel.QueueDeclareAsync(queueName, false, true, false, cancellationToken: cancellationToken);
+            if (isExclusive) await channel.QueueDeclareAsync(queueName, false, true, false);
             else
             {
                 if (isSingleActiveConsumer || isQuorumQueue) arguments = new Dictionary<string, object>();
@@ -209,83 +95,91 @@ class RabbitProducer
                     if (isSingleActiveConsumer) arguments.Add("x-single-active-consumer", true);
                     if (isQuorumQueue) arguments.Add("x-queue-type", "quorum");
                 }
-                await channel.QueueDeclareAsync(queueName, true, false, false, arguments, cancellationToken: cancellationToken);
+                await channel.QueueDeclareAsync(queueName, true, false, false, arguments);
             }
         });
     }
     public async Task BindExchange(string fromExchange, string toExchange, string routingKey)
     {
-        await this.TryTo($"BindExchange失败，fromExchange: {fromExchange}，toExchange：{toExchange}，routingKey：{routingKey}", async (channel, cancellationToken) =>
+        await this.TryTo($"BindExchange失败，fromExchange: {fromExchange}，toExchange：{toExchange}，routingKey：{routingKey}", async channel =>
         {
-            await channel.ExchangeBindAsync(toExchange, fromExchange, routingKey, cancellationToken: cancellationToken);
+            await channel.ExchangeBindAsync(toExchange, fromExchange, routingKey);
         });
     }
     public async Task BindQueue(string exchange, string queueName, string routingKey)
     {
-        await this.TryTo($"BindQueue失败，exchange: {exchange}，queueName：{queueName}，routingKey：{routingKey}", async (channel, cancellationToken) =>
+        await this.TryTo($"BindQueue失败，exchange: {exchange}，queueName：{queueName}，routingKey：{routingKey}", async channel =>
         {
-            await channel.QueueBindAsync(queueName, exchange, routingKey, cancellationToken: cancellationToken);
+            await channel.QueueBindAsync(queueName, exchange, routingKey);
         });
     }
     public async Task RemoveQueue(string queueName)
     {
-        await this.TryTo($"RemoveQueue失败，queueName: {queueName}", async (channel, cancellationToken) =>
+        await this.TryTo($"RemoveQueue失败，queueName: {queueName}", async channel =>
         {
-            await channel.QueueDeleteAsync(queueName, cancellationToken: cancellationToken);
+            await channel.QueueDeleteAsync(queueName);
         });
     }
-    //public async Task TryPublishAsync(Message message)
-    //    => await this.messageQueue.Writer.WriteAsync(message);
     public async Task PublishAsync(string exchange, string routingKey, BasicProperties properties, string message)
     {
-        await this.TryTo($"发送消息异常，Message: {message}", async (channel, cancellationToken) =>
+        await this.TryTo($"发送消息异常，Message: {message}", async channel =>
         {
             var body = Encoding.UTF8.GetBytes(message);
-            await channel.BasicPublishAsync(exchange, routingKey, true, properties, body, cancellationToken);
+            await channel.BasicPublishAsync(exchange, routingKey, true, properties, body);
         });
     }
     public async Task ShutdownAsync()
     {
-        if (Interlocked.Exchange(ref this.state, 1) >= 1)
-            return;
+        Task waiterTask;
+        await this.lifecycleSemaphore.WaitAsync();
         try
         {
-            //发送关闭生产者标志
-            //var shutdownMessage = new Message
-            //{
-            //    Type = Consts.Shutdown,
-            //    Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
-            //};
-            //await this.messageQueue.Writer.WriteAsync(shutdownMessage);
-            //await shutdownMessage.Waiter.Task;
-            //this.stoppingToken.Cancel();
-            //this.messageQueue.Writer.TryComplete();
+            if (Interlocked.CompareExchange(ref this.state, 1, 0) > 0)
+                return;
+            waiterTask = Volatile.Read(ref this.workers) == 0 ?
+                Task.CompletedTask : this.recycleWaiter.Task;
+        }
+        finally
+        {
+            this.lifecycleSemaphore.Release();
+        }
+
+        try
+        {
+            await waiterTask;
             while (this.channelQueue.TryTake(out var rabbitChannel))
                 await rabbitChannel.DisposeAsync();
             if (this.connection != null)
                 await this.connection.DisposeAsync();
             this.connection = null;
-            this.stoppingToken.Dispose();
-            this.channelQueue.Dispose(); 
+            this.channelQueue.Dispose();
         }
         catch (Exception ex)
         {
             this.logger.LogTagError("RabbitProducer", ex, $"ShutdownAsync，关闭RabbitMQ生产者失败, ConnectionId: {this.ConnectionId}");
             Console.WriteLine($"ShutdownAsync，关闭RabbitMQ生产者失败, ConnectionId: {this.ConnectionId}, Exception: {ex}");
         }
+        finally
+        {
+            Interlocked.Exchange(ref this.state, 2);
+        }
     }
-    private async Task TryTo(string errMessage, Func<IChannel, CancellationToken, Task> work)
+    private async Task TryTo(string errMessage, Func<IChannel, Task> work)
     {
-        if (this.stoppingToken == null || this.stoppingToken.IsCancellationRequested)
-            return;
-        if (Volatile.Read(ref this.state) == 2)
-            return;
-
+        await this.EnterAsync();
         IChannel rabbitChannel = null;
         try
         {
-            rabbitChannel = this.channelQueue.Take();
-            await work.Invoke(rabbitChannel, this.stoppingToken.Token);
+            using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                rabbitChannel = this.channelQueue.Take(timeoutSource.Token);
+            }
+            catch (OperationCanceledException ex) when (timeoutSource.IsCancellationRequested)
+            {
+                throw new TimeoutException($"获取RabbitMQ生产Channel超时，ConnectionId: {this.ConnectionId}, Timeout: 30s", ex);
+            }
+            await work.Invoke(rabbitChannel);
         }
         catch (Exception ex)
         {
@@ -293,18 +187,56 @@ class RabbitProducer
             Console.WriteLine($"{errMessage}, ConnectionId: {this.ConnectionId}, Exception: {ex}");
             try
             {
-                await rabbitChannel.DisposeAsync();
-                rabbitChannel = await this.connection.CreateChannelAsync();
+                if (rabbitChannel != null)
+                    await rabbitChannel.DisposeAsync();
+                rabbitChannel = null;
+                //关闭流程会等待所有已准入操作完成，期间仍需补回Channel，
+                //否则已经准入但正在等待Channel的操作可能永久阻塞。
+                if (Volatile.Read(ref this.state) < 2 && this.connection?.IsOpen == true)
+                    rabbitChannel = await this.connection.CreateChannelAsync();
             }
-            catch (Exception myEx)
+            catch (Exception rebuildException)
             {
-                this.logger.LogTagError("RabbitProducer", myEx, $"TryTo，重建Channel失败，{errMessage}, ConnectionId: {this.ConnectionId}");
-                Console.WriteLine($"TryTo，重建Channel失败，{errMessage}, ConnectionId: {this.ConnectionId}, Exception: {myEx}");
+                this.logger.LogTagError("RabbitProducer", rebuildException, $"TryTo，重建Channel失败，{errMessage}, ConnectionId: {this.ConnectionId}");
+                Console.WriteLine($"TryTo，重建Channel失败，{errMessage}, ConnectionId: {this.ConnectionId}, Exception: {rebuildException}");
             }
+            throw;
         }
         finally
         {
-            this.channelQueue.Add(rabbitChannel);
+            try
+            {
+                if (rabbitChannel != null)
+                {
+                    if (Volatile.Read(ref this.state) < 2 && rabbitChannel.IsOpen)
+                        this.channelQueue.Add(rabbitChannel);
+                    else await rabbitChannel.DisposeAsync();
+                }
+            }
+            finally
+            {
+                await this.ExitAsync();
+            }
+        }
+    }
+    private async Task EnterAsync()
+    {
+        await this.lifecycleSemaphore.WaitAsync();
+        Interlocked.Increment(ref this.workers);
+        this.lifecycleSemaphore.Release();
+    }
+    private async Task ExitAsync()
+    {
+        await this.lifecycleSemaphore.WaitAsync();
+        try
+        {
+            var currentWorkers = Interlocked.Decrement(ref this.workers);
+            if (this.state == 1 && currentWorkers == 0)
+                this.recycleWaiter.TrySetResult(true);
+        }
+        finally
+        {
+            this.lifecycleSemaphore.Release();
         }
     }
 }

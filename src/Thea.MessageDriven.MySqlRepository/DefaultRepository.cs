@@ -23,14 +23,14 @@ public class DefaultRepository : IMessageDrivenRepository
     }
     public virtual async Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true)
     {
-        var cacheKey = "thea.queue.all1";
+        var cacheKey = "thea.queue.all";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
         var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
             return await repository.QueryAsync<Queue>();
         });
-        cacheKey = "thea.binding.all1";
+        cacheKey = "thea.binding.all";
         if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
         var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
         {

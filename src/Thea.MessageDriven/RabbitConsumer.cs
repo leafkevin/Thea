@@ -6,7 +6,6 @@ using RabbitMQ.Client.Events;
 using RabbitMQ.Client.Exceptions;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -19,7 +18,9 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
+    private readonly SemaphoreSlim semaphore = new(1, 1);
     private int workers = 0;
+    private int isDrainCompleted = 0;
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
     private readonly Dictionary<string, Func<string, Task<string>>> exchangeHandlers;
@@ -28,14 +29,12 @@ class RabbitConsumer
     private IChannel channel;
     private AsyncEventingBasicConsumer consumer;
     private string consumerTag;
-    //0:未启动, 1:运行中, 2:关闭中, 3:延迟关闭
+    //0:未启动, 1:运行中, 2:关闭中, 3:排空中，4:已关闭
     private int state = 0;
     private CancellationTokenSource cancellationSource = null;
-    private TaskCompletionSource<bool> shutdownSource;
+    private TaskCompletionSource<bool> workersWaiter;
 
     private DispatchInfo dispatchInfo;
-    //是否等待所有消息处理完再关闭消费者，true:等待, false:不等待
-    private volatile bool isWaitForClearMessages;
     public volatile int PrefetchCount;
     public volatile bool IsLogEnabled;
 
@@ -44,7 +43,8 @@ class RabbitConsumer
     public int QueueIndex => this.dispatchInfo.QueueIndex;
     public string QueueName => this.dispatchInfo.QueueName;
     public string ConsumerId { get; private set; }
-    public bool IsActivated => (this.connection?.IsOpen ?? false) && (this.channel?.IsOpen ?? false) && (this.consumer?.IsRunning ?? false);
+    public bool IsActivated => Volatile.Read(ref this.state) == 1 && (this.connection?.IsOpen ?? false)
+        && (this.channel?.IsOpen ?? false) && (this.consumer?.IsRunning ?? false);
 
     public RabbitConsumer(DispatchInfo dispatchInfo, MessageDrivenService parent, IServiceProvider serviceProvider, int prefetchCount = 250, Dictionary<string, MethodInfo> exchangeMethodInfos = null)
     {
@@ -88,15 +88,21 @@ class RabbitConsumer
         if (this.IsActivated) return;
         try
         {
+            var workerCount = Volatile.Read(ref this.workers);
+            if (workerCount != 0)
+                throw new InvalidOperationException($"消费者启动失败，仍有{workerCount}个Worker未结束，ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+
+            Interlocked.Exchange(ref this.isDrainCompleted, 0);
+            Interlocked.Exchange(ref this.workers, 0);
             this.cancellationSource = new();
-            this.shutdownSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            this.workersWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
             this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
             this.channel = await this.connection.CreateChannelAsync();
             await this.channel.BasicQosAsync(0, (ushort)this.PrefetchCount, false);
             switch (this.queueType)
             {
                 case QueueType.Heartbeat:
-                    await this.channel.QueueDeclareAsync(this.QueueName, false, true, false);
+                    await this.channel.QueueDeclareAsync(this.QueueName, true, true, false);
                     await this.channel.QueueBindAsync(this.QueueName, Consts.HeartbeatExchange, this.parent.AppId);
                     await this.BindHeartbeatHandler();
                     break;
@@ -116,33 +122,40 @@ class RabbitConsumer
             throw;
         }
     }
-    public async Task ShutdownAsync(bool isWaitForClearMessages = false)
+    public async Task ShutdownAsync(bool isScalingDown = false)
     {
-        if (Interlocked.Exchange(ref this.state, 2) > 1)
-            return;
+        var targetState = isScalingDown ? 3 : 2;
+        Task waiterTask = null;
+        await this.semaphore.WaitAsync();
+        try
+        {
+            var originalState = Interlocked.CompareExchange(ref this.state, targetState, 1);
+            if (originalState is 2 or 4) return;
+            if (originalState == 1 && this.queueType == QueueType.Message && isScalingDown)
+                return;
 
-        //先关闭用户消息消费者，再关闭RPC结果消费者，RPC结果消费者消费完当前消息就可以关闭
-        //最后关闭转发和心跳消费者，不再处理用户消息，这两个消费者随时可以关闭
-        this.isWaitForClearMessages = isWaitForClearMessages;
-        if (this.queueType == QueueType.Message && isWaitForClearMessages)
-        {
-            await this.parent.ProcessMessage(new Message
-            {
-                MessageId = ObjectId.NewId(),
-                Type = Consts.SendShutdownMessages,
-                Body = this.QueueName
-            });
+            waiterTask = Volatile.Read(ref this.workers) > 0
+                ? this.workersWaiter.Task : Task.CompletedTask;
         }
-        //等待结束信号或临时结束信号
-        if (Interlocked.Increment(ref this.workers) > 1)
-            await this.shutdownSource.Task;
-        else await this.ShutdownCoreAsync();
-        if (!isWaitForClearMessages)
+        finally { this.semaphore.Release(); }
+        try
         {
+            //先停止投递
+            if (this.channel?.IsOpen == true && !string.IsNullOrEmpty(this.consumerTag))
+                await this.channel.BasicCancelAsync(this.consumerTag);
+
+            //等待正在处理的回调完成
+            await waiterTask.WaitAsync(TimeSpan.FromSeconds(30));
+
+            //释放资源
             await this.DisposeAsync();
-            Interlocked.Exchange(ref this.state, 0);
+            Interlocked.Exchange(ref this.state, 4);
         }
-        Interlocked.Decrement(ref this.workers);
+        catch
+        {
+            Interlocked.CompareExchange(ref this.state, 1, targetState);
+            throw;
+        }
     }
     public async Task<uint> MessageCount()
     {
@@ -160,18 +173,6 @@ class RabbitConsumer
         {
             return 0;
         }
-    }
-    private async Task ShutdownCoreAsync()
-    {
-        if (this.IsActivated)
-            await this.channel.BasicCancelAsync(this.consumerTag);
-        this.cancellationSource?.Cancel();
-        if (this.isWaitForClearMessages)
-        {
-            await this.DisposeAsync();
-            Interlocked.Exchange(ref this.state, 0);
-        }
-        else this.shutdownSource?.TrySetResult(true);
     }
     private async Task DisposeAsync()
     {
@@ -205,6 +206,7 @@ class RabbitConsumer
         this.cancellationSource = null;
         this.consumer = null;
         this.consumerTag = null;
+        this.workersWaiter = null;
     }
     private async Task SafeNack(IChannel rabbitChannel, ulong deliveryTag)
     {
@@ -224,13 +226,18 @@ class RabbitConsumer
         //用户消息队列
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            Interlocked.Increment(ref this.workers);
+            if (!await this.TryEnterAsync())
+            {
+                await this.SafeNack(this.channel, ea.DeliveryTag);
+                return;
+            }
 
             IDisposable scopeObj = null;
             string traceId = null;
             string jsonBody = null;
             var messageId = ea.BasicProperties.MessageId;
             var messageType = ea.BasicProperties.Type;
+            var isDrainMessage = messageType == Consts.DrainCompleted;
             try
             {
                 //消费者关闭过程中收到的在途投递不再处理，Channel关闭后由RabbitMQ重新入队
@@ -337,27 +344,10 @@ class RabbitConsumer
                                 throw exception;
                         }
                         break;
-                    case Consts.Shutdown:
-                        if (Volatile.Read(ref this.state) >= 2)
-                        {
-                            await this.channel.BasicAckAsync(ea.DeliveryTag, false);
-                            await this.ShutdownCoreAsync();
-                            return;
-                        }
-                        break;
                 }
                 await this.channel.BasicAckAsync(ea.DeliveryTag, false);
-                Interlocked.Decrement(ref this.workers);
-                if (Volatile.Read(ref this.state) == 2)
-                {
-                    if (this.isWaitForClearMessages)
-                    {
-                        //临时关闭，先让主服务继续处理其他消费者的关闭，当前消费者自己延迟关闭
-                        this.shutdownSource.TrySetResult(true);
-                        Interlocked.Exchange(ref this.state, 3);
-                    }
-                    else await this.ShutdownCoreAsync();
-                }
+                if (isDrainMessage)
+                    Interlocked.Exchange(ref this.isDrainCompleted, 1);
             }
             catch (Exception ex)
             {
@@ -378,6 +368,7 @@ class RabbitConsumer
             finally
             {
                 scopeObj?.Dispose();
+                await this.ExitAsync();
             }
         };
         this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
@@ -387,26 +378,24 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            Interlocked.Increment(ref this.workers);
             try
             {
                 if (this.cancellationSource.IsCancellationRequested)
                     return;
 
-                var serviceId = Encoding.UTF8.GetString(ea.Body.Span);
+                var body = Encoding.UTF8.GetString(ea.Body.Span);
                 if (ea.BasicProperties.AppId == this.parent.AppId)
                 {
                     await this.parent.ProcessMessage(new Message
                     {
                         MessageId = ea.BasicProperties.MessageId,
+                        //Heartbeat/ChangeConsumers/CloseConsumers三种消息类型
                         Type = ea.BasicProperties.Type,
-                        Body = serviceId
+                        //服务ID或是队列名称
+                        Body = body
                     });
                 }
                 await this.channel.BasicAckAsync(ea.DeliveryTag, false);
-                Interlocked.Decrement(ref this.workers);
-                if (Volatile.Read(ref this.state) == 2)
-                    await this.ShutdownCoreAsync();
             }
             catch (Exception ex)
             {
@@ -421,7 +410,6 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            Interlocked.Increment(ref this.workers);
             try
             {
                 if (this.cancellationSource.IsCancellationRequested)
@@ -435,9 +423,6 @@ class RabbitConsumer
                     Body = result
                 });
                 await this.channel.BasicAckAsync(ea.DeliveryTag, false);
-                Interlocked.Decrement(ref this.workers);
-                if (Volatile.Read(ref this.state) == 2)
-                    await this.ShutdownCoreAsync();
             }
             catch (Exception ex)
             {
@@ -452,7 +437,11 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            Interlocked.Increment(ref this.workers);
+            if (!await this.TryEnterAsync())
+            {
+                await this.SafeNack(this.channel, ea.DeliveryTag);
+                return;
+            }
             try
             {
                 if (this.cancellationSource.IsCancellationRequested)
@@ -479,14 +468,15 @@ class RabbitConsumer
                     Body = jsonBody
                 });
                 await this.channel.BasicAckAsync(ea.DeliveryTag, false);
-                Interlocked.Decrement(ref this.workers);
-                if (Volatile.Read(ref this.state) == 2)
-                    await this.ShutdownCoreAsync();
             }
             catch (Exception ex)
             {
                 this.logger.LogTagError("RabbitConsumer", ex, "转发消息失败");
                 await this.SafeNack(this.channel, ea.DeliveryTag);
+            }
+            finally
+            {
+                await this.ExitAsync();
             }
         };
         this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
@@ -539,5 +529,56 @@ class RabbitConsumer
             }
         }
         return consumerHandler;
+    }
+    private async Task<bool> TryEnterAsync()
+    {
+        await this.semaphore.WaitAsync();
+        try
+        {
+            var currentState = Volatile.Read(ref this.state);
+            if (currentState is 2 or 4) return false;
+            Interlocked.Increment(ref this.workers);
+            return true;
+        }
+        finally
+        {
+            this.semaphore.Release();
+        }
+    }
+    private async Task ExitAsync()
+    {
+        var isNotifyCloseConsumers = false;
+        await this.semaphore.WaitAsync();
+        try
+        {
+            var currentWorkers = Interlocked.Decrement(ref this.workers);
+            if (currentWorkers > 0) return;
+            var currentState = Volatile.Read(ref this.state);
+            if (currentState == 2) this.workersWaiter.TrySetResult(true);
+            //缩容队列消费者，已经收到消息排空消息，向主控协调器发送关闭所有消费者通知
+            else if (currentState == 3 && Volatile.Read(ref this.isDrainCompleted) == 1)
+                isNotifyCloseConsumers = true;
+        }
+        finally
+        {
+            this.semaphore.Release();
+        }
+        if (!isNotifyCloseConsumers) return;
+
+        //锁外执行网络调用和消费者组关闭，避免ProcessMessage回调ShutdownAsync时重入semaphore造成死锁
+        await this.parent.rabbitProducer.PublishAsync(Consts.HeartbeatExchange, this.parent.AppId, new BasicProperties
+        {
+            Persistent = true,
+            Type = Consts.CloseConsumers,
+            DeliveryMode = DeliveryModes.Persistent,
+            AppId = this.parent.AppId,
+            MessageId = ObjectId.NewId()
+        }, this.QueueName);
+        await this.parent.ProcessMessage(new Message
+        {
+            MessageId = ObjectId.NewId(),
+            Type = Consts.CloseConsumers,
+            Body = this.QueueName
+        });
     }
 }
