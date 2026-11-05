@@ -19,7 +19,7 @@ public class TheaLoggerProcessor : ILoggerProcessor
     private readonly CancellationTokenSource stopTokenSource = new();
     private readonly Channel<LogEntity> channel = Channel.CreateBounded<LogEntity>(new BoundedChannelOptions(50000)
     {
-        FullMode = BoundedChannelFullMode.Wait,
+        FullMode = BoundedChannelFullMode.DropOldest,
         SingleWriter = false,
         SingleReader = true
     });
