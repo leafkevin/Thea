@@ -30,7 +30,6 @@ class RabbitConsumer
     private string consumerTag;
     //0:未启动, 1:运行中, 2:关闭中, 3:已关闭
     private int state = 0;
-    private CancellationTokenSource cancellationSource = null;
     private TaskCompletionSource<bool> workersWaiter;
 
     private DispatchInfo dispatchInfo;
@@ -93,7 +92,6 @@ class RabbitConsumer
                 throw new InvalidOperationException($"消费者启动失败，仍有{workerCount}个Worker未结束，ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
 
             Interlocked.Exchange(ref this.workers, 0);
-            this.cancellationSource = new();
             this.workersWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
             this.connection = await this.factory.CreateConnectionAsync(this.parent.tcpEndPoints, this.ConsumerId);
             this.channel = await this.connection.CreateChannelAsync();
@@ -134,10 +132,6 @@ class RabbitConsumer
         finally { this.semaphore.Release(); }
         try
         {
-            //先停止投递
-            if (this.channel?.IsOpen == true && !string.IsNullOrEmpty(this.consumerTag))
-                await this.channel.BasicCancelAsync(this.consumerTag);
-
             //等待正在处理的回调完成
             await waiterTask.WaitAsync(TimeSpan.FromSeconds(30));
 
@@ -178,7 +172,6 @@ class RabbitConsumer
     }
     private async Task DisposeAsync()
     {
-        this.cancellationSource?.Cancel();
         if (this.channel != null)
         {
             try
@@ -201,11 +194,9 @@ class RabbitConsumer
                 this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Connection失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
             }
         }
-        this.cancellationSource?.Dispose();
 
         this.channel = null;
         this.connection = null;
-        this.cancellationSource = null;
         this.consumer = null;
         this.consumerTag = null;
         this.workersWaiter = null;
@@ -228,11 +219,8 @@ class RabbitConsumer
         //用户消息队列
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            if (!await this.TryEnterAsync())
-            {
-                await this.SafeNack(this.channel, ea.DeliveryTag);
+            if (!await this.TryEnterAsync(ea.DeliveryTag))
                 return;
-            }
 
             IDisposable scopeObj = null;
             string traceId = null;
@@ -241,9 +229,6 @@ class RabbitConsumer
             var messageType = ea.BasicProperties.Type;
             try
             {
-                //消费者关闭过程中收到的在途投递不再处理，Channel关闭后由RabbitMQ重新入队
-                if (this.cancellationSource.IsCancellationRequested)
-                    return;
                 var iLoop = 0;
                 Exception exception = null;
                 bool isSuccess = true;
@@ -379,9 +364,6 @@ class RabbitConsumer
         {
             try
             {
-                if (this.cancellationSource.IsCancellationRequested)
-                    return;
-
                 var body = Encoding.UTF8.GetString(ea.Body.Span);
                 if (ea.BasicProperties.AppId == this.parent.AppId)
                 {
@@ -411,8 +393,6 @@ class RabbitConsumer
         {
             try
             {
-                if (this.cancellationSource.IsCancellationRequested)
-                    return;
                 var result = Encoding.UTF8.GetString(ea.Body.Span);
                 //Console.WriteLine($"RpcResponse, MessageId: {message.MessageId}, ReplyTo:{ea.BasicProperties.ReplyTo}, RoutingKey:{ea.RoutingKey}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                 await this.parent.ProcessMessage(new Message
@@ -436,16 +416,10 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            if (!await this.TryEnterAsync())
-            {
-                await this.SafeNack(this.channel, ea.DeliveryTag);
+            if (!await this.TryEnterAsync(ea.DeliveryTag))
                 return;
-            }
             try
             {
-                if (this.cancellationSource.IsCancellationRequested)
-                    return;
-
                 var jsonBody = Encoding.UTF8.GetString(ea.Body.Span);
                 var headers = ea.BasicProperties.Headers;
                 string exchange = null, routingKey = null, traceId = null;
@@ -529,12 +503,17 @@ class RabbitConsumer
         }
         return consumerHandler;
     }
-    private async Task<bool> TryEnterAsync()
+    private async Task<bool> TryEnterAsync(ulong deliveryTag)
     {
         await this.semaphore.WaitAsync();
         try
         {
-            if (Volatile.Read(ref this.state) > 1) return false;
+            if (Volatile.Read(ref this.state) == 2)
+            {
+                await this.channel.BasicNackAsync(deliveryTag, false, true);
+                await this.channel.BasicCancelAsync(this.consumerTag);
+                return false;
+            }
             Interlocked.Increment(ref this.workers);
             return true;
         }
@@ -550,7 +529,10 @@ class RabbitConsumer
         {
             if (Interlocked.Decrement(ref this.workers) > 0) return;
             if (Volatile.Read(ref this.state) == 2)
+            {
+                await this.channel.BasicCancelAsync(this.consumerTag);
                 this.workersWaiter.TrySetResult(true);
+            }
         }
         finally
         {

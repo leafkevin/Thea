@@ -187,7 +187,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         {
             try
             {
-                if (DateTime.UtcNow.Subtract(this.lastInitedTime) > this.heartbeatCycle * 2)
+                if (DateTime.UtcNow.Subtract(this.lastInitedTime) > TimeSpan.FromSeconds(30))
                 {
                     //有消费者，按照消费者创建的生命周期初始化，否则就按照心跳时间周期初始化
                     await this.Initialize();
@@ -1088,7 +1088,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 }
                 if (hasMessages) continue;
 
-                if (DateTime.UtcNow.Subtract(timedConsumers.UpdatedAt) < this.heartbeatCycle * 4)
+                if (DateTime.UtcNow.Subtract(timedConsumers.UpdatedAt) < TimeSpan.FromMinutes(1))
                     continue;
                 foreach (var myConsumer in timedConsumers.Consumers)
                     await myConsumer.ShutdownAsync();

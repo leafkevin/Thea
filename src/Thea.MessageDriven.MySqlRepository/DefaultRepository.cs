@@ -11,6 +11,7 @@ namespace Thea.MessageDriven;
 public class DefaultRepository : IMessageDrivenRepository
 {
     private readonly string dbKey;
+    private readonly string cacheKey;
     private readonly IOrmDbFactory dbFactory;
     private readonly IDistributedCache redisCache;
 
@@ -19,28 +20,27 @@ public class DefaultRepository : IMessageDrivenRepository
         this.dbFactory = serviceProvider.GetService<IOrmDbFactory>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         this.dbKey = configuration.GetValue<string>("MessageDriven:DbKey");
+        this.cacheKey = configuration.GetValue<string>("MessageDriven:CacheKey");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
     public virtual async Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true)
     {
-        var cacheKey = "thea.queue.all";
-        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        var queues = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
+        if (!useCache) await this.redisCache.RemoveAsync(this.cacheKey);
+        var cacheValue = await this.redisCache.GetOrCreateAsync(this.cacheKey, async () =>
         {
             var repository = this.dbFactory.Create(this.dbKey);
-            return await repository.QueryAsync<Queue>();
+            using var reader = await repository.QueryMultipleAsync(t =>
+            {
+                t.Query<Queue>();
+                t.From<Binding, Queue>()
+                    .Where((a, b) => a.QueueId == b.QueueId)
+                    .SelectTo<Binding>().ToList();
+            });
+            var queues = await reader.ReadAsync<Queue>();
+            var bindings = await reader.ReadAsync<Binding>();
+            return new MessageDrivenCache { Queues = queues, Bindings = bindings };
         });
-        cacheKey = "thea.binding.all";
-        if (!useCache) await this.redisCache.RemoveAsync(cacheKey);
-        var bindings = await this.redisCache.GetOrCreateAsync(cacheKey, async () =>
-        {
-            var repository = this.dbFactory.Create(this.dbKey);
-            return await repository.From<Binding, Queue>()
-                .Where((a, b) => a.QueueId == b.QueueId)
-                .SelectTo<Binding>()
-                .ToListAsync();
-        });
-        return (queues, bindings);
+        return (cacheValue.Queues, cacheValue.Bindings);
     }
     public virtual async Task Register(List<Queue> queues, List<Binding> bindings)
     {
@@ -84,12 +84,16 @@ public class DefaultRepository : IMessageDrivenRepository
             })
             .Where(f => f.QueueId == myQueue.QueueId)
             .ExecuteAsync();
-        var cacheKey = "thea.queue.all";
-        await this.redisCache.RemoveAsync(cacheKey);
+        await this.redisCache.RemoveAsync(this.cacheKey);
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
     {
         var repository = this.dbFactory.Create(this.dbKey);
         await repository.CreateAsync<ExecLog>(logInfos);
+    }
+    class MessageDrivenCache
+    {
+        public List<Queue> Queues { get; set; }
+        public List<Binding> Bindings { get; set; }
     }
 }
