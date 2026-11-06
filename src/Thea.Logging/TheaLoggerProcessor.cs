@@ -117,10 +117,9 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
             LoggerHandlerDelegate app = null;
             if (first == null) app = context => Task.FromResult(true);
             else app = context => first(context);
-            this.components.Reverse();
-            foreach (var component in this.components)
+            for (var i = this.components.Count - 1; i >= 0; i--)
             {
-                app = component(app);
+                app = this.components[i](app);
             }
             this.next = app;
             this.CreatePusher();
