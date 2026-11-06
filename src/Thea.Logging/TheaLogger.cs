@@ -70,7 +70,7 @@ public class TheaLogger : ILogger
             var nowTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             logEntityInfo.Elapsed = (int)(nowTimestamp - logEntityInfo.LogTime);
         }
-        this.processor.ExecuteAsync(logEntityInfo).Wait();
+        this.processor.TryWrite(logEntityInfo);
     }
 
     public bool IsEnabled(LogLevel logLevel)

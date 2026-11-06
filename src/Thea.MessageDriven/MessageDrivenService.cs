@@ -37,8 +37,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
 
     private List<Binding> bindings = new();
     private List<Queue> queues = new();
-    private List<string> localQueueIds = null;
-    private List<string> localExchangeIds = null;
+    private List<string> localQueueIds;
+    private List<string> localExchangeIds;
     private List<ExchangeTransfer> exchangeTransfers = new();
 
     private RabbitConsumer heartbeatConsumer;
@@ -63,18 +63,20 @@ class MessageDrivenService : IMessageDriven, IHostedService
     internal List<AmqpTcpEndpoint> tcpEndPoints;
     public string AppId { get; private set; }
     public string ServiceId { get; private set; }
+    public string RpcQueue { get; private set; }
     internal bool IsEnabled { get; private set; }
 
     public MessageDrivenService(IServiceProvider serviceProvider)
     {
-        this.ServiceId = ObjectId.NewId();
-        this.serviceProvider = serviceProvider;
-        this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
-        this.AppId = configuration.GetValue<string>("AppId");
         this.IsEnabled = configuration.GetValue("MessageDriven:IsEnabled", true);
         if (!this.IsEnabled) return;
 
+        this.serviceProvider = serviceProvider;
+        this.ServiceId = ObjectId.NewId();
+        this.AppId = configuration.GetValue<string>("AppId");
+        this.RpcQueue = $"{Consts.RpcExchange}.{this.AppId}.{this.ServiceId}";
+        this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var endPoints = configuration.GetSection("MessageDriven:EndPoints").Get<string[]>();
         if (endPoints == null || endPoints.Length == 0)
             throw new Exception("未设置MessageDriven:EndPoints，无法初始化MessageDrivenService对象");
@@ -659,8 +661,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         this.isRpcConsumer = true;
         if (methodInfo != null)
         {
-            var queueName = $"{Consts.RpcExchange}.{this.AppId}.{this.ServiceId}";
-            var myConsumerHandler = this.consumerHandlers[queueName] = new();
+            var myConsumerHandler = this.consumerHandlers[this.RpcQueue] = new();
             myConsumerHandler[Consts.RpcExchange] = methodInfo;
         }
     }
@@ -736,7 +737,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         this.localQueueIds = this.queues.Select(f => f.QueueId).ToList();
         this.localExchangeIds = this.bindings.Select(f => f.ExchangeId).ToList();
         await this.repository.Register(this.queues, this.bindings);
-        (var dbQueues, var dbBindings) = await this.repository.GetSettings();
+        (var dbQueues, var dbBindings) = await this.repository.GetSettings(false);
         //根据本地配置，更新队列状态
 
         foreach (var myQueue in this.queues)

@@ -1,6 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Threading;
+using Microsoft.Extensions.Configuration;
 using System.Threading.Tasks;
 using Thea;
 using Thea.MessageDriven;
@@ -11,11 +10,13 @@ namespace WebAppTest.Controllers;
 [Route("[controller]/[action]")]
 public class SequenceController : ControllerBase
 {
+    private readonly string appId;
     private readonly IMessageDriven messageDriven;
 
-    public SequenceController(IMessageDriven messageDriven)
+    public SequenceController(IMessageDriven messageDriven, IConfiguration configuration)
     {
         this.messageDriven = messageDriven;
+        this.appId = configuration.GetValue<string>("AppId");
     }
     [HttpGet]
     public async Task<TheaResponse> Generate(string gameId)
@@ -27,7 +28,7 @@ public class SequenceController : ControllerBase
     public async Task<TheaResponse> GenerateSequences(int totalCount = 100000)
     {
         //int current = 0;
-        var queueName = this.messageDriven.RpcQueueName;
+        var queueName = this.messageDriven.RpcQueue;
         for (int i = 1; i <= totalCount; i++)
         {
             var messageId = $"{i}";

@@ -18,7 +18,7 @@ namespace Thea.MessageDriven;
 
 class RabbitConsumer
 {
-    private readonly SemaphoreSlim semaphore = new(1, 1);
+    private readonly SemaphoreSlim lifecycleLocker = new(1, 1);
     private int workers = 0;
     private readonly MessageDrivenService parent;
     private readonly ILogger<RabbitConsumer> logger;
@@ -28,7 +28,7 @@ class RabbitConsumer
     private IChannel channel;
     private AsyncEventingBasicConsumer consumer;
     private string consumerTag;
-    //0:未启动, 1:运行中, 2:关闭中, 3:已关闭
+    //0:未启动, 1:运行中, 2:关闭中
     private int state = 0;
     private TaskCompletionSource<bool> workersWaiter;
 
@@ -84,11 +84,18 @@ class RabbitConsumer
     }
     public async Task StartAsync()
     {
-        if (this.IsActivated) return;
+        await this.lifecycleLocker.WaitAsync();
+        int originalState = 0;
+        try
+        {
+            originalState = Interlocked.CompareExchange(ref this.state, 1, 0);
+            if (originalState != 0) return;
+        }
+        finally { this.lifecycleLocker.Release(); }
         try
         {
             var workerCount = Volatile.Read(ref this.workers);
-            if (workerCount != 0)
+            if (Volatile.Read(ref this.workers) != 0)
                 throw new InvalidOperationException($"消费者启动失败，仍有{workerCount}个Worker未结束，ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
 
             Interlocked.Exchange(ref this.workers, 0);
@@ -111,37 +118,48 @@ class RabbitConsumer
                     await this.BindRpcResultHandler();
                     break;
             }
-            Interlocked.Exchange(ref this.state, 1);
         }
         catch
         {
+            Interlocked.Exchange(ref this.state, originalState);
             await this.DisposeAsync();
             throw;
         }
     }
     public async Task ShutdownAsync()
     {
-        Task waiterTask = null;
-        await this.semaphore.WaitAsync();
+        Task workersTask = null;
+        await this.lifecycleLocker.WaitAsync();
         try
         {
-            if (Interlocked.Exchange(ref this.state, 2) > 1) return;
-            waiterTask = Volatile.Read(ref this.workers) > 0
+            if (Interlocked.CompareExchange(ref this.state, 2, 1) != 1) return;
+            workersTask = Volatile.Read(ref this.workers) > 0
                 ? this.workersWaiter.Task : Task.CompletedTask;
         }
-        finally { this.semaphore.Release(); }
+        finally { this.lifecycleLocker.Release(); }
         try
         {
+            using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            //先停止投递
+            if (this.channel?.IsOpen == true && !string.IsNullOrEmpty(this.consumerTag))
+                await this.channel.BasicCancelAsync(this.consumerTag, cancellationToken: timeoutSource.Token);
+
             //等待正在处理的回调完成
-            await waiterTask.WaitAsync(TimeSpan.FromSeconds(30));
+            await workersTask.WaitAsync(timeoutSource.Token);
 
             //释放资源
             await this.DisposeAsync();
-            Interlocked.Exchange(ref this.state, 3);
+            Interlocked.Exchange(ref this.state, 0);
         }
-        catch
+        catch (OperationCanceledException)
         {
-            Interlocked.Exchange(ref this.state, 1);
+            await this.DisposeAsync();
+            Interlocked.Exchange(ref this.state, 0);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogTagError("RabbitConsumer", ex, $"关闭消费者失败，QueueName: {this.QueueName}, ConsumerId: {this.ConsumerId}, Workers: {Volatile.Read(ref this.workers)}");
             throw;
         }
     }
@@ -172,34 +190,28 @@ class RabbitConsumer
     }
     private async Task DisposeAsync()
     {
-        if (this.channel != null)
+        try
         {
-            try
-            {
+            if (this.channel != null)
                 await this.channel.DisposeAsync();
-            }
-            catch (Exception ex)
-            {
-                this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Channel失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
-            }
         }
-        if (this.connection != null)
+        catch (Exception ex)
         {
-            try
-            {
-                await this.connection.DisposeAsync();
-            }
-            catch (Exception ex)
-            {
-                this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Connection失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
-            }
+            this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Channel失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
         }
-
+        try
+        {
+            if (this.connection != null)
+                await this.connection.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            this.logger.LogTagError("RabbitConsumer", ex, $"DisposeAsync，关闭Connection失败, ConsumerId: {this.ConsumerId}, QueueName: {this.QueueName}");
+        }
         this.channel = null;
         this.connection = null;
         this.consumer = null;
         this.consumerTag = null;
-        this.workersWaiter = null;
     }
     private async Task SafeNack(IChannel rabbitChannel, ulong deliveryTag)
     {
@@ -219,7 +231,7 @@ class RabbitConsumer
         //用户消息队列
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            if (!await this.TryEnterAsync(ea.DeliveryTag))
+            if (!await this.TryEnterAsync())
                 return;
 
             IDisposable scopeObj = null;
@@ -362,6 +374,9 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
+            if (!await this.TryEnterAsync())
+                return;
+
             try
             {
                 var body = Encoding.UTF8.GetString(ea.Body.Span);
@@ -383,6 +398,10 @@ class RabbitConsumer
                 this.logger.LogTagError("RabbitConsumer", ex, $"BindHeartbeatHandler，处理心跳消息失败, ConsumerId: {this.ConsumerId}");
                 await this.SafeNack(this.channel, ea.DeliveryTag);
             }
+            finally
+            {
+                await this.ExitAsync();
+            }
         };
         this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
@@ -391,6 +410,9 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
+            if (!await this.TryEnterAsync())
+                return;
+
             try
             {
                 var result = Encoding.UTF8.GetString(ea.Body.Span);
@@ -408,6 +430,10 @@ class RabbitConsumer
                 this.logger.LogTagError("RabbitConsumer", ex, $"BindRpcResultHandler，处理RPC结果失败, ConsumerId: {this.ConsumerId}");
                 await this.SafeNack(this.channel, ea.DeliveryTag);
             }
+            finally
+            {
+                await this.ExitAsync();
+            }
         };
         this.consumerTag = await this.channel.BasicConsumeAsync(this.QueueName, false, this.consumer);
     }
@@ -416,7 +442,7 @@ class RabbitConsumer
         this.consumer = new AsyncEventingBasicConsumer(this.channel);
         this.consumer.ReceivedAsync += async (model, ea) =>
         {
-            if (!await this.TryEnterAsync(ea.DeliveryTag))
+            if (!await this.TryEnterAsync())
                 return;
             try
             {
@@ -503,40 +529,36 @@ class RabbitConsumer
         }
         return consumerHandler;
     }
-    private async Task<bool> TryEnterAsync(ulong deliveryTag)
+    private async Task<bool> TryEnterAsync()
     {
-        await this.semaphore.WaitAsync();
+        await this.lifecycleLocker.WaitAsync();
         try
         {
-            if (Volatile.Read(ref this.state) == 2)
-            {
-                await this.channel.BasicNackAsync(deliveryTag, false, true);
-                await this.channel.BasicCancelAsync(this.consumerTag);
+            if (Volatile.Read(ref this.state) != 1)
                 return false;
-            }
             Interlocked.Increment(ref this.workers);
             return true;
         }
         finally
         {
-            this.semaphore.Release();
+            this.lifecycleLocker.Release();
         }
     }
     private async Task ExitAsync()
     {
-        await this.semaphore.WaitAsync();
+        await this.lifecycleLocker.WaitAsync();
         try
         {
-            if (Interlocked.Decrement(ref this.workers) > 0) return;
-            if (Volatile.Read(ref this.state) == 2)
-            {
-                await this.channel.BasicCancelAsync(this.consumerTag);
-                this.workersWaiter.TrySetResult(true);
-            }
+            var remainingWorkers = Interlocked.Decrement(ref this.workers);
+            if (remainingWorkers > 0) return;
+            if (remainingWorkers < 0)
+                throw new InvalidOperationException($"RabbitConsumer workers小于0，QueueName: {this.QueueName}, ConsumerId: {this.ConsumerId}");
+            if (Volatile.Read(ref this.state) is 0 or 2)
+                this.workersWaiter?.TrySetResult(true);
         }
         finally
         {
-            this.semaphore.Release();
+            this.lifecycleLocker.Release();
         }
     }
 }

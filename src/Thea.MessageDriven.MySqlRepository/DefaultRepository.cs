@@ -20,7 +20,7 @@ public class DefaultRepository : IMessageDrivenRepository
         this.dbFactory = serviceProvider.GetService<IOrmDbFactory>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         this.dbKey = configuration.GetValue<string>("MessageDriven:DbKey");
-        this.cacheKey = configuration.GetValue<string>("MessageDriven:CacheKey");
+        this.cacheKey = configuration.GetValue("MessageDriven:CacheKey", "thea.messageDriven.all");
         this.redisCache = serviceProvider.GetService<IDistributedCache>();
     }
     public virtual async Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true)
