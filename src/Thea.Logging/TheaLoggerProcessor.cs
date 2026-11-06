@@ -15,7 +15,7 @@ namespace Thea.Logging;
 public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
 {
     private int built;
-    private Task[] tasks;
+    private Task[] tasks = [];
     private LoggerHandlerDelegate next;
     private readonly CancellationTokenSource stopTokenSource = new();
     private Channel<LogEntity> writerChannel = null;
@@ -39,7 +39,7 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
         var pushThreads = configuration.GetValue("Logging:PushThreads", 1);
         this.batchCount = Math.Clamp(batchCount, 50, 200);
         this.pushThreads = Math.Clamp(pushThreads, 1, 5);
-        this.writerChannel = Channel.CreateBounded<LogEntity>(new BoundedChannelOptions(50000)
+        this.writerChannel = Channel.CreateBounded<LogEntity>(new BoundedChannelOptions(20000)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleWriter = false,
@@ -112,16 +112,24 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
     {
         if (Interlocked.Exchange(ref this.built, 1) == 1)
             return;
-        LoggerHandlerDelegate app = null;
-        if (first == null) app = context => Task.FromResult(true);
-        else app = context => first(context);
-        this.components.Reverse();
-        foreach (var component in this.components)
+        try
         {
-            app = component(app);
+            LoggerHandlerDelegate app = null;
+            if (first == null) app = context => Task.FromResult(true);
+            else app = context => first(context);
+            this.components.Reverse();
+            foreach (var component in this.components)
+            {
+                app = component(app);
+            }
+            this.next = app;
+            this.CreatePusher();
         }
-        this.next = app;
-        this.CreatePusher();
+        catch
+        {
+            Interlocked.Exchange(ref this.built, 0);
+            throw;
+        }
     }
     public async ValueTask DisposeAsync()
     {
@@ -133,9 +141,13 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
         this.writerChannel.Writer.TryComplete();
         this.pusherChannel?.Writer.TryComplete();
         this.stopTokenSource.Cancel();
-        try { await Task.WhenAll(tasks); }
-        catch (OperationCanceledException) { }
-        finally { this.stopTokenSource.Dispose(); }
+        if (this.tasks is { Length: > 0 })
+        {
+            try { await Task.WhenAll(tasks); }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { Console.WriteLine(ex.ToString()); }
+        }
+        this.stopTokenSource.Dispose();
     }
     private void CreateSingleWorker(int pushThreads, int batchCount)
     {
@@ -175,8 +187,11 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
                             finally { logEntities.Clear(); }
                         }
                         lastPushedTime = DateTime.UtcNow;
-                        if (this.writerChannel.Reader.Count == 0)
-                            await Task.Delay(1);
+                    }
+                    catch (OperationCanceledException)
+                        when (this.stopTokenSource.IsCancellationRequested)
+                    {
+                        break;
                     }
                     catch (Exception ex)
                     {
@@ -189,7 +204,7 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
     }
     private void CreateMultiWorkers(int pushThreads, int batchCount)
     {
-        var capacity = Math.Max(500 * 1024 / batchCount / 5, pushThreads * 20);
+        var capacity = Math.Max(200 * 1024 / batchCount / 5, pushThreads * 20);
         this.pusherChannel = Channel.CreateBounded<List<LogEntity>>(new BoundedChannelOptions(capacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -224,6 +239,11 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
                         await this.pusherChannel.Writer.WriteAsync(logEntities, this.stopTokenSource.Token);
                     lastReadTime = DateTime.UtcNow;
                 }
+                catch (OperationCanceledException)
+                    when (this.stopTokenSource.IsCancellationRequested)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
                     Console.WriteLine(ex.ToString());
@@ -234,17 +254,18 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
         {
             this.tasks[i] = Task.Run(async () =>
             {
-                try
+                while (!this.stopTokenSource.IsCancellationRequested)
                 {
-                    while (!this.stopTokenSource.IsCancellationRequested)
+                    try { await this.ExecuteAsync(); }
+                    catch (OperationCanceledException)
+                        when (this.stopTokenSource.IsCancellationRequested)
                     {
-                        if (!await this.ExecuteAsync())
-                            await Task.Delay(1);
+                        break;
                     }
-                }
-                catch (OperationCanceledException)
-                    when (this.stopTokenSource.IsCancellationRequested)
-                {
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(ex.ToString());
+                    }
                 }
             }, this.stopTokenSource.Token);
         }
@@ -268,20 +289,22 @@ public class TheaLoggerProcessor : ILoggerProcessor, IAsyncDisposable
         }
         return false;
     }
-    private async Task<bool> ExecuteAsync()
+    private async Task ExecuteAsync()
     {
-        if (!this.pusherChannel.Reader.TryRead(out var logEntities))
-            return false;
-        try
+        while (this.pusherChannel.Reader.TryRead(out var logEntities))
         {
-            await this.NextInvoke(logEntities);
-            await this.SendToAsync(logEntities);
+            try
+            {
+                await this.NextInvoke(logEntities);
+                await this.SendToAsync(logEntities);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+            }
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.ToString());
-        }
-        return true;
+        if (!await this.pusherChannel.Reader.WaitToReadAsync(this.stopTokenSource.Token))
+            return;
     }
     private async Task NextInvoke(List<LogEntity> logEntities)
     {
