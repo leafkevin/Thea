@@ -55,7 +55,7 @@ public static class Startup
         //内存缓存更新
         app.UseMessageDriven(f =>
         {
-            f.UseTrolleyRepository("default")
+            f.UseTrolleyRepository()
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
              .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
              .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward)

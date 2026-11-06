@@ -35,7 +35,7 @@ app.UseSwaggerUI();
 //}
 app.UseMessageDriven(f =>
 {
-    f.UseTrolleyRepository("default")
+    f.UseTrolleyRepository()
      .UseProducer().UseRpcConsumer();
 });
 app.UseAuthorization();
