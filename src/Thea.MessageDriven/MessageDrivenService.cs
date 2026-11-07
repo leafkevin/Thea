@@ -27,7 +27,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private readonly ConcurrentDictionary<string, TimedConsumers> shutdownConsumers = new();
     private readonly ConcurrentDictionary<string, DateTime> heartbeats = new();
     private readonly ConcurrentDictionary<string, RpcWaiter> rpcWaiters = new();
-    private Channel<Message> channel = null;
+    private Channel<Message> messageChannel = null;
+    private Channel<ExecLog> logsChannel = null;
     private bool isProducer = false;
     private bool hasConsumer = false;
     private bool isRpcConsumer = false;
@@ -113,7 +114,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 this.heartbeatTask = this.HeartbeatLoopAsync();
                 this.heartbeats[this.ServiceId] = DateTime.UtcNow;
             }
-            await this.Initialize();
+            await this.Initialize(false);
             this.lastInitedTime = DateTime.UtcNow;
             if (this.isProducer) this.producerTask = this.ProducerLoopAsync();
 
@@ -182,9 +183,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task ExecuteAsync()
     {
-        List<ExecLog> logs = null;
-        if (this.hasConsumer)
-            logs = new List<ExecLog>();
         while (!this.stopTokenSource.IsCancellationRequested)
         {
             try
@@ -192,22 +190,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 if (DateTime.UtcNow.Subtract(this.lastInitedTime) > TimeSpan.FromSeconds(30))
                 {
                     //有消费者，按照消费者创建的生命周期初始化，否则就按照心跳时间周期初始化
-                    await this.Initialize();
+                    await this.Initialize(true);
                     this.lastInitedTime = DateTime.UtcNow;
-                }
-                if (this.hasConsumer)
-                {
-                    if ((DateTime.UtcNow - this.lastLoggedTime > TimeSpan.FromSeconds(10) && logs.Count > 0) || logs.Count >= 100)
-                    {
-                        var myLogs = logs.Take(100).ToList();
-                        try { await this.repository.WriteLogs(myLogs).WaitAsync(this.stopTokenSource.Token); }
-                        catch (Exception ex) when (!this.stopTokenSource.Token.IsCancellationRequested)
-                        {
-                            Console.WriteLine($"MessageDriven写日志失败：{ex.Message}");
-                        }
-                        finally { logs.RemoveRange(0, myLogs.Count); }
-                        this.lastLoggedTime = DateTime.UtcNow;
-                    }
                 }
                 if (!this.rpcWaiters.IsEmpty && DateTime.UtcNow.Subtract(this.lastClearRpcTime).TotalSeconds > 5)
                 {
@@ -225,7 +209,37 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     }
                     this.lastClearRpcTime = DateTime.UtcNow;
                 }
-                await Task.Delay(1);
+                if (this.hasConsumer)
+                {
+                    var logs = new List<ExecLog>();
+                    while (logs.Count < 100)
+                    {
+                        if (DateTime.UtcNow.Subtract(this.lastLoggedTime) >= TimeSpan.FromSeconds(10)
+                            || DateTime.UtcNow.Subtract(this.lastInitedTime) > TimeSpan.FromSeconds(30)
+                            || !this.rpcWaiters.IsEmpty && DateTime.UtcNow.Subtract(this.lastClearRpcTime) > TimeSpan.FromSeconds(5))
+                            break;
+                        if (this.logsChannel.Reader.TryRead(out var log))
+                            logs.Add(log);
+                        else
+                        {
+                            var remaining = TimeSpan.FromSeconds(10).Subtract(DateTime.UtcNow.Subtract(this.lastLoggedTime))
+                                .Min(TimeSpan.FromSeconds(30).Subtract(DateTime.UtcNow.Subtract(this.lastInitedTime)))
+                                .Min(!this.rpcWaiters.IsEmpty, TimeSpan.FromSeconds(5) - DateTime.UtcNow.Subtract(this.lastClearRpcTime));
+                            if (remaining <= TimeSpan.Zero) break;
+                            if (!await this.ReadLog(logs, remaining))
+                                break;
+                        }
+                    }
+                    try { if (logs.Count > 0) await this.repository.WriteLogs(logs); }
+                    catch (Exception ex) { Console.WriteLine($"MessageDriven写日志失败：{ex.Message}"); }
+                    this.lastLoggedTime = DateTime.UtcNow;
+                }
+                else
+                {
+                    var remaining = TimeSpan.FromSeconds(30).Subtract(DateTime.UtcNow.Subtract(this.lastInitedTime))
+                        .Min(!this.rpcWaiters.IsEmpty, TimeSpan.FromSeconds(5) - DateTime.UtcNow.Subtract(this.lastClearRpcTime));
+                    await this.Delay(remaining);
+                }
             }
             catch (Exception ex)
             {
@@ -234,13 +248,33 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
     }
+    private async Task<bool> ReadLog(List<ExecLog> logs, TimeSpan timeout)
+    {
+        try
+        {
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(this.stopTokenSource.Token);
+            timeoutSource.CancelAfter(timeout);
+            if (await this.logsChannel.Reader.WaitToReadAsync(timeoutSource.Token)
+                && this.logsChannel.Reader.TryRead(out var log))
+            {
+                logs.Add(log);
+                return true;
+            }
+        }
+        catch (OperationCanceledException)
+            when (!this.stopTokenSource.IsCancellationRequested)
+        {
+            // flush timeout
+        }
+        return false;
+    }
     public async Task ProducerLoopAsync()
     {
         var statefulBindings = this.bindings.FindAll(f =>
             f.IsStateful).ToDictionary(f => f.ExchangeId, f => f);
         var transferQueues = this.queues.FindAll(f =>
             f.IsTransfer).ToDictionary(f => f.AppId, f => f);
-        while (!this.stopTokenSource.IsCancellationRequested || this.channel.Reader.TryPeek(out _))
+        while (!this.stopTokenSource.IsCancellationRequested || this.messageChannel.Reader.TryPeek(out _))
         {
             Message message = null;
             BasicProperties properties = null;
@@ -249,7 +283,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             {
                 for (int i = 0; i < 10; i++)
                 {
-                    if (!this.channel.Reader.TryRead(out message))
+                    if (!this.messageChannel.Reader.TryRead(out message))
                         break;
                     try
                     {
@@ -326,7 +360,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                             this.logger.LogTagError("MessageDriven", exception, errMessage);
                             message.Waiter?.TrySetException(new Exception(errMessage, exception));
                         }
-                        else if (!this.channel.Writer.TryWrite(message))
+                        else if (!this.messageChannel.Writer.TryWrite(message))
                         {
                             var retryException = new InvalidOperationException("消息发送失败且内部Channel已关闭，无法重新入队。", ex);
                             message.Waiter?.TrySetException(retryException);
@@ -334,7 +368,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                         }
                     }
                 }
-                if (!this.channel.Reader.TryPeek(out _))
+                if (!this.messageChannel.Reader.TryPeek(out _))
                     await Task.Delay(1);
             }
             catch (Exception ex)
@@ -365,9 +399,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 Type = Consts.Shutdown,
                 Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
             };
-            await this.channel.Writer.WriteAsync(stopMessage);
+            await this.messageChannel.Writer.WriteAsync(stopMessage);
             await stopMessage.Waiter.Task;
-            this.channel.Writer.TryComplete();
+            this.messageChannel.Writer.TryComplete();
         }
         await Task.WhenAll(new[] { this.mainTask, this.producerTask, this.heartbeatTask,
             this.rabbitProducer.ShutdownAsync()}.Where(task => task != null));
@@ -406,7 +440,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             RoutingKey = routingKey,
             Body = message.ToJson()
         };
-        await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
+        await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
     }
     public async Task PublishRpcAsync<TRequest>(string replyToQueue, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default)
     {
@@ -432,7 +466,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             RoutingKey = routingKey,
             Body = request.ToJson()
         };
-        await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
+        await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
     }
     public async Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest request, int timeoutSeconds = 30, CancellationToken cancellationToken = default)
     {
@@ -462,7 +496,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
         var exMessage = $"RPC请求超时, 耗时{timeoutSeconds}s, message: {request.ToJson()}, exchange: {exchange}, routingKey: {routingKey}";
         var rpcWaiter = new RpcWaiter { MessageId = theaMessage.MessageId, TimeoutSeconds = timeoutSeconds, TimeoutMessage = exMessage };
         this.rpcWaiters.TryAdd(theaMessage.MessageId, rpcWaiter);
-        await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
+        await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
         //Console.WriteLine($"RpcMessage,Request Message, MessageId: {theaMessage.MessageId}, From:{this.ServiceId}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
         var rpcMessage = await rpcWaiter.Waiter.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), exMessage, cancellationToken);
         this.rpcWaiters.TryRemove(theaMessage.MessageId, out _);
@@ -491,18 +525,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
             ScheduleTimeUtc = enqueueTimeUtc,
             Body = message.ToJson()
         };
-        await this.channel.Writer.WriteAsync(theaMessage, cancellationToken);
+        await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
     }
-    public void UseProducer()
-    {
-        this.isProducer = true;
-        this.channel = Channel.CreateBounded<Message>(new BoundedChannelOptions(50000)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleWriter = false,
-            SingleReader = true
-        });
-    }
+    public void UseProducer() => this.isProducer = true;
     public void UseTransfer(string fromExchange, string toExchange, string routingKey)
     {
         if (this.exchangeTransfers.Exists(f => f.FromExchange == fromExchange && f.ToExchange == toExchange))
@@ -718,7 +743,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             case Consts.RpcMessage:
             case Consts.Logs:
                 //只要转发消息和日志进入channel中排队
-                await this.channel.Writer.WriteAsync(message);
+                await this.messageChannel.Writer.WriteAsync(message);
                 break;
             case Consts.RpcResponse:
             case Consts.RpcFailure:
@@ -727,59 +752,41 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 break;
             case Consts.ChangeConsumers:
                 //心跳队列发来的消息
-                await this.channel.Writer.WriteAsync(message);
+                await this.messageChannel.Writer.WriteAsync(message);
                 break;
         }
     }
-
     private async Task Register()
     {
-        this.localQueueIds = this.queues.Select(f => f.QueueId).ToList();
-        this.localExchangeIds = this.bindings.Select(f => f.ExchangeId).ToList();
-        await this.repository.Register(this.queues, this.bindings);
-        (var dbQueues, var dbBindings) = await this.repository.GetSettings(false);
-        //根据本地配置，更新队列状态
-
-        foreach (var myQueue in this.queues)
+        if (this.queues.Count > 0 && this.bindings.Count > 0)
         {
-            var dbQueue = dbQueues.Find(f => f.QueueId == myQueue.QueueId);
-            dbQueue.IsStateful = myQueue.IsStateful;
-            dbQueue.IsTransfer = myQueue.IsTransfer;
-            dbQueue.IsQuorumQueue = myQueue.IsQuorumQueue;
-            dbQueue.IsSingleActiveConsumer = myQueue.IsSingleActiveConsumer;
-            dbQueue.LastWorkloadTotal = myQueue.WorkloadTotal;
-
-            //确定变更类型，扩容/缩容
-            if (dbQueue.WorkloadTotal == myQueue.WorkloadTotal)
-                dbQueue.ChangeType = ChangeType.None;
-            else if (dbQueue.WorkloadTotal > myQueue.WorkloadTotal)
-                dbQueue.ChangeType = ChangeType.ScalingUp;
-            else dbQueue.ChangeType = ChangeType.ScalingDown;
+            this.localQueueIds = this.queues.Select(f => f.QueueId).ToList();
+            this.localExchangeIds = this.bindings.Select(f => f.ExchangeId).ToList();
+            await this.repository.Register(this.queues, this.bindings);
         }
-
-        //数据库中本应用配置可能会多于本地配置，本应用的配置以本地为主，其他应用以数据库为主
-        var myQueues = dbQueues.FindAll(f => this.localQueueIds.Contains(f.QueueId));
-        var myBindings = dbBindings.FindAll(f => this.localExchangeIds.Contains(f.ExchangeId));
-
-        string queueId = null, queueName = null;
+        if (this.isProducer)
+        {
+            this.messageChannel = Channel.CreateBounded<Message>(new BoundedChannelOptions(50000)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleWriter = false,
+                SingleReader = true
+            });
+        }
         if (this.hasConsumer)
         {
-            //一个交换机对应一块业务
-            //一个交换机顶多绑定一个有状态队列，但可以同时绑定多个无状态队列
-            //允许多个交换机绑定到同一个有状态队列
-            var exchangeQueues = myBindings.Where(f => f.IsStateful)
-                .GroupBy(f => f.ExchangeId).ToDictionary(f => f.Key, f => f.Select(t => t.QueueId).ToList())
-                .Where(f => f.Value.Count > 1).ToList();
-            if (exchangeQueues.Count > 0)
+            this.logsChannel = Channel.CreateBounded<ExecLog>(new BoundedChannelOptions(300)
             {
-                foreach (var exchangeQueue in exchangeQueues)
-                    throw new Exception($"与交换机{exchangeQueue.Key}绑定的有状态队列只能一个，目前绑定的有状态队列[{string.Join(',', exchangeQueue.Value)}]");
-            }
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleWriter = false,
+                SingleReader = true
+            });
         }
         this.rabbitProducer = new RabbitProducer(this, this.serviceProvider);
         await this.rabbitProducer.CreateProducer();
 
         //创建RPC消费者
+        string queueId = null;
         if (this.isRpcConsumer)
         {
             if (!this.isAllowCreateQueue)
@@ -797,6 +804,48 @@ class MessageDrivenService : IMessageDriven, IHostedService
         //创建队列和绑定，需要捞取数据库或是配置中心的最新信息
         //包含所有应用的队列和绑定信息，交换机可以多个应用公用，每个应用有自己的队列及处理程序
         if (!this.hasConsumer) return;
+
+        (var dbQueues, var dbBindings) = await this.repository.GetSettings(false);
+        //根据本地配置，更新队列状态
+        if (this.hasConsumer)
+        {
+            foreach (var myQueue in this.queues)
+            {
+                var dbQueue = dbQueues.Find(f => f.QueueId == myQueue.QueueId);
+                dbQueue.IsStateful = myQueue.IsStateful;
+                dbQueue.IsTransfer = myQueue.IsTransfer;
+                dbQueue.IsQuorumQueue = myQueue.IsQuorumQueue;
+                dbQueue.IsSingleActiveConsumer = myQueue.IsSingleActiveConsumer;
+                dbQueue.LastWorkloadTotal = myQueue.WorkloadTotal;
+
+                //确定变更类型，扩容/缩容
+                if (dbQueue.WorkloadTotal == myQueue.WorkloadTotal)
+                    dbQueue.ChangeType = ChangeType.None;
+                else if (dbQueue.WorkloadTotal > myQueue.WorkloadTotal)
+                    dbQueue.ChangeType = ChangeType.ScalingUp;
+                else dbQueue.ChangeType = ChangeType.ScalingDown;
+            }
+        }
+
+        //数据库中本应用配置可能会多于本地配置，本应用的配置以本地为主，其他应用以数据库为主
+        var myQueues = dbQueues.FindAll(f => this.localQueueIds.Contains(f.QueueId));
+        var myBindings = dbBindings.FindAll(f => this.localExchangeIds.Contains(f.ExchangeId));
+
+        string queueName = null;
+        if (this.hasConsumer)
+        {
+            //一个交换机对应一块业务
+            //一个交换机顶多绑定一个有状态队列，但可以同时绑定多个无状态队列
+            //允许多个交换机绑定到同一个有状态队列
+            var exchangeQueues = myBindings.Where(f => f.IsStateful)
+                .GroupBy(f => f.ExchangeId).ToDictionary(f => f.Key, f => f.Select(t => t.QueueId).ToList())
+                .Where(f => f.Value.Count > 1).ToList();
+            if (exchangeQueues.Count > 0)
+            {
+                foreach (var exchangeQueue in exchangeQueues)
+                    throw new Exception($"与交换机{exchangeQueue.Key}绑定的有状态队列只能一个，目前绑定的有状态队列[{string.Join(',', exchangeQueue.Value)}]");
+            }
+        }
 
         //创建交换机
         if (this.isAllowCreateExchange)
@@ -855,7 +904,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
     }
-    private async Task Initialize()
+    private async Task Initialize(bool isUseCache)
     {
         if (Volatile.Read(ref this.appState) >= 2)
             return;
@@ -864,7 +913,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
 
         try
         {
-            (var dbQueues, var dbBindings) = await this.repository.GetSettings();
+            (var dbQueues, var dbBindings) = await this.repository.GetSettings(isUseCache);
             //根据本地配置，更新队列状态
             foreach (var myQueue in this.queues)
             {
@@ -882,20 +931,22 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     dbQueue.ChangeType = ChangeType.ScalingUp;
                 else dbQueue.ChangeType = ChangeType.ScalingDown;
             }
-            var changedQueues = dbQueues.Where(f => this.localQueueIds.Contains(f.QueueId) || f.AppId != this.AppId).ToList();
-            var changedBindings = dbBindings.Where(f => this.localExchangeIds.Contains(f.ExchangeId) || f.AppId != this.AppId).ToList();
-
+            var changedQueues = dbQueues;
+            var changedBindings = dbBindings;
             var removeKeys = new List<string>();
             if (this.hasConsumer)
             {
+                changedQueues = dbQueues.FindAll(f => this.localQueueIds.Contains(f.QueueId) || f.AppId != this.AppId);
+                changedBindings = dbBindings.FindAll(f => this.localExchangeIds.Contains(f.ExchangeId) || f.AppId != this.AppId);
+
                 var localQueues = changedQueues.FindAll(f => f.AppId == this.AppId);
                 var localBindings = changedBindings.FindAll(f => f.AppId == this.AppId);
                 var timeout = this.heartbeatCycle * 2;
-                var removedKeys = this.heartbeats
+                removeKeys = this.heartbeats
                     .Where(f => f.Key != this.ServiceId && DateTime.UtcNow.Subtract(f.Value) > timeout)
                     .Select(f => f.Key).ToList();
-                if (removedKeys.Count > 0)
-                    removedKeys.ForEach(f => this.heartbeats.TryRemove(f, out _));
+                if (removeKeys.Count > 0)
+                    removeKeys.ForEach(f => this.heartbeats.TryRemove(f, out _));
 
                 //启动消费者
                 var nodeIds = this.heartbeats.Keys.ToList();
@@ -1012,21 +1063,24 @@ class MessageDrivenService : IMessageDriven, IHostedService
                             else
                             {
                                 await rabbitConsumer.ShutdownAsync();
-                                rabbitConsumers.Remove(rabbitConsumer);
                                 Console.WriteLine($"多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}已关闭");
                             }
                             removeConsumers.Add(rabbitConsumer);
                         }
                     }
+                    if (removeConsumers.Count > 0)
+                        removeConsumers.ForEach(f => rabbitConsumers.Remove(f));
                 }
 
-                //删除未分配的多余消费者             
+                //删除未分配的多余消费者
+                removeKeys.Clear();
                 foreach (var queueName in this.consumers.Keys)
                 {
                     if (localConsumers.ContainsKey(queueName))
                         continue;
                     removeKeys.Add(queueName);
 
+                    removeConsumers.Clear();
                     var rabbitConsumers = this.consumers[queueName];
                     if (rabbitConsumers == null || rabbitConsumers.Count == 0)
                         continue;
@@ -1047,17 +1101,15 @@ class MessageDrivenService : IMessageDriven, IHostedService
                         else
                         {
                             await rabbitConsumer.ShutdownAsync();
-                            rabbitConsumers.Remove(rabbitConsumer);
                             Console.WriteLine($"多余消费者{rabbitConsumer.QueueId}, ConsumerId:{rabbitConsumer.ConsumerId}已关闭");
                         }
+                        removeConsumers.Remove(rabbitConsumer);
                     }
+                    if (removeConsumers.Count > 0)
+                        removeConsumers.ForEach(f => rabbitConsumers.Remove(f));
                 }
-
                 if (removeKeys.Count > 0)
-                {
                     removeKeys.ForEach(f => this.consumers.TryRemove(f, out _));
-                    removeKeys.Clear();
-                }
             }
 
             if (this.isProducer)
@@ -1067,7 +1119,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                      f.IsStateful).ToDictionary(f => f.ExchangeId, f => f);
                 var transferQueues = changedQueues.FindAll(f =>
                     f.IsTransfer).ToDictionary(f => f.AppId, f => f);
-                await this.channel.Writer.WriteAsync(new Message
+                await this.messageChannel.Writer.WriteAsync(new Message
                 {
                     MessageId = ObjectId.NewId(),
                     Type = Consts.ChangeConsumers,
@@ -1076,7 +1128,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     Body = (statefulBindings, transferQueues)
                 });
             }
-
+            removeKeys.Clear();
             foreach (var queueName in this.shutdownConsumers.Keys)
             {
                 var timedConsumers = this.shutdownConsumers[queueName];
@@ -1162,5 +1214,17 @@ class MessageDrivenService : IMessageDriven, IHostedService
             throw new InvalidOperationException("MessageDriven is disabled.");
         if (Volatile.Read(ref this.appState) >= 2)
             throw new ObjectDisposedException(nameof(MessageDrivenService), "MessageDriven is stopping.");
+    }
+    private async Task Delay(TimeSpan timeout)
+    {
+        try
+        {
+            await Task.Delay(timeout, this.stopTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+            when (!this.stopTokenSource.IsCancellationRequested)
+        {
+            // flush timeout
+        }
     }
 }

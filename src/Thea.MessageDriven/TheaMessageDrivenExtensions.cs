@@ -77,4 +77,15 @@ public static class TheaMessageDrivenExtensions
         }
         return result;
     }
+    internal static TimeSpan Min(this TimeSpan left, TimeSpan right)
+    {
+        if (right < left) return right;
+        return left;
+    }
+    internal static TimeSpan Min(this TimeSpan left, bool condition, TimeSpan right)
+    {
+        if (!condition) return left;
+        if (right < left) return right;
+        return left;
+    }
 }
