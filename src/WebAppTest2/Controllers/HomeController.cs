@@ -26,10 +26,10 @@ public class HomeController : ControllerBase
             {
                 var message = $"message-{i}-{j}";
                 await this.messageDriven.PublishAsync("cache.refresh", "1", message);
-                await this.messageDriven.PublishAsync("award.take", i.ToString(), new AwardInfo { AwardId = message, Quantity = i % 5 });
+                await this.messageDriven.PublishAsync("award.take", message, new AwardInfo { AwardId = message, Quantity = i % 5 });
                 //Console.WriteLine($"Request {result.ToJson()}, time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
             }
-            Thread.Sleep(10);
+            Thread.Sleep(100);
         }
         return TheaResponse.Succeed("ok");
     }
