@@ -3,10 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Thea.Logging;
 
@@ -17,7 +17,7 @@ class RabbitProducer
     private readonly MessageDrivenService parent;
     private readonly ConnectionFactory factory;
     private IConnection connection;
-    private readonly BlockingCollection<IChannel> channelQueue;
+    private readonly Channel<IChannel> channelQueue;
     private readonly ILogger<RabbitProducer> logger;
     private readonly SemaphoreSlim lifecycleSemaphore = new(1, 1);
     private readonly TaskCompletionSource<bool> recycleWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -51,7 +51,7 @@ class RabbitProducer
                 { "client_api", "Thea.MessageDriven" }
             }
         };
-        this.channelQueue = new(channelSize);
+        this.channelQueue = Channel.CreateBounded<IChannel>(channelSize);
         this.logger = serviceProvider.GetService<ILogger<RabbitProducer>>();
     }
     public async Task CreateProducer()
@@ -62,12 +62,12 @@ class RabbitProducer
             for (int i = 0; i < this.channelSize; i++)
             {
                 var channel = await this.connection.CreateChannelAsync();
-                this.channelQueue.Add(channel);
+                await this.channelQueue.Writer.WriteAsync(channel);
             }
         }
         catch
         {
-            while (this.channelQueue.TryTake(out var rabbitChannel))
+            while (this.channelQueue.Reader.TryPeek(out var rabbitChannel))
                 await rabbitChannel.DisposeAsync();
             await this.connection.DisposeAsync();
             throw;
@@ -147,12 +147,11 @@ class RabbitProducer
         try
         {
             await waiterTask;
-            while (this.channelQueue.TryTake(out var rabbitChannel))
+            while (this.channelQueue.Reader.TryRead(out var rabbitChannel))
                 await rabbitChannel.DisposeAsync();
             if (this.connection != null)
                 await this.connection.DisposeAsync();
             this.connection = null;
-            this.channelQueue.Dispose();
         }
         catch (Exception ex)
         {
@@ -173,7 +172,7 @@ class RabbitProducer
             using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             try
             {
-                rabbitChannel = this.channelQueue.Take(timeoutSource.Token);
+                rabbitChannel = await this.channelQueue.Reader.ReadAsync(timeoutSource.Token);
             }
             catch (OperationCanceledException ex) when (timeoutSource.IsCancellationRequested)
             {
@@ -209,7 +208,7 @@ class RabbitProducer
                 if (rabbitChannel != null)
                 {
                     if (Volatile.Read(ref this.state) < 2 && rabbitChannel.IsOpen)
-                        this.channelQueue.Add(rabbitChannel);
+                        await this.channelQueue.Writer.WriteAsync(rabbitChannel);
                     else await rabbitChannel.DisposeAsync();
                 }
             }

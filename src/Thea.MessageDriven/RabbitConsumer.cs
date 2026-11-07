@@ -326,16 +326,16 @@ class RabbitConsumer
                                 //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, ReplyTo:{replyToQueue}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                                 var replyToQueue = ea.BasicProperties.ReplyTo;
                                 var rpcMessageType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
-                                await this.parent.rabbitProducer.PublishAsync(Consts.DefaultExchange, replyToQueue, new BasicProperties
+                                await this.parent.ProcessMessage(new Message
                                 {
-                                    Persistent = true,
-                                    Type = rpcMessageType,
-                                    AppId = ea.BasicProperties.AppId,
-                                    DeliveryMode = DeliveryModes.Persistent,
                                     MessageId = messageId,
-                                    CorrelationId = messageId,
-                                    Headers = new Dictionary<string, object> { { "TraceId", traceId } }
-                                }, result);
+                                    Type = rpcMessageType,
+                                    Exchange = Consts.RpcExchange,
+                                    RoutingKey = replyToQueue,
+                                    ReplyTo = ea.BasicProperties.ReplyTo,
+                                    Body = result,
+                                    TraceId = traceId
+                                });
                             }
                             //RPC消息直接跳过，因为异常已经返回到前端了
                             if (!isSuccess && messageType == Consts.UserMessage)
