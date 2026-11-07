@@ -114,7 +114,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 this.heartbeatTask = this.HeartbeatLoopAsync();
                 this.heartbeats[this.ServiceId] = DateTime.UtcNow;
             }
-            await this.Initialize(false);
+            await this.Initialize(true);
             this.lastInitedTime = DateTime.UtcNow;
             if (this.isProducer) this.producerTask = this.ProducerLoopAsync();
 
@@ -189,7 +189,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 if (DateTime.UtcNow.Subtract(this.lastInitedTime) > TimeSpan.FromSeconds(30))
                 {
                     //有消费者，按照消费者创建的生命周期初始化，否则就按照心跳时间周期初始化
-                    await this.Initialize(true);
+                    await this.Initialize(false);
                     this.lastInitedTime = DateTime.UtcNow;
                 }
                 if (!this.rpcWaiters.IsEmpty && DateTime.UtcNow.Subtract(this.lastClearRpcTime).TotalSeconds > 5)
@@ -906,7 +906,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
     }
-    private async Task Initialize(bool isUseCache)
+    private async Task Initialize(bool isFirst)
     {
         if (Volatile.Read(ref this.appState) >= 2)
             return;
@@ -915,7 +915,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
 
         try
         {
-            (var dbQueues, var dbBindings) = await this.repository.GetSettings(isUseCache);
+            (var dbQueues, var dbBindings) = await this.repository.GetSettings(!isFirst);
             //根据本地配置，更新队列状态
             foreach (var myQueue in this.queues)
             {
@@ -924,14 +924,22 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 dbQueue.IsTransfer = myQueue.IsTransfer;
                 dbQueue.IsQuorumQueue = myQueue.IsQuorumQueue;
                 dbQueue.IsSingleActiveConsumer = myQueue.IsSingleActiveConsumer;
-                dbQueue.LastWorkloadTotal = myQueue.WorkloadTotal;
 
                 //确定变更类型，扩容/缩容
-                if (dbQueue.WorkloadTotal == myQueue.WorkloadTotal)
+                if (isFirst)
+                {
+                    dbQueue.LastWorkloadTotal = dbQueue.WorkloadTotal;
                     dbQueue.ChangeType = ChangeType.None;
-                else if (dbQueue.WorkloadTotal > myQueue.WorkloadTotal)
-                    dbQueue.ChangeType = ChangeType.ScalingUp;
-                else dbQueue.ChangeType = ChangeType.ScalingDown;
+                }
+                else
+                {
+                    dbQueue.LastWorkloadTotal = myQueue.WorkloadTotal;
+                    if (dbQueue.WorkloadTotal == myQueue.WorkloadTotal)
+                        dbQueue.ChangeType = ChangeType.None;
+                    else if (dbQueue.WorkloadTotal > myQueue.WorkloadTotal)
+                        dbQueue.ChangeType = ChangeType.ScalingUp;
+                    else dbQueue.ChangeType = ChangeType.ScalingDown;
+                }
             }
             var changedQueues = dbQueues;
             var changedBindings = dbBindings;
@@ -960,61 +968,115 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 int index = 0, nodeCount = nodeIds.Count;
                 var localConsumers = new Dictionary<string, DispatchInfo>();
 
-                //先创建有状态队列消费者(包括SAC和非SAC消费者)
-                var myQueues = localQueues.Where(f => f.IsStateful).OrderBy(f => f.QueueId).ToList();
-                foreach (var myQueue in myQueues)
+                //创建扩容的有状态队列和绑定，包括业务队列和转发队列
+                var myQueues = localQueues.Where(f => f.IsStateful)
+                    .OrderBy(f => f.QueueId).ToList();
+                if (!isFirst)
                 {
-                    if (myQueue.ChangeType != ChangeType.ScalingUp)
-                        continue;
-
-                    var myBindings = localBindings.FindAll(f => f.QueueId == myQueue.QueueId);
-                    for (int i = myQueue.LastWorkloadTotal; i < myQueue.WorkloadTotal; i++)
+                    foreach (var myQueue in myQueues)
                     {
-                        var queueName = $"{myQueue.QueueId}.{i}";
-                        if (this.isAllowCreateQueue)
-                            await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
-                        if (this.isAllowCreateBinding)
+                        if (myQueue.ChangeType != ChangeType.ScalingUp)
+                            continue;
+
+                        var myBindings = localBindings.FindAll(f => f.QueueId == myQueue.QueueId);
+                        for (int i = myQueue.LastWorkloadTotal; i < myQueue.WorkloadTotal; i++)
                         {
-                            foreach (var myBinding in myBindings)
-                                await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+                            var queueName = $"{myQueue.QueueId}.{i}";
+                            if (this.isAllowCreateQueue)
+                                await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
+
+                            //转发队列没有绑定数据
+                            if (this.isAllowCreateBinding && myBindings.Count > 0)
+                            {
+                                foreach (var myBinding in myBindings)
+                                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
+                            }
                         }
                     }
                 }
+                var statefullQueues = localQueues.Where(f => f.IsStateful && !f.IsTransfer)
+                    .OrderBy(f => f.QueueId).ToList();
+                var transferQueues = localQueues.Where(f => f.IsTransfer)
+                    .OrderBy(f => f.QueueId).ToList();
 
-                //先创建有状态队列消费者
-                foreach (var myQueue in myQueues)
+                //分配有状态队列SAC激活消费者
+                foreach (var myQueue in statefullQueues)
                 {
-                    var queueType = myQueue.IsTransfer ? QueueType.Transfer : QueueType.Message;
                     for (int i = 0; i < myQueue.WorkloadTotal; i++)
                     {
                         var queueName = $"{myQueue.QueueId}.{i}";
-                        this.Dispatch(queueType, index, i, queueName, myQueue, nodeIds, localConsumers);
+                        this.Dispatch(QueueType.Message, index, i, queueName, myQueue, nodeIds, localConsumers);
                         index++;
                     }
                 }
-                var statefullQueues = myQueues;
+
+                //分配转发队列队列SAC激活消费者
+                foreach (var myQueue in transferQueues)
+                {
+                    if (myQueue.WorkloadTotal > 1)
+                    {
+                        for (int i = 0; i < myQueue.WorkloadTotal; i++)
+                        {
+                            var queueName = $"{myQueue.QueueId}.{i}";
+                            this.Dispatch(QueueType.Transfer, index, i, queueName, myQueue, nodeIds, localConsumers);
+                            index++;
+                        }
+                    }
+                    else
+                    {
+                        var queueName = myQueue.QueueId;
+                        this.Dispatch(QueueType.Transfer, index, 0, queueName, myQueue, nodeIds, localConsumers);
+                        index++;
+                    }
+                }
 
                 //创建无状态队列消费者
-                myQueues = localQueues.Where(f => !f.IsStateful).OrderBy(f => f.QueueId).ToList();
-                foreach (var myQueue in myQueues)
+                var statelessQueues = localQueues.Where(f => !f.IsStateful).OrderBy(f => f.QueueId).ToList();
+                foreach (var myQueue in statelessQueues)
                 {
                     var queueName = myQueue.QueueId;
-                    var queueType = myQueue.IsTransfer ? QueueType.Transfer : QueueType.Message;
                     for (int i = 0; i < myQueue.WorkloadTotal; i++)
                     {
-                        this.Dispatch(queueType, index, 0, queueName, myQueue, nodeIds, localConsumers);
+                        this.Dispatch(QueueType.Message, index, 0, queueName, myQueue, nodeIds, localConsumers);
                         index++;
                     }
                 }
+
                 //创建有状态队列SAC等待消费者
                 foreach (var myQueue in statefullQueues)
                 {
                     for (int i = 0; i < myQueue.WorkloadTotal; i++)
                     {
-                        for (int workloadIndex = 1; workloadIndex < this.sacCount; workloadIndex++)
+                        var queueName = $"{myQueue.QueueId}.{i}";
+                        for (int sacIndex = 1; sacIndex < this.sacCount; sacIndex++)
+                        {
+                            this.Dispatch(QueueType.Message, index, i, queueName, myQueue, nodeIds, localConsumers);
+                            index++;
+                        }
+                    }
+                }
+
+                //分配转发队列队列SAC等待消费者
+                foreach (var myQueue in transferQueues)
+                {
+                    if (myQueue.WorkloadTotal > 1)
+                    {
+                        for (int i = 0; i < myQueue.WorkloadTotal; i++)
                         {
                             var queueName = $"{myQueue.QueueId}.{i}";
-                            this.Dispatch(QueueType.Message, index, i, queueName, myQueue, nodeIds, localConsumers);
+                            for (int sacIndex = 1; sacIndex < this.sacCount; sacIndex++)
+                            {
+                                this.Dispatch(QueueType.Transfer, index, i, queueName, myQueue, nodeIds, localConsumers);
+                                index++;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var queueName = myQueue.QueueId;
+                        for (int sacIndex = 1; sacIndex < this.sacCount; sacIndex++)
+                        {
+                            this.Dispatch(QueueType.Transfer, index, 0, queueName, myQueue, nodeIds, localConsumers);
                             index++;
                         }
                     }
