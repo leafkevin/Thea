@@ -6,6 +6,7 @@ using RabbitMQ.Client;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -22,7 +23,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private Task producerTask = Task.CompletedTask;
     private CancellationTokenSource stopTokenSource;
     private readonly SemaphoreSlim lifecycleLocker = new(1, 1);
-    private TaskCompletionSource<bool> lefecycleWaiter;
+    private TaskCompletionSource<bool> startingWaiter;
+    private TaskCompletionSource<bool> stoppingWaiter;
 
     private readonly TaskCompletionSource<bool> readyToStart = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
@@ -115,14 +117,15 @@ class MessageDrivenService : IMessageDriven, IHostedService
         try
         {
             var currentState = Volatile.Read(ref this.appState);
-            if (currentState is 0 or 3)
+            if (currentState == 2) throw new Exception("正在关闭中，请稍后再试");
+            else if (currentState == 1)
+                startingTask = this.startingWaiter.Task;
+            else
             {
-                this.lefecycleWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                Interlocked.Exchange(ref this.appState, 1);
+                this.startingWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 startingTask = this.CompleteStartAsync();
             }
-            else if (currentState == 1)
-                startingTask = this.lefecycleWaiter.Task;
-            else startingTask = Task.CompletedTask;
         }
         finally { this.lifecycleLocker.Release(); }
         await startingTask;
@@ -135,17 +138,21 @@ class MessageDrivenService : IMessageDriven, IHostedService
         try
         {
             var currentState = Volatile.Read(ref this.appState);
-            if (currentState < 2)
+            if (currentState == 1)
             {
-                this.lefecycleWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                Interlocked.Exchange(ref this.appState, 2);
+                this.stoppingWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 stopingTask = this.CompleteStopAsync();
             }
             else if (currentState == 2)
-                stopingTask = this.lefecycleWaiter.Task;
+                stopingTask = this.stoppingWaiter.Task;
             else stopingTask = Task.CompletedTask;
         }
         finally { this.lifecycleLocker.Release(); }
         await stopingTask;
+        await this.lifecycleLocker.WaitAsync();
+        Interlocked.Exchange(ref this.appState, 3);
+        this.lifecycleLocker.Release();
     }
     private async Task HeartbeatLoopAsync()
     {
@@ -391,7 +398,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
     {
         var errors = new List<Exception>();
         this.stopTokenSource = new();
-        this.lefecycleWaiter = null;
         try { await this.Register(); }
         catch (Exception ex) { errors.Add(ex); }
 
@@ -408,16 +414,15 @@ class MessageDrivenService : IMessageDriven, IHostedService
         this.mainTask = this.ExecuteAsync();
         if (errors.Count == 0)
         {
-            Interlocked.Exchange(ref this.appState, 1);
-            this.lefecycleWaiter.TrySetResult(true);
+            this.startingWaiter.TrySetResult(true);
             Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is started！");
         }
         else
         {
             var exception = errors.Count == 1 ? errors[0] : new AggregateException(errors);
-            this.lefecycleWaiter.TrySetException(exception);
+            this.startingWaiter.TrySetException(exception);
             // 所有调用方都取消等待时，关闭失败仍被观察，后续调用仍可取得同一个异常结果。
-            _ = this.lefecycleWaiter.Task.Exception;
+            _ = this.startingWaiter.Task.Exception;
             this.logger.LogTagError("MessageDriven", exception, "MessageDrivenService启动失败");
             Console.WriteLine($"MessageDriven, Starting is failled, {exception}");
             try
@@ -429,6 +434,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 this.logger.LogTagError("MessageDriven", stoppingException, "MessageDrivenService启动失败后，关闭再次失败");
                 Console.WriteLine($"MessageDriven, Stopping is failled, {stoppingException}");
             }
+            throw exception;
         }
     }
     private async Task CompleteStopAsync()
@@ -438,14 +444,18 @@ class MessageDrivenService : IMessageDriven, IHostedService
         catch (Exception ex) { errors.Add(ex); }
         try { await this.CleanupAsync(); }
         catch (Exception ex) { errors.Add(ex); }
-        finally { Interlocked.Exchange(ref this.appState, 3); }
-        if (errors.Count == 0) this.lefecycleWaiter.TrySetResult(true);
+        if (errors.Count == 0)
+        {
+            this.stoppingWaiter.TrySetResult(true);
+            Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is stopped！");
+        }
         else
         {
             var exception = errors.Count == 1 ? errors[0] : new AggregateException(errors);
-            this.lefecycleWaiter.TrySetException(exception);
+            this.stoppingWaiter.TrySetException(exception);
             // 所有调用方都取消等待时，关闭失败仍被观察，后续调用仍可取得同一个异常结果。
-            _ = this.lefecycleWaiter.Task.Exception;
+            _ = this.stoppingWaiter.Task.Exception;
+            throw exception;
         }
     }
     private async Task ShutdownAsync()
@@ -460,7 +470,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
         }
         //关闭主控循环和心跳循环
         this.stopTokenSource.Cancel();
-        await this.rpcConsumer.ShutdownAsync();
+        if (this.rpcConsumer != null)
+            await this.rpcConsumer.ShutdownAsync();
         if (this.isProducer) this.messageChannel.Writer.TryComplete();
 
         await Task.WhenAll(new[] { this.mainTask, this.producerTask, this.heartbeatTask }
