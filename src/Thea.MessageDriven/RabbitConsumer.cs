@@ -173,11 +173,10 @@ class RabbitConsumer
     }
     public async Task<uint> MessageCount()
     {
-        var currentChannel = this.channel;
-        if (!(currentChannel?.IsOpen ?? false)) return 0;
+        if (!(this.channel?.IsOpen ?? false)) return 0;
         try
         {
-            return await currentChannel.MessageCountAsync(this.QueueName);
+            return await this.channel.MessageCountAsync(this.QueueName);
         }
         catch (AlreadyClosedException)
         {
@@ -334,7 +333,8 @@ class RabbitConsumer
                                     RoutingKey = replyToQueue,
                                     ReplyTo = ea.BasicProperties.ReplyTo,
                                     Body = result,
-                                    TraceId = traceId
+                                    TraceId = traceId,
+                                    Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
                                 });
                             }
                             //RPC消息直接跳过，因为异常已经返回到前端了
@@ -464,7 +464,8 @@ class RabbitConsumer
                     RoutingKey = routingKey,
                     TraceId = traceId,
                     ReplyTo = ea.BasicProperties.ReplyTo,
-                    Body = jsonBody
+                    Body = jsonBody,
+                    Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
                 });
                 await this.channel.BasicAckAsync(ea.DeliveryTag, false);
             }

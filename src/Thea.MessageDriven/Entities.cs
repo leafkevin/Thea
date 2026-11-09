@@ -72,6 +72,10 @@ public class Queue
     /// </summary>
     public bool IsTransfer { get; set; }
     /// <summary>
+    /// 是否已确认，主要用在转发队列
+    /// </summary>
+    public bool IsConfirmed { get; set; }
+    /// <summary>
     /// 是否开启日志
     /// </summary>
     public bool IsLogEnabled { get; set; }

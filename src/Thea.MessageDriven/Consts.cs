@@ -19,6 +19,5 @@ class Consts
     public const string RpcFailure = "RpcFailure";
     public const string Heartbeat = "Heartbeat";
     public const string ChangeConsumers = "ChangeConsumers";
-    public const string Shutdown = "Shutdown";
     public const string Logs = "Logs";
 }

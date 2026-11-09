@@ -67,7 +67,7 @@ class RabbitProducer
         }
         catch
         {
-            while (this.channelQueue.Reader.TryPeek(out var rabbitChannel))
+            while (this.channelQueue.Reader.TryRead(out var rabbitChannel))
                 await rabbitChannel.DisposeAsync();
             await this.connection.DisposeAsync();
             throw;
@@ -112,6 +112,13 @@ class RabbitProducer
         {
             await channel.QueueBindAsync(queueName, exchange, routingKey);
         });
+    }
+    public async Task<uint> MessageCount(string queueName)
+    {
+        uint result = 0;
+        await this.TryTo($"MessageCount失败，queueName: {queueName}", async channel =>
+            result = await channel.MessageCountAsync(queueName));
+        return result;
     }
     public async Task RemoveQueue(string queueName)
     {
@@ -221,8 +228,13 @@ class RabbitProducer
     private async Task EnterAsync()
     {
         await this.lifecycleSemaphore.WaitAsync();
-        Interlocked.Increment(ref this.workers);
-        this.lifecycleSemaphore.Release();
+        try
+        {
+            if (Volatile.Read(ref this.state) > 1)
+                throw new Exception("RabbitProducer已关闭，无法发送消息");
+            Interlocked.Increment(ref this.workers);
+        }
+        finally { this.lifecycleSemaphore.Release(); }
     }
     private async Task ExitAsync()
     {

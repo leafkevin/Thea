@@ -80,9 +80,19 @@ public class DefaultRepository : IMessageDrivenRepository
             {
                 myQueue.WorkloadTotal,
                 myQueue.PrefetchCount,
+                myQueue.IsConfirmed,
                 myQueue.IsLogEnabled
             })
             .Where(f => f.QueueId == myQueue.QueueId)
+            .ExecuteAsync();
+        await this.redisCache.RemoveAsync(this.cacheKey);
+    }
+    public virtual async Task Confirm(string appId)
+    {
+        var repository = this.dbFactory.Create(this.dbKey);
+        await repository.Update<Queue>()
+            .Set(f => f.IsConfirmed, true)
+            .Where(f => f.AppId == appId && f.IsConfirmed == false)
             .ExecuteAsync();
         await this.redisCache.RemoveAsync(this.cacheKey);
     }
