@@ -23,8 +23,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private Task producerTask = Task.CompletedTask;
     private CancellationTokenSource stopTokenSource;
     private readonly SemaphoreSlim lifecycleLocker = new(1, 1);
-    private TaskCompletionSource<bool> startingWaiter;
-    private TaskCompletionSource<bool> stoppingWaiter;
+    private Task startingTask = Task.CompletedTask;
+    private Task stoppingTask = Task.CompletedTask;
+    private Exception startupCleanupError;
 
     private readonly TaskCompletionSource<bool> readyToStart = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
@@ -60,8 +61,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastClearRpcTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
-    // 0: starting, 1: running, 2: stopping, 3: stopped.
-    private int appState;
+    // 0: starting, 1: running, 2: stopping, 3: stopped, 4: cleanup failed.
+    private int appState = 3;
     private int isChangeConsumers = 0;
 
     internal readonly TimeSpan heartbeatCycle;
@@ -74,6 +75,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
 
     public MessageDrivenService(IServiceProvider serviceProvider)
     {
+        this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var configuration = serviceProvider.GetService<IConfiguration>();
         this.IsEnabled = configuration.GetValue("MessageDriven:IsEnabled", true);
         if (!this.IsEnabled) return;
@@ -82,7 +84,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
         this.ServiceId = ObjectId.NewId();
         this.AppId = configuration.GetValue<string>("AppId");
         this.RpcQueue = $"{Consts.RpcExchange}.{this.AppId}.{this.ServiceId}";
-        this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
         var endPoints = configuration.GetSection("MessageDriven:EndPoints").Get<string[]>();
         if (endPoints == null || endPoints.Length == 0)
             throw new Exception("未设置MessageDriven:EndPoints，无法初始化MessageDrivenService对象");
@@ -104,7 +105,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
     {
         if (!this.IsEnabled)
         {
-            this.logger.LogWarning("MessageDriven is disabled.");
+            this.logger?.LogWarning("MessageDriven is disabled.");
             return;
         }
         if (!this.isProducer && !this.hasConsumer)
@@ -113,47 +114,50 @@ class MessageDrivenService : IMessageDriven, IHostedService
         await this.readyToStart.Task.WaitAsync(cancellationToken);
 
         Task startingTask;
-        await this.lifecycleLocker.WaitAsync();
+        await this.lifecycleLocker.WaitAsync(cancellationToken);
         try
         {
             var currentState = Volatile.Read(ref this.appState);
-            if (currentState == 2) throw new Exception("正在关闭中，请稍后再试");
-            else if (currentState == 1)
-                startingTask = this.startingWaiter.Task;
+            if (currentState == 2) throw new InvalidOperationException("正在关闭中，请稍后再试");
+            if (currentState == 4) throw new InvalidOperationException("上次资源清理失败，不能重新启动");
+            if (currentState is 0 or 1)
+                startingTask = this.startingTask;
             else
             {
-                Interlocked.Exchange(ref this.appState, 1);
-                this.startingWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                startingTask = this.CompleteStartAsync();
+                Interlocked.Exchange(ref this.appState, 0);
+                startingTask = this.startingTask = this.CompleteStartAsync();
+                ObserveFailure(startingTask);
             }
         }
         finally { this.lifecycleLocker.Release(); }
-        await startingTask;
+        await startingTask.WaitAsync(cancellationToken);
     }
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         if (!this.IsEnabled) return;
         Task stopingTask;
-        await this.lifecycleLocker.WaitAsync();
+        await this.lifecycleLocker.WaitAsync(cancellationToken);
         try
         {
             var currentState = Volatile.Read(ref this.appState);
-            if (currentState == 1)
+            if (currentState is 0 or 1)
             {
                 Interlocked.Exchange(ref this.appState, 2);
-                this.stoppingWaiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                stopingTask = this.CompleteStopAsync();
+                var pendingStart = this.startingTask;
+                stopingTask = this.stoppingTask = this.CompleteStopAsync(pendingStart);
+                ObserveFailure(stopingTask);
             }
-            else if (currentState == 2)
-                stopingTask = this.stoppingWaiter.Task;
+            else if (currentState is 2 or 4)
+                stopingTask = this.stoppingTask;
             else stopingTask = Task.CompletedTask;
         }
         finally { this.lifecycleLocker.Release(); }
-        await stopingTask;
-        await this.lifecycleLocker.WaitAsync();
-        Interlocked.Exchange(ref this.appState, 3);
-        this.lifecycleLocker.Release();
+        await stopingTask.WaitAsync(cancellationToken);
     }
+    private static void ObserveFailure(Task task) => task.ContinueWith(completed =>
+    {
+        _ = completed.Exception;
+    }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     private async Task HeartbeatLoopAsync()
     {
         //使用独立的StopToken，关闭中还会有消费者消费，可能需要
@@ -396,90 +400,73 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task CompleteStartAsync()
     {
-        var errors = new List<Exception>();
+        this.startupCleanupError = null;
         this.stopTokenSource = new();
-        try { await this.Register(); }
-        catch (Exception ex) { errors.Add(ex); }
-
-        if (this.hasConsumer)
+        try
         {
-            this.heartbeatTask = this.HeartbeatLoopAsync();
-            this.heartbeats[this.ServiceId] = DateTime.UtcNow;
-        }
-        try { await this.Initialize(true); }
-        catch (Exception ex) { errors.Add(ex); }
-        this.lastInitedTime = DateTime.UtcNow;
-        if (this.isProducer) this.producerTask = this.ProducerLoopAsync();
-
-        this.mainTask = this.ExecuteAsync();
-        if (errors.Count == 0)
-        {
-            this.startingWaiter.TrySetResult(true);
+            await this.Register();
+            if (this.hasConsumer)
+            {
+                this.heartbeatTask = this.HeartbeatLoopAsync();
+                this.heartbeats[this.ServiceId] = DateTime.UtcNow;
+            }
+            await this.Initialize(true);
+            this.lastInitedTime = DateTime.UtcNow;
+            if (this.isProducer) this.producerTask = this.ProducerLoopAsync();
+            this.mainTask = this.ExecuteAsync();
+            await this.lifecycleLocker.WaitAsync();
+            try { Interlocked.CompareExchange(ref this.appState, 1, 0); }
+            finally { this.lifecycleLocker.Release(); }
             Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is started！");
         }
-        else
+        catch (Exception exception)
         {
-            var exception = errors.Count == 1 ? errors[0] : new AggregateException(errors);
-            this.startingWaiter.TrySetException(exception);
-            // 所有调用方都取消等待时，关闭失败仍被观察，后续调用仍可取得同一个异常结果。
-            _ = this.startingWaiter.Task.Exception;
-            this.logger.LogTagError("MessageDriven", exception, "MessageDrivenService启动失败");
-            Console.WriteLine($"MessageDriven, Starting is failled, {exception}");
+            Exception cleanupException = null;
+            try { await this.CleanupAsync(); }
+            catch (Exception ex) { cleanupException = ex; }
+            this.startupCleanupError = cleanupException;
+            await this.lifecycleLocker.WaitAsync();
             try
             {
-                await this.StopAsync(CancellationToken.None);
+                // 已有停止请求时，由停止任务发布最终状态。
+                if (this.appState != 2)
+                {
+                    Interlocked.Exchange(ref this.appState, cleanupException == null ? 3 : 4);
+                    if (cleanupException != null)
+                    {
+                        this.stoppingTask = Task.FromException(cleanupException);
+                        ObserveFailure(this.stoppingTask);
+                    }
+                }
             }
-            catch (Exception stoppingException)
-            {
-                this.logger.LogTagError("MessageDriven", stoppingException, "MessageDrivenService启动失败后，关闭再次失败");
-                Console.WriteLine($"MessageDriven, Stopping is failled, {stoppingException}");
-            }
-            throw exception;
+            finally { this.lifecycleLocker.Release(); }
+            if (cleanupException != null) throw new AggregateException(exception, cleanupException);
+            throw;
         }
     }
-    private async Task CompleteStopAsync()
+    private async Task CompleteStopAsync(Task pendingStart)
+    {
+        bool startFailed = false;
+        try { await pendingStart; }
+        catch { startFailed = true; }
+        Exception error = this.startupCleanupError;
+        if (!startFailed)
+        {
+            try { await this.CleanupAsync(); }
+            catch (Exception ex) { error = ex; }
+        }
+        await this.lifecycleLocker.WaitAsync();
+        try { Interlocked.Exchange(ref this.appState, error == null ? 3 : 4); }
+        finally { this.lifecycleLocker.Release(); }
+        if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is stopped！");
+    }
+    private async Task CleanupAsync()
     {
         var errors = new List<Exception>();
         try { await this.ShutdownAsync(); }
         catch (Exception ex) { errors.Add(ex); }
-        try { await this.CleanupAsync(); }
-        catch (Exception ex) { errors.Add(ex); }
-        if (errors.Count == 0)
-        {
-            this.stoppingWaiter.TrySetResult(true);
-            Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is stopped！");
-        }
-        else
-        {
-            var exception = errors.Count == 1 ? errors[0] : new AggregateException(errors);
-            this.stoppingWaiter.TrySetException(exception);
-            // 所有调用方都取消等待时，关闭失败仍被观察，后续调用仍可取得同一个异常结果。
-            _ = this.stoppingWaiter.Task.Exception;
-            throw exception;
-        }
-    }
-    private async Task ShutdownAsync()
-    {
-        if (this.hasConsumer)
-        {
-            var tasks = this.consumers.Values.SelectMany(f => f)
-                .Concat(this.shutdownConsumers.Values.SelectMany(x => x.Consumers))
-                .Concat([this.heartbeatConsumer]).Distinct()
-                .Select(f => f.ShutdownAsync()).ToList();
-            await Task.WhenAll(tasks);
-        }
-        //关闭主控循环和心跳循环
-        this.stopTokenSource.Cancel();
-        if (this.rpcConsumer != null)
-            await this.rpcConsumer.ShutdownAsync();
-        if (this.isProducer) this.messageChannel.Writer.TryComplete();
-
-        await Task.WhenAll(new[] { this.mainTask, this.producerTask, this.heartbeatTask }
-            .Where(task => task != null));
-    }
-    private async Task CleanupAsync()
-    {
-        if (this.hasConsumer)
+        try
         {
             this.consumers.Clear();
             this.shutdownConsumers.Clear();
@@ -487,12 +474,44 @@ class MessageDrivenService : IMessageDriven, IHostedService
             foreach (var rpcWaiter in this.rpcWaiters.Values)
                 rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
             this.rpcWaiters.Clear();
+            try
+            {
+                if (this.rabbitProducer != null)
+                    await this.rabbitProducer.ShutdownAsync();
+            }
+            finally
+            {
+                this.rabbitProducer = null;
+                this.stopTokenSource?.Dispose();
+                this.stopTokenSource = null;
+                this.heartbeatConsumer = null;
+                this.rpcConsumer = null;
+                this.mainTask = this.heartbeatTask = this.producerTask = Task.CompletedTask;
+                this.lastNodeIds = null;
+                this.lastHeartbeatTime = DateTime.MinValue;
+            }
         }
-        if (this.rabbitProducer != null)
-            await this.rabbitProducer.ShutdownAsync();
-        this.rabbitProducer = null;
-        this.stopTokenSource?.Dispose();
-        this.stopTokenSource = null;
+        catch (Exception ex) { errors.Add(ex); }
+        if (errors.Count > 0) throw new AggregateException(errors);
+    }
+    private async Task ShutdownAsync()
+    {
+        var errors = new List<Exception>();
+        async Task Attempt(Func<Task> action)
+        {
+            try { await action(); }
+            catch (Exception ex) { errors.Add(ex); }
+        }
+        // 先停止控制循环，防止关闭快照之后又创建新的消费者。
+        await Attempt(() => { this.stopTokenSource?.Cancel(); return Task.CompletedTask; });
+        await Attempt(() => Task.WhenAll(new[] { this.mainTask, this.heartbeatTask }.Where(task => task != null)));
+        var consumers = this.consumers.Values.SelectMany(f => f)
+            .Concat(this.shutdownConsumers.Values.SelectMany(x => x.Consumers))
+            .Concat([this.heartbeatConsumer, this.rpcConsumer]).Where(f => f != null).Distinct().ToList();
+        await Attempt(() => Task.WhenAll(consumers.Select(f => f.ShutdownAsync())));
+        this.messageChannel?.Writer.TryComplete();
+        await Attempt(() => this.producerTask);
+        if (errors.Count > 0) throw new AggregateException(errors);
     }
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
@@ -980,7 +999,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task Initialize(bool isFirst)
     {
-        if (Volatile.Read(ref this.appState) >= 2)
+        if (!isFirst && Volatile.Read(ref this.appState) >= 2)
             return;
         if (Interlocked.Exchange(ref this.isChangeConsumers, 1) == 1)
             return;
