@@ -160,6 +160,10 @@ class MessageDrivenService : IMessageDriven, IHostedService
     {
         _ = completed.Exception;
     }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    private static void ObserveFailure(Task task) => task.ContinueWith(completed =>
+    {
+        _ = completed.Exception;
+    }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     private async Task HeartbeatLoopAsync()
     {
         //使用独立的StopToken，关闭中还会有消费者消费，可能需要
