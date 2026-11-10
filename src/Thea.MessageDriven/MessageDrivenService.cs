@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
@@ -25,8 +24,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private CancellationTokenSource stopTokenSource;
     private readonly SemaphoreSlim lifecycleLocker = new(1, 1);
     private Task startingTask = Task.CompletedTask;
-    private Task stoppingTask = Task.CompletedTask;
-    private Exception startupCleanupError;
 
     private readonly TaskCompletionSource<bool> readyToStart = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<string, List<RabbitConsumer>> consumers = new();
@@ -63,8 +60,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private DateTime lastInitedTime = DateTime.MinValue;
     private DateTime lastClearRpcTime = DateTime.MinValue;
     private DateTime lastLoggedTime = DateTime.MinValue;
-    // 0: starting, 1: running, 2: stopping, 3: stopped, 4: cleanup failed.
-    private int appState = 3;
+    // 0: none, 1: starting, 2: running, 3: stopping, 4: stopped
+    private int appState = 0;
     private int isChangeConsumers = 0;
 
     internal readonly TimeSpan heartbeatCycle;
@@ -120,16 +117,11 @@ class MessageDrivenService : IMessageDriven, IHostedService
         try
         {
             var currentState = Volatile.Read(ref this.appState);
-            if (currentState == 2) throw new InvalidOperationException("正在关闭中，请稍后再试");
-            if (currentState == 4) throw new InvalidOperationException("上次资源清理失败，不能重新启动");
-            if (currentState is 0 or 1)
-                startingTask = this.startingTask;
-            else
-            {
-                Interlocked.Exchange(ref this.appState, 0);
-                startingTask = this.startingTask = this.CompleteStartAsync();
-                ObserveFailure(startingTask);
-            }
+            if (currentState == 3) throw new InvalidOperationException("正在关闭中，请稍后再试");
+            if (currentState is 1 or 2) return;
+            Interlocked.Exchange(ref this.appState, 1);
+            startingTask = this.startingTask = this.CompleteStartAsync();
+            ObserveFailure(startingTask);
         }
         finally { this.lifecycleLocker.Release(); }
         await startingTask.WaitAsync(cancellationToken);
@@ -142,24 +134,15 @@ class MessageDrivenService : IMessageDriven, IHostedService
         try
         {
             var currentState = Volatile.Read(ref this.appState);
-            if (currentState is 0 or 1)
-            {
-                Interlocked.Exchange(ref this.appState, 2);
-                var pendingStart = this.startingTask;
-                stopingTask = this.stoppingTask = this.CompleteStopAsync(pendingStart);
-                ObserveFailure(stopingTask);
-            }
-            else if (currentState is 2 or 4)
-                stopingTask = this.stoppingTask;
-            else stopingTask = Task.CompletedTask;
+            if (currentState is 3 or 4) return;
+
+            Interlocked.Exchange(ref this.appState, 3);
+            stopingTask = this.CompleteStopAsync();
+            ObserveFailure(stopingTask);
         }
         finally { this.lifecycleLocker.Release(); }
         await stopingTask.WaitAsync(cancellationToken);
     }
-    private static void ObserveFailure(Task task) => task.ContinueWith(completed =>
-    {
-        _ = completed.Exception;
-    }, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     private static void ObserveFailure(Task task) => task.ContinueWith(completed =>
     {
         _ = completed.Exception;
@@ -371,18 +354,27 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     catch (Exception ex)
                     {
                         message.RetryTimes++;
+                        var exception = ex.InnerException ?? ex;
                         if (message.RetryTimes > 3)
                         {
-                            var exception = ex.InnerException ?? ex;
                             var errMessage = $"发送消息失败，RetryTimes: {message.RetryTimes - 1}，Message: {message.ToJson()}";
-                            message.Waiter?.TrySetException(exception);
                             this.logger.LogTagError("MessageDriven", exception, errMessage);
                             message.Waiter?.TrySetException(new Exception(errMessage, exception));
                             continue;
                         }
-                        if (this.messageChannel.Writer.TryWrite(message))
-                            continue;
-                        this.failedMessages.Enqueue(message);
+                        if (Volatile.Read(ref this.appState) == 3)
+                        {
+                            //消费者发过来的消息，直接抛异常nack回队列，应用端发过来的消息，直接上报应用端
+                            var errMessage = $"发送消息失败，RetryTimes: {message.RetryTimes - 1}，Message: {message.ToJson()}";
+                            this.logger.LogTagError("MessageDriven", exception, errMessage);
+                            message.Waiter?.TrySetException(new Exception(errMessage, exception));
+                        }
+                        else
+                        {
+                            if (this.messageChannel.Writer.TryWrite(message))
+                                continue;
+                            this.failedMessages.Enqueue(message);
+                        }
                     }
                 }
                 while (this.failedMessages.TryPeek(out var failedMessage))
@@ -405,11 +397,13 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task CompleteStartAsync()
     {
-        this.startupCleanupError = null;
-        this.stopTokenSource = new();
+        //异常不再启动
+        int targetSate = 1;
         try
         {
             await this.Register();
+
+            this.stopTokenSource = new();
             if (this.hasConsumer)
             {
                 this.heartbeatTask = this.HeartbeatLoopAsync();
@@ -419,85 +413,44 @@ class MessageDrivenService : IMessageDriven, IHostedService
             this.lastInitedTime = DateTime.UtcNow;
             if (this.isProducer) this.producerTask = this.ProducerLoopAsync();
             this.mainTask = this.ExecuteAsync();
-            await this.lifecycleLocker.WaitAsync();
-            try { Interlocked.CompareExchange(ref this.appState, 1, 0); }
-            finally { this.lifecycleLocker.Release(); }
+
+            //启动成功，从0/4 -> 1 -> 2
+            targetSate = 2;
             Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is started！");
         }
-        catch (Exception exception)
+        catch (Exception ex)
         {
-            Exception cleanupException = null;
-            try { await this.CleanupAsync(); }
-            catch (Exception ex) { cleanupException = ex; }
-            this.startupCleanupError = cleanupException;
-            await this.lifecycleLocker.WaitAsync();
-            try
-            {
-                // 已有停止请求时，由停止任务发布最终状态。
-                if (this.appState != 2)
-                {
-                    Interlocked.Exchange(ref this.appState, cleanupException == null ? 3 : 4);
-                    if (cleanupException != null)
-                    {
-                        this.stoppingTask = Task.FromException(cleanupException);
-                        ObserveFailure(this.stoppingTask);
-                    }
-                }
-            }
-            finally { this.lifecycleLocker.Release(); }
-            if (cleanupException != null) throw new AggregateException(exception, cleanupException);
+            targetSate = 0;
+            Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven startup failed，{ex}");
             throw;
         }
-    }
-    private async Task CompleteStopAsync(Task pendingStart)
-    {
-        bool startFailed = false;
-        try { await pendingStart; }
-        catch { startFailed = true; }
-        Exception error = this.startupCleanupError;
-        if (!startFailed)
+        finally
         {
-            try { await this.CleanupAsync(); }
-            catch (Exception ex) { error = ex; }
+            await this.lifecycleLocker.WaitAsync();
+            try { Interlocked.Exchange(ref this.appState, targetSate); }
+            finally { this.lifecycleLocker.Release(); }
         }
-        await this.lifecycleLocker.WaitAsync();
-        try { Interlocked.Exchange(ref this.appState, error == null ? 3 : 4); }
-        finally { this.lifecycleLocker.Release(); }
-        if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
-        Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is stopped！");
     }
-    private async Task CleanupAsync()
+    private async Task CompleteStopAsync()
     {
+        await this.startingTask;
+
         var errors = new List<Exception>();
         try { await this.ShutdownAsync(); }
         catch (Exception ex) { errors.Add(ex); }
-        try
-        {
-            this.consumers.Clear();
-            this.shutdownConsumers.Clear();
-            this.heartbeats.Clear();
-            foreach (var rpcWaiter in this.rpcWaiters.Values)
-                rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
-            this.rpcWaiters.Clear();
-            try
-            {
-                if (this.rabbitProducer != null)
-                    await this.rabbitProducer.ShutdownAsync();
-            }
-            finally
-            {
-                this.rabbitProducer = null;
-                this.stopTokenSource?.Dispose();
-                this.stopTokenSource = null;
-                this.heartbeatConsumer = null;
-                this.rpcConsumer = null;
-                this.mainTask = this.heartbeatTask = this.producerTask = Task.CompletedTask;
-                this.lastNodeIds = null;
-                this.lastHeartbeatTime = DateTime.MinValue;
-            }
-        }
+        try { await this.CleanupAsync(); }
         catch (Exception ex) { errors.Add(ex); }
-        if (errors.Count > 0) throw new AggregateException(errors);
+        if (errors.Count > 0)
+        {
+            var exception = errors.Count > 1 ? new AggregateException(errors) : errors[0];
+            Console.WriteLine($"stopping is failed，{exception}");
+            throw exception;
+        }
+
+        await this.lifecycleLocker.WaitAsync();
+        Interlocked.Exchange(ref this.appState, 4);
+        this.lifecycleLocker.Release();
+        Console.WriteLine($"ServiceId：{this.ServiceId}，MessageDriven is stopped！");
     }
     private async Task ShutdownAsync()
     {
@@ -509,15 +462,44 @@ class MessageDrivenService : IMessageDriven, IHostedService
         }
         // 先停止控制循环，防止关闭快照之后又创建新的消费者。
         await Attempt(() => { this.stopTokenSource?.Cancel(); return Task.CompletedTask; });
-        await Attempt(() => Task.WhenAll(new[] { this.mainTask, this.heartbeatTask }.Where(task => task != null)));
+        await Attempt(() => Task.WhenAll([this.mainTask, this.heartbeatTask]));
+
         var consumers = this.consumers.Values.SelectMany(f => f)
             .Concat(this.shutdownConsumers.Values.SelectMany(x => x.Consumers))
-            .Concat([this.heartbeatConsumer, this.rpcConsumer]).Where(f => f != null).Distinct().ToList();
+            .Concat([this.heartbeatConsumer]).Where(f => f != null).Distinct().ToList();
         await Attempt(() => Task.WhenAll(consumers.Select(f => f.ShutdownAsync())));
+        await Attempt(() => this.rpcConsumer?.ShutdownAsync() ?? Task.CompletedTask);
+
         this.messageChannel?.Writer.TryComplete();
         await Attempt(() => this.producerTask);
         if (errors.Count > 0) throw new AggregateException(errors);
     }
+    private async Task CleanupAsync()
+    {
+        this.consumers.Clear();
+        this.shutdownConsumers.Clear();
+        this.heartbeats.Clear();
+        foreach (var rpcWaiter in this.rpcWaiters.Values)
+            rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
+        this.rpcWaiters.Clear();
+        try
+        {
+            if (this.rabbitProducer != null)
+                await this.rabbitProducer.ShutdownAsync();
+        }
+        finally
+        {
+            this.rabbitProducer = null;
+            this.stopTokenSource?.Dispose();
+            this.stopTokenSource = null;
+            this.heartbeatConsumer = null;
+            this.rpcConsumer = null;
+            this.mainTask = this.heartbeatTask = this.producerTask = Task.CompletedTask;
+            this.lastNodeIds = null;
+            this.lastHeartbeatTime = DateTime.MinValue;
+        }
+    }
+
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
         this.EnsureAvailable();
@@ -537,7 +519,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
         };
         await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
-        await theaMessage.Waiter.Task;
+        await theaMessage.Waiter.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
     public async Task PublishRpcAsync<TRequest>(string replyToQueue, string messageId, string exchange, string routingKey, TRequest request, CancellationToken cancellationToken = default)
     {
@@ -565,7 +547,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
         };
         await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
-        await theaMessage.Waiter.Task;
+        await theaMessage.Waiter.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
     public async Task<TResponse> RequestAsync<TRequest, TResponse>(string exchange, string routingKey, TRequest request, int timeoutSeconds = 30, CancellationToken cancellationToken = default)
     {
@@ -629,7 +611,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
         };
         await this.messageChannel.Writer.WriteAsync(theaMessage, cancellationToken);
-        await theaMessage.Waiter.Task;
+        await theaMessage.Waiter.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
     public void UseProducer() => this.isProducer = true;
     public void UseTransfer(string fromExchange, string toExchange, string routingKey)
@@ -807,6 +789,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             myQueue.PrefetchCount = prefetchCount.Value;
         if (isLogEnabled.HasValue)
             myQueue.IsLogEnabled = isLogEnabled.Value;
+        myQueue.IsConfirmed = !myQueue.IsTransfer;
         await this.repository.Change(myQueue);
     }
     public async Task RemoveQueue(string queueId, int minSuffixIndex, int maxSuffixIndex)
@@ -1003,7 +986,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
     }
     private async Task Initialize(bool isFirst)
     {
-        if (!isFirst && Volatile.Read(ref this.appState) >= 2)
+        if (!isFirst && Volatile.Read(ref this.appState) >= 3)
             return;
         if (Interlocked.CompareExchange(ref this.isChangeConsumers, 1, 0) == 1)
             return;
@@ -1263,9 +1246,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 removeKeys.ForEach(f => this.shutdownConsumers.TryRemove(f, out _));
 
             //转发队列更新为已确认
-            var transferQueue = changedQueues.Find(f => f.AppId == this.AppId && f.IsTransfer && !f.IsConfirmed);
-            transferQueue.IsConfirmed = true;
-            await this.repository.Confirm(this.AppId);
+            var transferQueue = changedQueues.Find(f => f.AppId == this.AppId && f.IsTransfer);
+            if (transferQueue != null) await this.repository.Confirm(transferQueue);
 
             this.queues = changedQueues;
             this.bindings = changedBindings;
