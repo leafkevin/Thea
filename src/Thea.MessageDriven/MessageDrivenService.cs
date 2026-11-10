@@ -232,7 +232,13 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 {
                     var remaining = TimeSpan.FromSeconds(30).Subtract(DateTime.UtcNow.Subtract(this.lastInitedTime))
                         .Min(!this.rpcWaiters.IsEmpty, TimeSpan.FromSeconds(5) - DateTime.UtcNow.Subtract(this.lastClearRpcTime));
-                    await this.Delay(remaining);
+                    try { await Task.Delay(remaining, this.stopTokenSource.Token); }
+                    catch (OperationCanceledException)
+                        when (this.stopTokenSource.IsCancellationRequested)
+                    {
+                        // 服务正常停止，不记录为错误。
+                        break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -256,7 +262,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
         catch (OperationCanceledException)
-            when (!this.stopTokenSource.IsCancellationRequested)
+            when (this.stopTokenSource.IsCancellationRequested)
         {
             // flush timeout
         }
@@ -1098,10 +1104,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     var queueType = myQueue.IsTransfer ? QueueType.Transfer : QueueType.Message;
                     for (int i = 0; i < myQueue.WorkloadTotal; i++)
                     {
-                        string queueName = null;
-                        if (myQueue.IsTransfer && myQueue.WorkloadTotal == 1)
-                            queueName = myQueue.QueueId;
-                        else queueName = $"{myQueue.QueueId}.{i}";
+                        var queueName = $"{myQueue.QueueId}.{i}";
                         for (int sacIndex = 1; sacIndex < this.sacCount; sacIndex++)
                         {
                             this.Dispatch(queueType, index, i, queueName, myQueue, nodeIds, localConsumers);
@@ -1205,6 +1208,14 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     removeKeys.ForEach(f => this.consumers.TryRemove(f, out _));
             }
 
+            //转发队列更新为已确认
+            var transferQueue = changedQueues.Find(f => f.AppId == this.AppId && f.IsTransfer);
+            if (transferQueue != null && !transferQueue.IsConfirmed)
+            {
+                transferQueue.IsConfirmed = true;
+                await this.repository.Confirm(transferQueue);
+            }
+
             if (this.isProducer)
             {
                 //向发送消息循环，发送变更消息
@@ -1245,10 +1256,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
             if (removeKeys.Count > 0)
                 removeKeys.ForEach(f => this.shutdownConsumers.TryRemove(f, out _));
-
-            //转发队列更新为已确认
-            var transferQueue = changedQueues.Find(f => f.AppId == this.AppId && f.IsTransfer);
-            if (transferQueue != null) await this.repository.Confirm(transferQueue);
 
             this.queues = changedQueues;
             this.bindings = changedBindings;
@@ -1310,17 +1317,5 @@ class MessageDrivenService : IMessageDriven, IHostedService
     {
         if (!this.IsEnabled)
             throw new InvalidOperationException("MessageDriven is disabled.");
-    }
-    private async Task Delay(TimeSpan timeout)
-    {
-        try
-        {
-            await Task.Delay(timeout, this.stopTokenSource.Token);
-        }
-        catch (OperationCanceledException)
-            when (!this.stopTokenSource.IsCancellationRequested)
-        {
-            // flush timeout
-        }
     }
 }
