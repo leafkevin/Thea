@@ -44,7 +44,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private List<Queue> queues = new();
     private List<string> localQueueIds;
     private List<string> localExchangeIds;
-    private List<ExchangeTransfer> exchangeTransfers = new();
+    private List<QueueTransfer> queueTransfers;
 
     private RabbitConsumer heartbeatConsumer;
     private RabbitConsumer rpcConsumer;
@@ -232,19 +232,20 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 {
                     var remaining = TimeSpan.FromSeconds(30).Subtract(DateTime.UtcNow.Subtract(this.lastInitedTime))
                         .Min(!this.rpcWaiters.IsEmpty, TimeSpan.FromSeconds(5) - DateTime.UtcNow.Subtract(this.lastClearRpcTime));
-                    try { await Task.Delay(remaining, this.stopTokenSource.Token); }
-                    catch (OperationCanceledException)
-                        when (this.stopTokenSource.IsCancellationRequested)
-                    {
-                        // 服务正常停止，不记录为错误。
-                        break;
-                    }
+                    await Task.Delay(remaining, this.stopTokenSource.Token);
                 }
+            }
+            catch (OperationCanceledException)
+                when (this.stopTokenSource.IsCancellationRequested)
+            {
+                // 日志读取和延时等待都可能因服务停止而取消，正常退出循环。
+                break;
             }
             catch (Exception ex)
             {
                 var exception = ex.InnerException ?? ex;
                 this.logger.LogTagError("MessageDriven", exception, $"ExecuteAsync is failled");
+                Console.WriteLine($"MessageDriven，,ExecuteAsync is failled，{ex}");
             }
         }
     }
@@ -262,9 +263,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
             }
         }
         catch (OperationCanceledException)
-            when (this.stopTokenSource.IsCancellationRequested)
+            when (!this.stopTokenSource.IsCancellationRequested)
         {
-            // flush timeout
+            // 本次日志读取超时，返回主循环刷新日志；服务停止则交给外层处理。
         }
         return false;
     }
@@ -474,6 +475,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
         var consumers = this.consumers.Values.SelectMany(f => f)
             .Concat(this.shutdownConsumers.Values.SelectMany(x => x.Consumers))
             .Concat([this.heartbeatConsumer]).Where(f => f != null).Distinct().ToList();
+        if (this.queueTransfers != null && this.queueTransfers.Count > 0)
+            consumers = consumers.Concat(this.queueTransfers.SelectMany(f => f.Consumers)).ToList();
         await Attempt(() => Task.WhenAll(consumers.Select(f => f.ShutdownAsync())));
         await Attempt(() => this.rpcConsumer?.ShutdownAsync() ?? Task.CompletedTask);
 
@@ -489,6 +492,11 @@ class MessageDrivenService : IMessageDriven, IHostedService
         foreach (var rpcWaiter in this.rpcWaiters.Values)
             rpcWaiter.Waiter.TrySetException(new Exception("MessageDrivenService已经关闭"));
         this.rpcWaiters.Clear();
+        if (this.queueTransfers != null && this.queueTransfers.Count > 0)
+        {
+            foreach (var transfer in this.queueTransfers)
+                transfer.Consumers.Clear();
+        }
         try
         {
             if (this.rabbitProducer != null)
@@ -621,15 +629,16 @@ class MessageDrivenService : IMessageDriven, IHostedService
         await theaMessage.Waiter.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
     public void UseProducer() => this.isProducer = true;
-    public void UseTransfer(string fromExchange, string toExchange, string routingKey)
+    public void UseMigrating(string queueName, bool isSingleActiveConsumer)
     {
-        if (this.exchangeTransfers.Exists(f => f.FromExchange == fromExchange && f.ToExchange == toExchange))
+        this.queueTransfers ??= new();
+        if (this.queueTransfers.Exists(f => f.FromQueue == queueName))
             return;
-        this.exchangeTransfers.Add(new ExchangeTransfer
+        this.queueTransfers.Add(new QueueTransfer
         {
-            FromExchange = fromExchange,
-            ToExchange = toExchange,
-            RoutingKey = routingKey
+            FromQueue = queueName,
+            IsSingleActiveConsumer = isSingleActiveConsumer,
+            Consumers = new()
         });
     }
     public void UseStatefulConsumer(string exchange, string queue, MethodInfo methodInfo, bool isSingleActiveConsumer = true, bool isQuorumQueue = true)
@@ -810,6 +819,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             await this.rabbitProducer.RemoveQueue(queueName);
         }
     }
+
     internal void Start() => this.readyToStart.TrySetResult(true);
     internal void UseRepository(IMessageDrivenRepository repository) => this.repository = repository;
     internal async Task ProcessMessage(Message message)
@@ -988,6 +998,29 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     }
                 }
                 else await this.rabbitProducer.BindQueue(myBinding.ExchangeId, myBinding.QueueId, Consts.FanoutRoutingKey);
+            }
+        }
+
+        //迁移已有旧队列消息
+        if (this.queueTransfers != null && this.queueTransfers.Count > 0)
+        {
+            foreach (var queueTransfer in this.queueTransfers)
+            {
+                var consumerCount = queueTransfer.IsSingleActiveConsumer ? this.sacCount : 1;
+                var dispatchInfo = new DispatchInfo
+                {
+                    QueueType = QueueType.Transfer,
+                    Queue = new Queue
+                    {
+                        QueueId = queueTransfer.FromQueue,
+                        PrefetchCount = 250
+                    },
+                    QueueName = queueTransfer.FromQueue,
+                    QueueIndex = 0,
+                    ConsumerCount = consumerCount
+                };
+                for (int i = 0; i < consumerCount; i++)
+                    await this.CreateConsumer(dispatchInfo, queueTransfer.Consumers);
             }
         }
     }

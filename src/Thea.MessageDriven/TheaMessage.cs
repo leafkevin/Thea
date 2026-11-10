@@ -11,11 +11,11 @@ public enum ChangeType
     ScalingUp,
     ScalingDown
 }
-class ExchangeTransfer
+class QueueTransfer
 {
-    public string FromExchange { get; set; }
-    public string ToExchange { get; set; }
-    public string RoutingKey { get; set; }
+    public string FromQueue { get; set; }
+    public bool IsSingleActiveConsumer { get; set; }
+    public List<RabbitConsumer> Consumers { get; set; }
 }
 class DispatchInfo
 {

@@ -325,7 +325,7 @@ class RabbitConsumer
                                 //Console.WriteLine($"RpcMessage, Publish Response, MessageId: {message.MessageId}, ReplyTo:{replyToQueue}, DateTime: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
                                 var replyToQueue = ea.BasicProperties.ReplyTo;
                                 var rpcMessageType = isSuccess ? Consts.RpcResponse : Consts.RpcFailure;
-                                var theaMessage = new Message
+                                await this.parent.ProcessMessage(new Message
                                 {
                                     MessageId = messageId,
                                     Type = rpcMessageType,
@@ -335,9 +335,7 @@ class RabbitConsumer
                                     Body = result,
                                     TraceId = traceId,
                                     Waiter = new(TaskCreationOptions.RunContinuationsAsynchronously)
-                                };
-                                await this.parent.ProcessMessage(theaMessage);
-                                await theaMessage.Waiter.Task;
+                                });
                             }
                             //RPC消息直接跳过，因为异常已经返回到前端了
                             if (!isSuccess && messageType == Consts.UserMessage)

@@ -47,14 +47,14 @@ public class MessageDrivenBuilder
         this.messageDriven.UseSubscriber(exchange, queue, consumerHandler, isDelay, isQuorumQueue);
         return this;
     }
-    public MessageDrivenBuilder UseTransfer(string fromExchange, string toExchange, string routingKey)
-    {
-        this.messageDriven.UseTransfer(fromExchange, toExchange, routingKey);
-        return this;
-    }
     public MessageDrivenBuilder UseRpcConsumer(MethodInfo consumerHandler = null)
     {
         this.messageDriven.UseRpcConsumer(consumerHandler);
+        return this;
+    }
+    public MessageDrivenBuilder UseMigrating(string fromQueueName, bool isSingleActiveConsumer)
+    {
+        this.messageDriven.UseMigrating(fromQueueName, isSingleActiveConsumer);
         return this;
     }
     internal MessageDrivenService Build() => this.messageDriven;
