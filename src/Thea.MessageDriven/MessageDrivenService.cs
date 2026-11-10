@@ -18,7 +18,7 @@ namespace Thea.MessageDriven;
 
 class MessageDrivenService : IMessageDriven, IHostedService
 {
-    private Task mainTask;
+    private Task mainTask = Task.CompletedTask;
     private Task heartbeatTask = Task.CompletedTask;
     private Task producerTask = Task.CompletedTask;
     private CancellationTokenSource stopTokenSource;
@@ -427,13 +427,14 @@ class MessageDrivenService : IMessageDriven, IHostedService
         finally
         {
             await this.lifecycleLocker.WaitAsync();
-            try { Interlocked.Exchange(ref this.appState, targetSate); }
+            try { Interlocked.CompareExchange(ref this.appState, targetSate, 1); }
             finally { this.lifecycleLocker.Release(); }
         }
     }
     private async Task CompleteStopAsync()
     {
-        await this.startingTask;
+        if (this.startingTask != null)
+            await this.startingTask;
 
         var errors = new List<Exception>();
         try { await this.ShutdownAsync(); }
