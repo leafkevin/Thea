@@ -79,22 +79,22 @@ public class DefaultRepository : IMessageDrivenRepository
             {
                 myQueue.ChangingWorkloadTotal,
                 myQueue.PrefetchCount,
-                myQueue.IsConfirmed,
                 myQueue.IsLogEnabled
             })
             .Where(f => f.QueueId == myQueue.QueueId)
             .ExecuteAsync();
         await this.redisCache.RemoveAsync(this.cacheKey);
     }
-    public virtual async Task Confirm(Queue myQueue)
+    public virtual async Task<bool> ChangeRouting(Queue myQueue)
     {
         var repository = this.dbFactory.Create(this.dbKey);
-        await repository.Update<Queue>()
-            .Set(f => f.WorkloadTotal, myQueue.ChangingWorkloadTotal)
+        var count = await repository.Update<Queue>()
+            .Set(new { WorkloadTotal = myQueue.ChangingWorkloadTotal })
             .Where(f => f.QueueId == myQueue.QueueId
                 && f.ChangingWorkloadTotal == myQueue.ChangingWorkloadTotal)
             .ExecuteAsync();
-        await this.redisCache.RemoveAsync(this.cacheKey);
+        if (count > 0) await this.redisCache.RemoveAsync(this.cacheKey);
+        return count > 0;
     }
     public virtual async Task WriteLogs(List<ExecLog> logInfos)
     {

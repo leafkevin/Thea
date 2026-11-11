@@ -37,11 +37,11 @@ class RabbitConsumer
     public volatile bool IsLogEnabled;
 
     private QueueType queueType => this.dispatchInfo.QueueType;
-    public Queue Queue => this.dispatchInfo.Queue;
     public string QueueId => this.dispatchInfo.Queue.QueueId;
     public int QueueIndex => this.dispatchInfo.QueueIndex;
     public string QueueName => this.dispatchInfo.QueueName;
     public string ConsumerId { get; private set; }
+    public Queue Queue { get; set; }
     public bool IsActivated => Volatile.Read(ref this.state) == 1 && (this.connection?.IsOpen ?? false)
         && (this.channel?.IsOpen ?? false) && (this.consumer?.IsRunning ?? false);
     public bool IsBusying => Volatile.Read(ref this.workers) > 0;

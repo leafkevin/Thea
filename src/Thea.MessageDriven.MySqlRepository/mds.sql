@@ -21,7 +21,6 @@ CREATE TABLE `mds_queue`
     `queue_id` VARCHAR(50) NOT NULL COMMENT '队列ID',
     `app_id` VARCHAR(50) NULL COMMENT '应用ID',
     `is_stateful` TINYINT(1) NULL DEFAULT 0 COMMENT '是否有状态',
-    `is_transfer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否转发队列',
     `prefetch_count` INTEGER NULL COMMENT '预取个数',
     `workload_total` INTEGER NULL COMMENT '工作负荷个数',
     `changing_workload_total` INTEGER NULL COMMENT '待变更工作负荷个数',

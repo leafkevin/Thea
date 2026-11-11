@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
@@ -276,9 +277,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
             {
                 ExchangeId = binding.ExchangeId,
                 IsStateful = queue.IsStateful,
-                WorkloadTotal = queue.WorkloadTotal
+                WorkloadTotal = queue.IsStateful ? Math.Min(queue.WorkloadTotal, queue.ChangingWorkloadTotal) : 0
             })
-            .ToDictionary(f => f.ExchangeId, f => f);
+            .DistinctBy(f => f.ExchangeId).ToDictionary(f => f.ExchangeId, f => f);
         while (await this.messageChannel.Reader.WaitToReadAsync())
         {
             try
@@ -647,6 +648,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 IsSingleActiveConsumer = isSingleActiveConsumer,
                 PrefetchCount = 250,
                 WorkloadTotal = 2,
+                ChangingWorkloadTotal = 2,
                 IsLogEnabled = false
             });
         }
@@ -657,6 +659,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             myQueue.IsSingleActiveConsumer = isSingleActiveConsumer;
             myQueue.PrefetchCount = 250;
             myQueue.WorkloadTotal = 2;
+            myQueue.ChangingWorkloadTotal = 2;
         }
         if (!this.bindings.Exists(f => f.ExchangeId == exchange && f.QueueId == queue))
         {
@@ -694,6 +697,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 IsSingleActiveConsumer = false,
                 PrefetchCount = 250,
                 WorkloadTotal = 2,
+                ChangingWorkloadTotal = 2,
                 IsLogEnabled = false
             });
         }
@@ -720,6 +724,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 IsSingleActiveConsumer = false,
                 PrefetchCount = 250,
                 WorkloadTotal = 2,
+                ChangingWorkloadTotal = 2,
                 IsLogEnabled = false
             });
         }
@@ -863,37 +868,32 @@ class MessageDrivenService : IMessageDriven, IHostedService
 
         (var dbQueues, var dbBindings) = await this.repository.GetSettings(false);
         //根据本地配置，更新队列状态
-        if (this.hasConsumer)
+
+        foreach (var myQueue in this.queues)
         {
-            foreach (var myQueue in this.queues)
-            {
-                var dbQueue = dbQueues.Find(f => f.QueueId == myQueue.QueueId);
-                dbQueue.IsStateful = myQueue.IsStateful;
-                dbQueue.IsQuorumQueue = myQueue.IsQuorumQueue;
-                dbQueue.IsSingleActiveConsumer = myQueue.IsSingleActiveConsumer;
-                //以数据库配置为主
-                dbQueue.ChangeType = ChangeType.None;
-            }
+            var dbQueue = dbQueues.Find(f => f.QueueId == myQueue.QueueId);
+            dbQueue.IsStateful = myQueue.IsStateful;
+            dbQueue.IsQuorumQueue = myQueue.IsQuorumQueue;
+            dbQueue.IsSingleActiveConsumer = myQueue.IsSingleActiveConsumer;
+            //以数据库配置为主
+            dbQueue.ChangeType = ChangeType.None;
         }
 
         //数据库中本应用配置可能会多于本地配置，本应用的配置以本地为主，其他应用以数据库为主
         var myQueues = dbQueues.FindAll(f => this.localQueueIds.Contains(f.QueueId));
         var myBindings = dbBindings.FindAll(f => this.localExchangeIds.Contains(f.ExchangeId));
 
-        string queueName = null;
-        if (this.hasConsumer)
+        //一个交换机代表一块业务
+        //一个交换机只能绑定一个有状态队列，但可以同时绑定多个无状态队列
+        //一个交换机不能同时绑定有状态队列和无状态队列，只能选择其一绑定
+        //允许多个交换机绑定到同一个有状态队列
+        var exchangeQueues = myBindings.Where(f => f.IsStateful)
+            .GroupBy(f => f.ExchangeId).ToDictionary(f => f.Key, f => f.Select(t => t.QueueId).ToList())
+            .Where(f => f.Value.Count > 1).ToList();
+        if (exchangeQueues.Count > 0)
         {
-            //一个交换机对应一块业务
-            //一个交换机顶多绑定一个有状态队列，但可以同时绑定多个无状态队列
-            //允许多个交换机绑定到同一个有状态队列
-            var exchangeQueues = myBindings.Where(f => f.IsStateful)
-                .GroupBy(f => f.ExchangeId).ToDictionary(f => f.Key, f => f.Select(t => t.QueueId).ToList())
-                .Where(f => f.Value.Count > 1).ToList();
-            if (exchangeQueues.Count > 0)
-            {
-                foreach (var exchangeQueue in exchangeQueues)
-                    throw new Exception($"与交换机{exchangeQueue.Key}绑定的有状态队列只能一个，目前绑定的有状态队列[{string.Join(',', exchangeQueue.Value)}]");
-            }
+            foreach (var exchangeQueue in exchangeQueues)
+                throw new Exception($"与交换机{exchangeQueue.Key}绑定的有状态队列只能一个，目前绑定的有状态队列[{string.Join(',', exchangeQueue.Value)}]");
         }
 
         //创建交换机
@@ -907,7 +907,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
             await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
         }
 
-        //创建队列      
+        //创建队列
+        string queueName = null;
         if (this.isAllowCreateQueue)
         {
             //创建工作负载队列和转发队列
@@ -1008,7 +1009,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 dbQueue.IsSingleActiveConsumer = myQueue.IsSingleActiveConsumer;
 
                 //确定变更类型，扩容/缩容               
-                if (dbQueue.WorkloadTotal == myQueue.ChangingWorkloadTotal)
+                if (dbQueue.ChangingWorkloadTotal == myQueue.WorkloadTotal)
                     dbQueue.ChangeType = ChangeType.None;
                 else if (dbQueue.ChangingWorkloadTotal > myQueue.WorkloadTotal)
                     dbQueue.ChangeType = ChangeType.ScalingUp;
@@ -1018,6 +1019,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             var changedBindings = dbBindings;
             var removeKeys = new List<string>();
             var confirmQueues = new List<Queue>();
+
             if (this.hasConsumer)
             {
                 changedQueues = dbQueues.FindAll(f => this.localQueueIds.Contains(f.QueueId) || f.AppId != this.AppId);
@@ -1052,13 +1054,12 @@ class MessageDrivenService : IMessageDriven, IHostedService
                         continue;
 
                     var myBindings = localBindings.FindAll(f => f.QueueId == myQueue.QueueId);
-                    for (int i = myQueue.LastWorkloadTotal; i < myQueue.WorkloadTotal; i++)
+                    for (int i = myQueue.WorkloadTotal; i < myQueue.ChangingWorkloadTotal; i++)
                     {
                         var queueName = $"{myQueue.QueueId}.{i}";
                         if (this.isAllowCreateQueue)
                             await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
 
-                        //转发队列没有绑定数据
                         if (this.isAllowCreateBinding && myBindings.Count > 0)
                         {
                             foreach (var myBinding in myBindings)
@@ -1075,7 +1076,10 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 //分配有状态队列SAC激活消费者
                 foreach (var myQueue in statefullQueues)
                 {
-                    for (int i = 0; i < myQueue.WorkloadTotal; i++)
+                    //缩容期间重启，以缩容前分片数创建消费者
+                    var workloadTotal = isFirst ? Math.Max(myQueue.WorkloadTotal,
+                        myQueue.ChangingWorkloadTotal) : myQueue.ChangingWorkloadTotal;
+                    for (int i = 0; i < workloadTotal; i++)
                     {
                         var queueName = $"{myQueue.QueueId}.{i}";
                         this.Dispatch(QueueType.Message, index, i, queueName, myQueue, nodeIds, localConsumers);
@@ -1089,17 +1093,22 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 foreach (var myQueue in statelessQueues)
                 {
                     var queueName = myQueue.QueueId;
-                    for (int i = 0; i < myQueue.WorkloadTotal; i++)
+                    for (int i = 0; i < myQueue.ChangingWorkloadTotal; i++)
                     {
                         this.Dispatch(QueueType.Message, index, 0, queueName, myQueue, nodeIds, localConsumers);
                         index++;
                     }
+                    if (myQueue.WorkloadTotal != myQueue.ChangingWorkloadTotal)
+                        confirmQueues.Add(myQueue);
                 }
 
                 //创建有状态队列SAC等待消费者
                 foreach (var myQueue in statefullQueues)
                 {
-                    for (int i = 0; i < myQueue.WorkloadTotal; i++)
+                    //缩容期间重启，以缩容前分片数创建消费者
+                    var workloadTotal = isFirst ? Math.Max(myQueue.WorkloadTotal,
+                        myQueue.ChangingWorkloadTotal) : myQueue.ChangingWorkloadTotal;
+                    for (int i = 0; i < workloadTotal; i++)
                     {
                         var queueName = $"{myQueue.QueueId}.{i}";
                         for (int sacIndex = 1; sacIndex < this.sacCount; sacIndex++)
@@ -1142,14 +1151,15 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     else if (rabbitConsumers.Count > consumerCount)
                     {
                         var isScalingDown = myQueue.ChangeType == ChangeType.ScalingDown
-                            && dispatchInfo.QueueIndex >= myQueue.WorkloadTotal;
+                            && dispatchInfo.QueueIndex >= myQueue.ChangingWorkloadTotal;
                         for (int i = rabbitConsumers.Count - 1; i >= consumerCount; i--)
                         {
                             var rabbitConsumer = rabbitConsumers[i];
-                            if (isScalingDown)
+                            if (isScalingDown && myQueue.IsStateful)
                             {
-                                var timedConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new());
+                                var timedConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new(myQueue.QueueId));
                                 timedConsumers.Consumers.Add(rabbitConsumer);
+                                rabbitConsumer.Queue = myQueue;
                                 timedConsumers.HasMessages = true;
                                 Console.WriteLine($"缩容队列，多余消费者{rabbitConsumer.QueueName}, ConsumerId:{rabbitConsumer.ConsumerId}延迟关闭");
                             }
@@ -1183,11 +1193,12 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     foreach (var rabbitConsumer in rabbitConsumers)
                     {
                         var isScalingDown = myQueue.ChangeType == ChangeType.ScalingDown
-                            && rabbitConsumer.QueueIndex >= myQueue.WorkloadTotal;
-                        if (isScalingDown)
+                            && rabbitConsumer.QueueIndex >= myQueue.ChangingWorkloadTotal;
+                        if (isScalingDown && myQueue.IsStateful)
                         {
-                            var timedConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new());
+                            var timedConsumers = this.shutdownConsumers.GetOrAdd(queueName, f => new(queueId));
                             timedConsumers.Consumers.Add(rabbitConsumer);
+                            rabbitConsumer.Queue = myQueue;
                             timedConsumers.HasMessages = true;
                             Console.WriteLine($"缩容队列，多余消费者{rabbitConsumer.QueueName}, ConsumerId:{rabbitConsumer.ConsumerId}延迟关闭");
                         }
@@ -1205,37 +1216,20 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     removeKeys.ForEach(f => this.consumers.TryRemove(f, out _));
             }
 
-            //转发队列更新为已确认
-            //var transferQueue = changedQueues.Find(f => f.AppId == this.AppId && f.is);
-            //if (transferQueue != null && !transferQueue.IsConfirmed)
-            //{
-            //    transferQueue.IsConfirmed = true;
-            //    await this.repository.Confirm(transferQueue);
-            //}
-
-            if (this.isProducer)
-            {
-                //向发送消息循环，发送变更消息
-                var routings = changedQueues.Join(changedBindings, queue => queue.QueueId,
-                    binding => binding.QueueId, (queue, binding) => new ProducerRouting
-                    {
-                        ExchangeId = binding.ExchangeId,
-                        IsStateful = queue.IsStateful,
-                        WorkloadTotal = Math.Min(queue.WorkloadTotal, queue.ChangingWorkloadTotal)
-                    })
-                    .ToDictionary(f => f.ExchangeId, f => f);
-                await this.messageChannel.Writer.WriteAsync(new Message
-                {
-                    MessageId = ObjectId.NewId(),
-                    Type = Consts.ChangeConsumers,
-                    Body = routings
-                });
-            }
             removeKeys.Clear();
             //缩容的消费者，等待关闭
             foreach (var queueName in this.shutdownConsumers.Keys)
             {
+                Queue myQueue = null;
                 var timedConsumers = this.shutdownConsumers[queueName];
+                if (timedConsumers.Consumers == null || timedConsumers.Consumers.Count == 0)
+                {
+                    //缩容队列已经排空，上次变更路由失败，本次继续变更路由
+                    myQueue = changedQueues.Find(f => f.QueueId == timedConsumers.QueueId);
+                    if (await this.repository.ChangeRouting(myQueue))
+                        removeKeys.Add(queueName);
+                    continue;
+                }
                 var rabbitConsumer = timedConsumers.Consumers[0];
                 var hasMessages = await rabbitConsumer.HasMessage();
                 if (timedConsumers.HasMessages != hasMessages)
@@ -1251,21 +1245,44 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     timeout = this.heartbeatCycle * 4;
                 if (DateTime.UtcNow.Subtract(timedConsumers.UpdatedAt) < timeout)
                     continue;
+
                 foreach (var myConsumer in timedConsumers.Consumers)
                     await myConsumer.ShutdownAsync();
-
-                confirmQueues.Add(rabbitConsumer.Queue);
                 Console.WriteLine($"缩容队列{queueName}，所有消费者共{timedConsumers.Consumers.Count}个已关闭");
                 timedConsumers.Consumers.Clear();
-                removeKeys.Add(queueName);
+
+                //缩容队列已经排空，取最新的队列分片变更路由
+                myQueue = changedQueues.Find(f => f.QueueId == timedConsumers.QueueId);
+                if (await this.repository.ChangeRouting(myQueue))
+                    removeKeys.Add(queueName);
             }
             if (removeKeys.Count > 0)
                 removeKeys.ForEach(f => this.shutdownConsumers.TryRemove(f, out _));
 
             if (confirmQueues.Count > 0)
             {
+                confirmQueues = confirmQueues.DistinctBy(f => f.QueueId).ToList();
                 foreach (var confirmQueue in confirmQueues)
-                    await this.repository.Confirm(confirmQueue);
+                    await this.repository.ChangeRouting(confirmQueue);
+            }
+
+            if (this.isProducer)
+            {
+                //向发送消息循环，发送变更消息
+                var routings = changedQueues.Join(changedBindings, queue => queue.QueueId,
+                    binding => binding.QueueId, (queue, binding) => new ProducerRouting
+                    {
+                        ExchangeId = binding.ExchangeId,
+                        IsStateful = queue.IsStateful,
+                        WorkloadTotal = queue.IsStateful ? Math.Min(queue.WorkloadTotal, queue.ChangingWorkloadTotal) : 0
+                    })
+                    .DistinctBy(f => f.ExchangeId).ToDictionary(f => f.ExchangeId, f => f);
+                await this.messageChannel.Writer.WriteAsync(new Message
+                {
+                    MessageId = ObjectId.NewId(),
+                    Type = Consts.ChangeConsumers,
+                    Body = routings
+                });
             }
 
             this.queues = changedQueues;
@@ -1299,18 +1316,30 @@ class MessageDrivenService : IMessageDriven, IHostedService
         //新增消费者，直接启动
         var myQueue = dispatchInfo.Queue;
         var queueName = dispatchInfo.QueueName;
+        var queueType = myQueue.IsStateful ? "有" : "无";
+        var consumerId = $"{dispatchInfo.QueueName}.{this.ServiceId}";
         if (this.shutdownConsumers.TryGetValue(queueName, out var timedConsumers))
         {
-            if (timedConsumers.Consumers.Count > 0)
+            if (timedConsumers.Consumers != null && timedConsumers.Consumers.Count > 0)
             {
                 var rabbitConsumer = timedConsumers.Consumers[0];
-                rabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
                 rabbitConsumers.Add(rabbitConsumer);
                 timedConsumers.Consumers.RemoveAt(0);
+                if (!rabbitConsumer.IsActivated || rabbitConsumer.PrefetchCount != myQueue.PrefetchCount
+                    || rabbitConsumer.IsLogEnabled != myQueue.IsLogEnabled)
+                {
+                    rabbitConsumer.PrefetchCount = myQueue.PrefetchCount;
+                    rabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
+                    await rabbitConsumer.ShutdownAsync();
+                    await rabbitConsumer.StartAsync();
+                }
+                if (timedConsumers.Consumers.Count == 0)
+                    this.shutdownConsumers.TryRemove(queueName, out _);
+                Console.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, 重用{queueType}状态队列{dispatchInfo.QueueName} 消费者{consumerId}，当前消费者数量：{rabbitConsumers.Count}");
+                return;
             }
-            if (timedConsumers.Consumers.Count == 0)
-                this.shutdownConsumers.TryRemove(queueName, out _);
-            return;
+            //上次路由变更失败，本次又扩容了，不需要变更了，直接删除
+            else this.shutdownConsumers.TryRemove(queueName, out _);
         }
         var queueId = myQueue.QueueId;
         //转发队列没有消费者处理程序，直接转发到目标队列
@@ -1320,8 +1349,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
         myRabbitConsumer.IsLogEnabled = myQueue.IsLogEnabled;
         rabbitConsumers.Add(myRabbitConsumer);
         await myRabbitConsumer.StartAsync();
-        var queueType = myQueue.IsStateful ? "有" : "无";
-        var consumerId = $"{dispatchInfo.QueueName}.{this.ServiceId}";
         Console.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}, {queueType}状态队列{dispatchInfo.QueueName} 消费者{consumerId}已启动，当前消费者数量：{rabbitConsumers.Count}");
     }
     private void EnsureAvailable()

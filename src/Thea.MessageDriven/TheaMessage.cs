@@ -60,9 +60,12 @@ class RpcWaiter
 }
 class TimedConsumers
 {
+    public string QueueId { get; set; }
     public List<RabbitConsumer> Consumers { get; set; } = new();
     public bool HasMessages { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public TimedConsumers(string queueId) => this.QueueId = queueId;
 }
 class ProducerRouting
 {

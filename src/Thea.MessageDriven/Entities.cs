@@ -68,10 +68,6 @@ public class Queue
     /// </summary>
     public int ChangingWorkloadTotal { get; set; }
     /// <summary>
-    /// 是否已确认，主要用在转发队列
-    /// </summary>
-    public bool IsConfirmed { get; set; }
-    /// <summary>
     /// 是否开启日志
     /// </summary>
     public bool IsLogEnabled { get; set; }
@@ -89,10 +85,6 @@ public class Queue
     /// 变更类型，扩容/缩容
     /// </summary>
     public ChangeType ChangeType { get; set; }
-    /// <summary>
-    /// 上次负载个数
-    /// </summary>
-    public int LastWorkloadTotal { get; set; }
 }
 /// <summary>
 /// 日志表，描述消息队列每个消费者的执行日志
