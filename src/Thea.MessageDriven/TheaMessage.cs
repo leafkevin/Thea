@@ -73,3 +73,18 @@ class ProducerRouting
     public bool IsStateful { get; set; }
     public int WorkloadTotal { get; set; }
 }
+class RabbitQueueInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; }
+    [JsonPropertyName("vhost")]
+    public string VirtualHost { get; set; }
+    [JsonPropertyName("messages_ready")]
+    public long MessagesReady { get; set; }
+    [JsonPropertyName("messages_unacknowledged")]
+    public long MessagesUnacknowledged { get; set; }
+    [JsonPropertyName("messages")]
+    public long Messages { get; set; }
+    [JsonPropertyName("consumers")]
+    public int Consumers { get; set; }
+}

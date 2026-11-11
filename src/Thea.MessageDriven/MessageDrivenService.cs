@@ -4,12 +4,16 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -51,10 +55,13 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private RabbitConsumer rpcConsumer;
     private string lastNodeIds = null;
     private readonly int sacCount = 2;
+    private readonly string user;
+    private readonly string password;
     private readonly int messagePoolSize = 50000;
 
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
     private readonly IServiceProvider serviceProvider;
+    private readonly IConfiguration configuration;
     private readonly ILogger<MessageDrivenService> logger;
     private IMessageDrivenRepository repository;
     private DateTime lastHeartbeatTime = DateTime.MinValue;
@@ -76,30 +83,29 @@ class MessageDrivenService : IMessageDriven, IHostedService
     public MessageDrivenService(IServiceProvider serviceProvider)
     {
         this.logger = serviceProvider.GetService<ILogger<MessageDrivenService>>();
-        var configuration = serviceProvider.GetService<IConfiguration>();
-        this.IsEnabled = configuration.GetValue("MessageDriven:IsEnabled", true);
+        this.configuration = serviceProvider.GetService<IConfiguration>();
+        this.IsEnabled = this.configuration.GetValue("MessageDriven:IsEnabled", true);
         if (!this.IsEnabled) return;
 
         this.serviceProvider = serviceProvider;
         this.ServiceId = ObjectId.NewId();
-        this.AppId = configuration.GetValue<string>("AppId");
+        this.AppId = this.configuration.GetValue<string>("AppId");
         this.RpcQueue = $"{Consts.RpcExchange}.{this.AppId}.{this.ServiceId}";
-        var endPoints = configuration.GetSection("MessageDriven:EndPoints").Get<string[]>();
+        var endPoints = this.configuration.GetSection("MessageDriven:EndPoints").Get<string[]>();
         if (endPoints == null || endPoints.Length == 0)
             throw new Exception("未设置MessageDriven:EndPoints，无法初始化MessageDrivenService对象");
         this.tcpEndPoints = endPoints.Select(f => AmqpTcpEndpoint.Parse(f)).ToList();
-        this.isAllowCreateQueue = configuration.GetValue("MessageDriven:IsAllowCreateQueue", true);
-        this.isAllowCreateExchange = configuration.GetValue("MessageDriven:IsAllowCreateExchange", true);
-        this.isAllowCreateBinding = configuration.GetValue("MessageDriven:IsAllowCreateBinding", true);
-        this.heartbeatCycle = TimeSpan.FromSeconds(configuration.GetValue("MessageDriven:Heartbeat", 10));
-        this.messagePoolSize = configuration.GetValue("MessageDriven:MessagePoolSize", 50000);
-
+        this.isAllowCreateQueue = this.configuration.GetValue("MessageDriven:IsAllowCreateQueue", true);
+        this.isAllowCreateExchange = this.configuration.GetValue("MessageDriven:IsAllowCreateExchange", true);
+        this.isAllowCreateBinding = this.configuration.GetValue("MessageDriven:IsAllowCreateBinding", true);
+        this.heartbeatCycle = TimeSpan.FromSeconds(this.configuration.GetValue("MessageDriven:Heartbeat", 10));
+        this.messagePoolSize = this.configuration.GetValue("MessageDriven:MessagePoolSize", 50000);
         if (string.IsNullOrEmpty(this.AppId))
         {
             this.logger.LogTagError("MessageDriven", "未设置AppId，无法初始化MessageDrivenService对象");
             throw new Exception("未设置AppId，无法初始化MessageDrivenService对象");
         }
-        this.sacCount = configuration.GetValue("MessageDriven:SacCount", 2);
+        this.sacCount = this.configuration.GetValue("MessageDriven:SacCount", 2);
     }
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -1230,8 +1236,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
                         removeKeys.Add(queueName);
                     continue;
                 }
-                var rabbitConsumer = timedConsumers.Consumers[0];
-                var hasMessages = await rabbitConsumer.HasMessage();
+                var hasMessages = await this.HasMessages(queueName);
                 if (timedConsumers.HasMessages != hasMessages)
                 {
                     timedConsumers.HasMessages = hasMessages;
@@ -1355,5 +1360,28 @@ class MessageDrivenService : IMessageDriven, IHostedService
     {
         if (!this.IsEnabled)
             throw new InvalidOperationException("MessageDriven is disabled.");
+    }
+    private async Task<bool> HasMessages(string queueName)
+    {
+        var managementPort = this.configuration.GetValue("MessageDriven:ManagementPort", 15672);
+        var userName = this.configuration.GetValue("MessageDriven:User", "admin");
+        var password = this.configuration.GetValue("MessageDriven:Password", "123456");
+
+        var clientFactory = this.serviceProvider.GetService<IHttpClientFactory>();
+        var client = clientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(10);
+        // "/" 编码后为 "%2F"，队列名也需要编码
+        var virtualHost = "/";
+        var parameters = $"{Uri.EscapeDataString(virtualHost)}/{Uri.EscapeDataString(queueName)}";
+        var requestUrl = $"http://{this.tcpEndPoints[0].HostName}:{managementPort}/api/queues/{parameters}";
+        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{userName}:{password}"));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var response = await client.GetAsync(requestUrl);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            throw new HttpRequestException($"队列不存在或当前用户不可见：{virtualHost}/{queueName}", null, response.StatusCode);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<RabbitQueueInfo>();
+        return result.Messages > 0;
     }
 }
