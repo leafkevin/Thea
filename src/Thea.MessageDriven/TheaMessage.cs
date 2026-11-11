@@ -64,3 +64,9 @@ class TimedConsumers
     public bool HasMessages { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+class ProducerRouting
+{
+    public string ExchangeId { get; set; }
+    public bool IsStateful { get; set; }
+    public int WorkloadTotal { get; set; }
+}

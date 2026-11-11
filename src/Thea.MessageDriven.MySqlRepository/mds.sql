@@ -22,9 +22,9 @@ CREATE TABLE `mds_queue`
     `app_id` VARCHAR(50) NULL COMMENT '应用ID',
     `is_stateful` TINYINT(1) NULL DEFAULT 0 COMMENT '是否有状态',
     `is_transfer` TINYINT(1) NULL DEFAULT 0 COMMENT '是否转发队列',
-    `workload_total` INTEGER NULL COMMENT '工作负荷个数',
     `prefetch_count` INTEGER NULL COMMENT '预取个数',
-    `is_confirmed` TINYINT(1) NULL DEFAULT 0 COMMENT '是否已确认',
+    `workload_total` INTEGER NULL COMMENT '工作负荷个数',
+    `changing_workload_total` INTEGER NULL COMMENT '待变更工作负荷个数',
     `is_log_enabled` TINYINT(1) NULL DEFAULT 0 COMMENT '是否开启日志',
     CONSTRAINT `pk_mds_queue` PRIMARY KEY(`queue_id`)
 );

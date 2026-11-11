@@ -53,8 +53,7 @@ public class DefaultRepository : IMessageDrivenRepository
                 .Set(f => new
                 {
                     AppId = f.Values(f.AppId),
-                    IsStateful = f.Values(f.IsStateful),
-                    IsTransfer = f.Values(f.IsTransfer)
+                    IsStateful = f.Values(f.IsStateful)
                 })
                 .ExecuteAsync();
         }
@@ -78,7 +77,7 @@ public class DefaultRepository : IMessageDrivenRepository
         await repository.Update<Queue>()
             .Set(new
             {
-                myQueue.WorkloadTotal,
+                myQueue.ChangingWorkloadTotal,
                 myQueue.PrefetchCount,
                 myQueue.IsConfirmed,
                 myQueue.IsLogEnabled
@@ -91,9 +90,9 @@ public class DefaultRepository : IMessageDrivenRepository
     {
         var repository = this.dbFactory.Create(this.dbKey);
         await repository.Update<Queue>()
-            .Set(f => f.IsConfirmed, true)
+            .Set(f => f.WorkloadTotal, myQueue.ChangingWorkloadTotal)
             .Where(f => f.QueueId == myQueue.QueueId
-                && f.WorkloadTotal == myQueue.WorkloadTotal)
+                && f.ChangingWorkloadTotal == myQueue.ChangingWorkloadTotal)
             .ExecuteAsync();
         await this.redisCache.RemoveAsync(this.cacheKey);
     }

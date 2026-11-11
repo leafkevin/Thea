@@ -37,10 +37,6 @@ public class Binding
     /// 是否有状态
     /// </summary>
     public bool IsStateful { get; set; }
-    /// <summary>
-    /// 工作负荷个数
-    /// </summary>
-    public int WorkloadTotal { get; set; }
 }
 /// <summary>
 /// 队列表，描述所有的队列基本信息
@@ -56,21 +52,21 @@ public class Queue
     /// </summary>
     public string AppId { get; set; }
     /// <summary>
-    /// 工作负荷个数
+    /// 是否有状态
     /// </summary>
-    public int WorkloadTotal { get; set; }
+    public bool IsStateful { get; set; }
     /// <summary>
     /// 预取个数
     /// </summary>
     public int PrefetchCount { get; set; }
     /// <summary>
-    /// 是否有状态
+    /// 工作负荷个数
     /// </summary>
-    public bool IsStateful { get; set; }
+    public int WorkloadTotal { get; set; }
     /// <summary>
-    /// 是否转发队列
+    /// 待变更的工作负荷个数
     /// </summary>
-    public bool IsTransfer { get; set; }
+    public int ChangingWorkloadTotal { get; set; }
     /// <summary>
     /// 是否已确认，主要用在转发队列
     /// </summary>

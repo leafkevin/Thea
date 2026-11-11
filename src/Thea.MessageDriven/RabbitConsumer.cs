@@ -37,6 +37,7 @@ class RabbitConsumer
     public volatile bool IsLogEnabled;
 
     private QueueType queueType => this.dispatchInfo.QueueType;
+    public Queue Queue => this.dispatchInfo.Queue;
     public string QueueId => this.dispatchInfo.Queue.QueueId;
     public int QueueIndex => this.dispatchInfo.QueueIndex;
     public string QueueName => this.dispatchInfo.QueueName;
