@@ -5,6 +5,14 @@ using System.Threading.Tasks;
 
 namespace Thea.MessageDriven;
 
+
+enum QueueType
+{
+    Message,
+    Heartbeat,
+    RpcResult,
+    Transfer
+}
 public enum ChangeType
 {
     None,
@@ -24,13 +32,6 @@ class DispatchInfo
     public int QueueIndex { get; set; }
     public string QueueName { get; set; }
     public int ConsumerCount { get; set; }
-}
-enum QueueType
-{
-    Message,
-    Heartbeat,
-    RpcResult,
-    Transfer
 }
 class Message
 {

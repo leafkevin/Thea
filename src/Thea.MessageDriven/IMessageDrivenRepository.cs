@@ -7,7 +7,7 @@ public interface IMessageDrivenRepository
 {
     Task<(List<Queue>, List<Binding>)> GetSettings(bool useCache = true);
     Task Register(List<Queue> queues, List<Binding> bindings);
-    Task Change(Queue myQueue);
+    Task<bool> ChangeSharding(Queue myQueue);
     Task<bool> ChangeRouting(Queue myQueue);
     Task WriteLogs(List<ExecLog> logInfos);
 }

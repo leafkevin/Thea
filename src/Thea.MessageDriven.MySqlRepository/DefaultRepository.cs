@@ -71,10 +71,10 @@ public class DefaultRepository : IMessageDrivenRepository
                 .ExecuteAsync();
         }
     }
-    public virtual async Task Change(Queue myQueue)
+    public virtual async Task<bool> ChangeSharding(Queue myQueue)
     {
         var repository = this.dbFactory.Create(this.dbKey);
-        await repository.Update<Queue>()
+        var count = await repository.Update<Queue>()
             .Set(new
             {
                 myQueue.ChangingWorkloadTotal,
@@ -84,6 +84,7 @@ public class DefaultRepository : IMessageDrivenRepository
             .Where(f => f.QueueId == myQueue.QueueId)
             .ExecuteAsync();
         await this.redisCache.RemoveAsync(this.cacheKey);
+        return count > 0;
     }
     public virtual async Task<bool> ChangeRouting(Queue myQueue)
     {

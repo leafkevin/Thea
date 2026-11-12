@@ -55,8 +55,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private RabbitConsumer rpcConsumer;
     private string lastNodeIds = null;
     private readonly int sacCount = 2;
-    private readonly string user;
-    private readonly string password;
     private readonly int messagePoolSize = 50000;
 
     private readonly Dictionary<string, Dictionary<string, MethodInfo>> consumerHandlers = new();
@@ -506,7 +504,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
             this.lastHeartbeatTime = DateTime.MinValue;
         }
     }
-
     public async Task PublishAsync<TMessage>(string exchange, string routingKey, TMessage message, CancellationToken cancellationToken = default)
     {
         this.EnsureAvailable();
@@ -772,7 +769,7 @@ class MessageDrivenService : IMessageDriven, IHostedService
             myQueue.PrefetchCount = prefetchCount.Value;
         if (isLogEnabled.HasValue)
             myQueue.IsLogEnabled = isLogEnabled.Value;
-        await this.repository.Change(myQueue);
+        await this.repository.ChangeSharding(myQueue);
     }
     public async Task RemoveQueue(string queueId, int minSuffixIndex, int maxSuffixIndex)
     {
@@ -795,12 +792,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
             case Consts.Heartbeat:
                 var serviceId = message.Body as string;
                 this.heartbeats[serviceId] = DateTime.UtcNow;
-                break;
-            case Consts.UserMessage:
-            case Consts.RpcMessage:
-                //转发消费者返回的消息
-                await this.messageChannel.Writer.WriteAsync(message);
-                await message.Waiter.Task;
                 break;
             case Consts.Logs:
                 await this.logsChannel.Writer.WriteAsync(message.Body as ExecLog);
