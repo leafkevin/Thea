@@ -13,6 +13,7 @@ public static class TheaMessageDrivenExtensions
         services.AddSingleton<MessageDrivenService>();
         services.AddSingleton<IMessageDriven>(f => f.GetRequiredService<MessageDrivenService>());
         services.AddHostedService(f => f.GetRequiredService<MessageDrivenService>());
+        services.AddHttpClient();
         return services;
     }
     public static IApplicationBuilder UseMessageDriven(this IApplicationBuilder app, Action<MessageDrivenBuilder> builderInitializer)

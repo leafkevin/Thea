@@ -63,6 +63,7 @@ class TimedConsumers
     public string QueueId { get; set; }
     public List<RabbitConsumer> Consumers { get; set; } = new();
     public bool HasMessages { get; set; }
+    public int ConfirmTimes { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public TimedConsumers(string queueId) => this.QueueId = queueId;
@@ -80,9 +81,9 @@ class RabbitQueueInfo
     [JsonPropertyName("vhost")]
     public string VirtualHost { get; set; }
     [JsonPropertyName("messages_ready")]
-    public long MessagesReady { get; set; }
+    public long? MessagesReady { get; set; }
     [JsonPropertyName("messages_unacknowledged")]
-    public long MessagesUnacknowledged { get; set; }
+    public long? MessagesUnacknowledged { get; set; }
     [JsonPropertyName("messages")]
     public long Messages { get; set; }
     [JsonPropertyName("consumers")]

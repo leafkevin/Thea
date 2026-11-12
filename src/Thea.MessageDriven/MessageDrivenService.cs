@@ -1236,13 +1236,17 @@ class MessageDrivenService : IMessageDriven, IHostedService
                         removeKeys.Add(queueName);
                     continue;
                 }
-                var hasMessages = await this.HasMessages(queueName);
+                (var isSuccess, var hasMessages) = await this.RequestApi(queueName);
+                if (!isSuccess) hasMessages = await timedConsumers.Consumers[0].HasMessage();
                 if (timedConsumers.HasMessages != hasMessages)
-                {
                     timedConsumers.HasMessages = hasMessages;
-                    if (!hasMessages) timedConsumers.UpdatedAt = DateTime.UtcNow;
+                if (!hasMessages) timedConsumers.ConfirmTimes++;
+                else timedConsumers.ConfirmTimes = 0;
+                if (hasMessages || timedConsumers.ConfirmTimes < 2)
+                {
+                    timedConsumers.UpdatedAt = DateTime.UtcNow;
+                    continue;
                 }
-                if (hasMessages) continue;
 
                 //队列排空1分钟后，删除消费者
                 var timeout = TimeSpan.FromMinutes(1);
@@ -1361,27 +1365,39 @@ class MessageDrivenService : IMessageDriven, IHostedService
         if (!this.IsEnabled)
             throw new InvalidOperationException("MessageDriven is disabled.");
     }
-    private async Task<bool> HasMessages(string queueName)
+    private async Task<(bool, bool)> RequestApi(string queueName)
     {
-        var managementPort = this.configuration.GetValue("MessageDriven:ManagementPort", 15672);
-        var userName = this.configuration.GetValue("MessageDriven:User", "admin");
-        var password = this.configuration.GetValue("MessageDriven:Password", "123456");
-
-        var clientFactory = this.serviceProvider.GetService<IHttpClientFactory>();
-        var client = clientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(10);
-        // "/" 编码后为 "%2F"，队列名也需要编码
-        var virtualHost = "/";
-        var parameters = $"{Uri.EscapeDataString(virtualHost)}/{Uri.EscapeDataString(queueName)}";
-        var requestUrl = $"http://{this.tcpEndPoints[0].HostName}:{managementPort}/api/queues/{parameters}";
-        var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{userName}:{password}"));
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
-        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        using var response = await client.GetAsync(requestUrl);
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            throw new HttpRequestException($"队列不存在或当前用户不可见：{virtualHost}/{queueName}", null, response.StatusCode);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<RabbitQueueInfo>();
-        return result.Messages > 0;
+        string requestUrl = null;
+        try
+        {
+            var managementPort = this.configuration.GetValue("MessageDriven:ManagementPort", 15672);
+            var userName = this.configuration.GetValue("MessageDriven:User", "admin");
+            var password = this.configuration.GetValue("MessageDriven:Password", "123456");
+            var clientFactory = this.serviceProvider.GetRequiredService<IHttpClientFactory>();
+            using var client = clientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+            // "/" 编码后为 "%2F"，队列名也需要编码
+            var virtualHost = "/";
+            var parameters = $"{Uri.EscapeDataString(virtualHost)}/{Uri.EscapeDataString(queueName)}";
+            requestUrl = $"http://{this.tcpEndPoints[0].HostName}:{managementPort}/api/queues/{parameters}";
+            var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{userName}:{password}"));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await client.GetAsync(requestUrl);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return (false, false);
+            //throw new HttpRequestException($"队列不存在或当前用户不可见：{virtualHost}/{queueName}", null, response.StatusCode);
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<RabbitQueueInfo>();
+            if (result == null || result.MessagesReady is null || result.MessagesUnacknowledged is null)
+                //throw new InvalidOperationException("RabbitMQ 队列统计暂不可用");
+                return (false, false);
+            return (true, result.MessagesReady > 0 || result.MessagesUnacknowledged > 0);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"请求Management Api{requestUrl}失败，{ex}");
+        }
+        return (false, false);
     }
 }

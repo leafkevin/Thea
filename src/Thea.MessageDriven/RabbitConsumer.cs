@@ -86,13 +86,9 @@ class RabbitConsumer
     public async Task StartAsync()
     {
         await this.lifecycleLocker.WaitAsync();
-        int originalState = 0;
-        try
-        {
-            originalState = Interlocked.CompareExchange(ref this.state, 1, 0);
-            if (originalState != 0) return;
-        }
-        finally { this.lifecycleLocker.Release(); }
+        var originalState = Interlocked.CompareExchange(ref this.state, 1, 0);
+        if (originalState != 0) return;
+        this.lifecycleLocker.Release();
         try
         {
             var workerCount = Volatile.Read(ref this.workers);
@@ -120,11 +116,12 @@ class RabbitConsumer
                     break;
             }
         }
-        catch
+        catch (Exception ex)
         {
             Interlocked.Exchange(ref this.state, originalState);
             await this.DisposeAsync();
-            throw;
+            this.logger.LogTagError("RabbitConsumer", ex, $"启动消费者失败，QueueName: {this.QueueName}, ConsumerId: {this.ConsumerId}, Workers: {Volatile.Read(ref this.workers)}");
+            Console.WriteLine($"启动消费者失败，QueueName: {this.QueueName}, ConsumerId: {this.ConsumerId}, Workers: {Volatile.Read(ref this.workers)}");
         }
     }
     public async Task ShutdownAsync()
@@ -147,21 +144,17 @@ class RabbitConsumer
 
             //等待正在处理的回调完成
             await workersTask.WaitAsync(timeoutSource.Token);
-
-            //释放资源
-            await this.DisposeAsync();
-            Interlocked.Exchange(ref this.state, 0);
-        }
-        catch (OperationCanceledException)
-        {
-            await this.DisposeAsync();
-            Interlocked.Exchange(ref this.state, 0);
-            throw;
         }
         catch (Exception ex)
         {
             this.logger.LogTagError("RabbitConsumer", ex, $"关闭消费者失败，QueueName: {this.QueueName}, ConsumerId: {this.ConsumerId}, Workers: {Volatile.Read(ref this.workers)}");
-            throw;
+            Console.WriteLine($"启动消费者失败，QueueName: {this.QueueName}, ConsumerId: {this.ConsumerId}, Workers: {Volatile.Read(ref this.workers)}");
+        }
+        finally
+        {
+            //释放资源
+            await this.DisposeAsync();
+            Interlocked.Exchange(ref this.state, 0);
         }
     }
     public async Task<bool> HasMessage()
