@@ -41,9 +41,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
     private bool isProducer = false;
     private bool hasConsumer = false;
     private bool isRpcConsumer = false;
-    private readonly bool isAllowCreateQueue = false;
-    private readonly bool isAllowCreateExchange = false;
-    private readonly bool isAllowCreateBinding = false;
 
     private List<Binding> bindings = new();
     private List<Queue> queues = new();
@@ -93,9 +90,6 @@ class MessageDrivenService : IMessageDriven, IHostedService
         if (endPoints == null || endPoints.Length == 0)
             throw new Exception("未设置MessageDriven:EndPoints，无法初始化MessageDrivenService对象");
         this.tcpEndPoints = endPoints.Select(f => AmqpTcpEndpoint.Parse(f)).ToList();
-        this.isAllowCreateQueue = this.configuration.GetValue("MessageDriven:IsAllowCreateQueue", true);
-        this.isAllowCreateExchange = this.configuration.GetValue("MessageDriven:IsAllowCreateExchange", true);
-        this.isAllowCreateBinding = this.configuration.GetValue("MessageDriven:IsAllowCreateBinding", true);
         this.heartbeatCycle = TimeSpan.FromSeconds(this.configuration.GetValue("MessageDriven:Heartbeat", 10));
         this.messagePoolSize = this.configuration.GetValue("MessageDriven:MessagePoolSize", 50000);
         if (string.IsNullOrEmpty(this.AppId))
@@ -847,10 +841,8 @@ class MessageDrivenService : IMessageDriven, IHostedService
         string queueId = null;
         if (this.isRpcConsumer)
         {
-            if (!this.isAllowCreateQueue)
-                throw new Exception("未配置允许创建队列，无法创建RPC结果队列，请检查配置项：IsAllowCreateQueue");
-
             queueId = $"{Consts.RpcExchange}.{this.AppId}";
+            await this.rabbitProducer.CreateExchange(Consts.RpcExchange, Consts.TopicBindingType);
             this.rpcConsumer = new RabbitConsumer(new DispatchInfo
             {
                 QueueType = QueueType.RpcResult,
@@ -893,73 +885,62 @@ class MessageDrivenService : IMessageDriven, IHostedService
                 throw new Exception($"与交换机{exchangeQueue.Key}绑定的有状态队列只能一个，目前绑定的有状态队列[{string.Join(',', exchangeQueue.Value)}]");
         }
 
-        //创建交换机
-        if (this.isAllowCreateExchange)
+        //工作交换机
+        var distBindings = myBindings.Select(f => new { f.ExchangeId, f.BindType, f.IsDelay }).Distinct().ToList();
+        foreach (var myBinding in distBindings)
+            await this.rabbitProducer.CreateExchange(myBinding.ExchangeId, myBinding.BindType, myBinding.IsDelay);
+        //心跳交换机
+        await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
+
+        string queueName = null;
+        //创建工作负载队列
+        foreach (var myQueue in myQueues)
         {
-            //工作交换机
-            var distBindings = myBindings.Select(f => new { f.ExchangeId, f.BindType, f.IsDelay }).Distinct().ToList();
-            foreach (var myBinding in distBindings)
-                await this.rabbitProducer.CreateExchange(myBinding.ExchangeId, myBinding.BindType, myBinding.IsDelay);
-            //心跳交换机
-            await this.rabbitProducer.CreateExchange(Consts.HeartbeatExchange, Consts.TopicBindingType);
+            if (myQueue.IsStateful)
+            {
+                //刚启动不确定缩容场景消息是否排空完毕，先按最大分片创建队列
+                var workloadTotal = Math.Max(myQueue.WorkloadTotal, myQueue.ChangingWorkloadTotal);
+                for (int i = 0; i < workloadTotal; i++)
+                {
+                    queueName = $"{myQueue.QueueId}.{i}";
+                    await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
+                }
+            }
+            else await this.rabbitProducer.CreateQueue(myQueue.QueueId, myQueue.IsQuorumQueue, false, false);
         }
 
-        //创建队列
-        string queueName = null;
-        if (this.isAllowCreateQueue)
+        //创建独占心跳队列和消费者
+        queueId = $"{Consts.HeartbeatExchange}.{this.AppId}";
+        this.heartbeatConsumer = new RabbitConsumer(new DispatchInfo
         {
-            //创建工作负载队列和转发队列
-            foreach (var myQueue in myQueues)
+            QueueType = QueueType.Heartbeat,
+            Queue = new Queue { QueueId = queueId },
+            QueueName = $"{queueId}.{this.ServiceId}"
+        }, this, this.serviceProvider);
+        await this.heartbeatConsumer.StartAsync();
+
+        //创建交换机队列绑定
+        foreach (var myQueue in myQueues)
+        {
+            var myQueueBindings = myBindings.FindAll(f => f.QueueId == myQueue.QueueId);
+            if (myQueue.IsStateful)
             {
-                if (myQueue.IsStateful)
+                //刚启动不确定缩容场景消息是否排空完毕，先按最大分片创建交换机绑定
+                var workloadTotal = Math.Max(myQueue.WorkloadTotal, myQueue.ChangingWorkloadTotal);
+                foreach (var myBinding in myQueueBindings)
                 {
-                    //刚启动不确定缩容场景消息是否排空完毕，先按最大分片创建队列
-                    var workloadTotal = Math.Max(myQueue.WorkloadTotal, myQueue.ChangingWorkloadTotal);
                     for (int i = 0; i < workloadTotal; i++)
                     {
                         queueName = $"{myQueue.QueueId}.{i}";
-                        await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
+                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
                     }
                 }
-                else await this.rabbitProducer.CreateQueue(myQueue.QueueId, myQueue.IsQuorumQueue, false, false);
             }
-            //创建独占心跳队列和消费者
-            queueId = $"{Consts.HeartbeatExchange}.{this.AppId}";
-            this.heartbeatConsumer = new RabbitConsumer(new DispatchInfo
+            else
             {
-                QueueType = QueueType.Heartbeat,
-                Queue = new Queue { QueueId = queueId },
-                QueueName = $"{queueId}.{this.ServiceId}"
-            }, this, this.serviceProvider);
-            await this.heartbeatConsumer.StartAsync();
-        }
-
-        //创建队列绑定
-        if (this.isAllowCreateBinding)
-        {
-            //创建工作负载队列绑定
-            foreach (var myQueue in myQueues)
-            {
-                var myQueueBindings = myBindings.FindAll(f => f.QueueId == myQueue.QueueId);
-                if (myQueue.IsStateful)
+                foreach (var myBinding in myQueueBindings)
                 {
-                    //刚启动不确定缩容场景消息是否排空完毕，先按最大分片创建交换机绑定
-                    var workloadTotal = Math.Max(myQueue.WorkloadTotal, myQueue.ChangingWorkloadTotal);
-                    foreach (var myBinding in myQueueBindings)
-                    {
-                        for (int i = 0; i < workloadTotal; i++)
-                        {
-                            queueName = $"{myQueue.QueueId}.{i}";
-                            await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());
-                        }
-                    }
-                }
-                else
-                {
-                    foreach (var myBinding in myQueueBindings)
-                    {
-                        await this.rabbitProducer.BindQueue(myBinding.ExchangeId, myBinding.QueueId, Consts.FanoutRoutingKey);
-                    }
+                    await this.rabbitProducer.BindQueue(myBinding.ExchangeId, myBinding.QueueId, Consts.FanoutRoutingKey);
                 }
             }
         }
@@ -1054,10 +1035,9 @@ class MessageDrivenService : IMessageDriven, IHostedService
                     for (int i = myQueue.WorkloadTotal; i < myQueue.ChangingWorkloadTotal; i++)
                     {
                         var queueName = $"{myQueue.QueueId}.{i}";
-                        if (this.isAllowCreateQueue)
-                            await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
+                        await this.rabbitProducer.CreateQueue(queueName, myQueue.IsQuorumQueue, myQueue.IsSingleActiveConsumer, false);
 
-                        if (this.isAllowCreateBinding && myBindings.Count > 0)
+                        if (myBindings.Count > 0)
                         {
                             foreach (var myBinding in myBindings)
                                 await this.rabbitProducer.BindQueue(myBinding.ExchangeId, queueName, i.ToString());

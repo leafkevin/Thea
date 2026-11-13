@@ -59,8 +59,8 @@ public static class Startup
              .UseSubscriber<StatefulConsumer>("cache.refresh", "cache.queue", f => f.RemoveCache)
              .UseStatefulConsumer<StatefulConsumer>("award.take", "user", f => f.TakeAward)
              .UseStatefulConsumer<StatefulConsumer>("award.issue", "user", f => f.IssueAward)
-             .UseStatefulConsumer<StatefulConsumer>("sequence", "sequence", f => f.UpdateSequence)
-             .UseTransferConsumer(2).UseProducer().UseRpcConsumer();
+             //.UseStatefulConsumer<StatefulConsumer>("sequence", "sequence", f => f.UpdateSequence)
+             .UseProducer().UseRpcConsumer();
         });
     }
 }
